@@ -1,0 +1,20 @@
+[
+  { "query": "How did last week's advice do?", "should_trigger": true },
+  { "query": "Were you right about last week's lineup?", "should_trigger": true },
+  { "query": "Review last week", "should_trigger": true },
+  { "query": "Grade your picks from week 3", "should_trigger": true },
+  { "query": "Was I right to bench Deebo Samuel Sr.?", "should_trigger": true },
+  { "query": "Check the calibration of your recommendations", "should_trigger": true },
+  {
+    "query": "Recap my week: which calls were right for the right reasons?",
+    "should_trigger": true
+  },
+  { "query": "What was the regret on last week's lineup call?", "should_trigger": true },
+  { "query": "Who won my matchup?", "should_trigger": false },
+  { "query": "Prep me for week 6", "should_trigger": false },
+  { "query": "who should I start?", "should_trigger": false },
+  { "query": "Which defense should I stream?", "should_trigger": false },
+  { "query": "What happened in my league this week?", "should_trigger": false },
+  { "query": "Set up my league", "should_trigger": false },
+  { "query": "How many points did Josh Allen score last week?", "should_trigger": false }
+]

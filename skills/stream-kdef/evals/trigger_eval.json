@@ -1,0 +1,17 @@
+[
+  { "query": "Which defense should I stream?", "should_trigger": true },
+  { "query": "Who's the best kicker to pick up?", "should_trigger": true },
+  { "query": "Should I hold the Steelers DST or stream one?", "should_trigger": true },
+  { "query": "Which K should I use?", "should_trigger": true },
+  { "query": "Is it worth streaming a defense against the Browns?", "should_trigger": true },
+  { "query": "Rank the kickers for the next two weeks", "should_trigger": true },
+  { "query": "Should I drop my kicker for someone in a dome?", "should_trigger": true },
+  { "query": "Best D/ST options with a two-week look-ahead?", "should_trigger": true },
+  { "query": "who should I start at WR3", "should_trigger": false },
+  { "query": "Should I pick up Harold Fannin Jr.?", "should_trigger": false },
+  { "query": "Start Jahmyr Gibbs or Derrick Henry?", "should_trigger": false },
+  { "query": "Who are the best IDP linebackers?", "should_trigger": false },
+  { "query": "Review last week's streamers", "should_trigger": false },
+  { "query": "Set up my league", "should_trigger": false },
+  { "query": "How many points is a 50-yard field goal in my league?", "should_trigger": false }
+]

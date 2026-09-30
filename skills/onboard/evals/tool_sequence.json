@@ -1,0 +1,88 @@
+{
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7): the calls this Skill promises, in order, with example arguments on the fixture manual league. `interview` runs on a variant with no league file (every call after status reports NOT_FOUND with the no-league hint and the Skill interviews the user); `verify` runs on the base fixture league. The onboarding entry is a no-move record that the file was verified. Format: skills/README.md#tool-sequences.",
+  "schema_version": 1,
+  "skill": "onboard",
+  "tool_contract": 1,
+  "fixture": { "league_key": "manual.l.example", "team_key": "manual.l.example.t.1", "week": 4 },
+  "sequences": [
+    {
+      "id": "interview",
+      "when": "no league file exists",
+      "fixture_variant": "no-league-file",
+      "steps": [
+        { "id": "status", "tool": "ff_get_status", "args": {} },
+        { "id": "leagues", "tool": "ff_list_leagues", "args": {}, "expect": ["NOT_FOUND"] }
+      ]
+    },
+    {
+      "id": "verify",
+      "when": "the league file exists (after the user saved it)",
+      "steps": [
+        { "id": "status", "tool": "ff_get_status", "args": {} },
+        { "id": "leagues", "tool": "ff_list_leagues", "args": {} },
+        { "id": "league", "tool": "ff_get_league", "args": {} },
+        { "id": "roster", "tool": "ff_get_roster", "args": {} },
+        {
+          "id": "stats_w3",
+          "tool": "ff_get_player_stats",
+          "args": {
+            "player_keys": ["manual.p.00-0034857", "manual.p.00-0036900", "manual.p.00-0031136"],
+            "type": "week",
+            "week": 3
+          }
+        },
+        {
+          "id": "stats_w2",
+          "tool": "ff_get_player_stats",
+          "args": {
+            "player_keys": ["manual.p.00-0034857", "manual.p.00-0036900", "manual.p.00-0031136"],
+            "type": "week",
+            "week": 2
+          }
+        },
+        {
+          "id": "record",
+          "tool": "ff_record_recommendation",
+          "args": {
+            "kind": "onboarding",
+            "week": 4,
+            "rec": {
+              "action": "League file verified; engine self-check shown for three players over weeks 2-3",
+              "subjects": [],
+              "lineup": null,
+              "point_estimate": 0,
+              "distribution": {
+                "mean": 0,
+                "p10": 0,
+                "p25": 0,
+                "p50": 0,
+                "p75": 0,
+                "p90": 0,
+                "p_zero": 1,
+                "basis": "position_cv"
+              },
+              "delta_vs_next": { "value": 0, "p10": 0, "p90": 0 },
+              "decision_metric": "settings_check",
+              "drivers": [],
+              "assumptions": [
+                {
+                  "text": "The league file matches the league's settings and roster pages",
+                  "revisit_trigger": "a roster move or a settings change by the commissioner"
+                }
+              ],
+              "confidence": { "role_games": 0, "inputs": [] },
+              "as_of": { "$ref": "league.meta.as_of" },
+              "latest_execution_time": null,
+              "no_move": true,
+              "log_id": null
+            },
+            "alternatives": [],
+            "source_calls": { "$source_calls": ["league", "roster", "stats_w3", "stats_w2"] },
+            "followed_hint": "unknown",
+            "client_ref": "onboard-verify"
+          }
+        }
+      ]
+    }
+  ]
+}

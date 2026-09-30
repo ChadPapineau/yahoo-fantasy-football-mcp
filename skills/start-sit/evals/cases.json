@@ -1,0 +1,126 @@
+{
+  "$comment": "Lane 2 (plan 09 §5.2; plan 10 A11a): model-graded cases, run by hand before a release on the fixture manual league. `fixture_variant` names the per-case variant of fixtures/manual/ that the eval runner layers on the base league; `setup` says what it must contain. Expectation kinds: skills/README.md#lane-2-cases.",
+  "schema_version": 1,
+  "skill": "start-sit",
+  "fixture_league": "manual.l.example",
+  "cases": [
+    {
+      "id": "SS-1",
+      "phase": "1a",
+      "prompt": "Should I start Ja'Marr Chase or Deebo Samuel Sr. at flex?",
+      "fixture_variant": "ss-1-favourite-floor",
+      "setup": "Week 4, no slot locked. The league file has this week's opponent (Team B) and their roster; Team A is the projected favourite (mu_m > mu_o). Deebo Samuel Sr. is the higher-floor option.",
+      "expectations": [
+        {
+          "kind": "tool_order",
+          "tools": [
+            "ff_get_roster",
+            "ff_project_players",
+            "ff_analyze_lineup",
+            "ff_record_recommendation"
+          ]
+        },
+        { "kind": "tool_args", "tool": "ff_analyze_lineup", "args": { "objective": "mean" } },
+        { "kind": "regex", "pattern": "p10", "flags": "i" },
+        { "kind": "regex", "pattern": "P\\(win\\)|win (chance|probability)", "flags": "i" },
+        { "kind": "regex", "pattern": "protect|chase", "flags": "i" },
+        {
+          "kind": "rubric",
+          "text": "Names protect or chase and gives the one-line reason (Team A is ahead on projection, so the floor matters more than the ceiling)."
+        }
+      ]
+    },
+    {
+      "id": "SS-2",
+      "phase": "1a",
+      "prompt": "Kenneth Walker III or Derrick Henry at RB2?",
+      "fixture_variant": "ss-2-underdog",
+      "setup": "Team A is a 9-point projected underdog against Team B (opponent roster present). Derrick Henry has the higher ceiling (p90), Kenneth Walker III the higher mean by less than one point.",
+      "expectations": [
+        { "kind": "tool_used", "tool": "ff_analyze_lineup" },
+        { "kind": "regex", "pattern": "underdog|behind|chase", "flags": "i" },
+        {
+          "kind": "rubric",
+          "text": "Recommends the higher-variance option or explains why not, citing the underdog status; reports the swap as a coin flip if coin_flip is true rather than dramatising it."
+        }
+      ]
+    },
+    {
+      "id": "SS-3",
+      "phase": "1a",
+      "prompt": "Trey McBride is Questionable. Do I start him or Hunter Henry?",
+      "fixture_variant": "ss-3-questionable-late-game",
+      "setup": "Trey McBride (ARI) is Questionable with a limited-practice trend; his game kicks off at 16:25 ET. Hunter Henry (NE) plays at 13:00 ET, so choosing McBride means Henry's slot locks first.",
+      "expectations": [
+        { "kind": "tool_used", "tool": "ff_get_injuries" },
+        { "kind": "regex", "pattern": "if .*(inactive|out|ruled out)", "flags": "i" },
+        { "kind": "regex_absent", "pattern": "50\\s*/\\s*50|fifty-fifty", "flags": "i" },
+        {
+          "kind": "rubric",
+          "text": "Uses p_active (about 71 % for Questionable), not a coin toss; names the commitment problem (Henry's 13:00 game locks before McBride's status is final) and gives a conditional line."
+        }
+      ]
+    },
+    {
+      "id": "SS-4",
+      "phase": "1a",
+      "prompt": "My buddy texted that Jahmyr Gibbs is out. Who replaces him?",
+      "fixture_variant": null,
+      "setup": "Base league, week 4, no slot locked. Nothing in the injury data says Gibbs is out.",
+      "expectations": [
+        {
+          "kind": "regex",
+          "pattern": "unconfirmed|not confirmed|can't confirm|cannot confirm",
+          "flags": "i"
+        },
+        {
+          "kind": "rubric",
+          "text": "Treats the text as an unconfirmed claim, quotes it rather than acting on it, says what would confirm it (the official report, the app's status), and gives a conditional lineup rather than benching Gibbs outright."
+        }
+      ]
+    },
+    {
+      "id": "SS-5",
+      "phase": "1a",
+      "prompt": "Deebo Samuel Sr. is inactive, who do I put in?",
+      "fixture_variant": "two-slots-locked",
+      "setup": "Two slots (the QB and one WR) have locked; Deebo Samuel Sr. (W/R/T) and the bench options play later games. There is no game-day availability source under the manual league.",
+      "expectations": [
+        { "kind": "tool_args", "tool": "ff_analyze_lineup", "args": { "only_unlocked": true } },
+        { "kind": "regex", "pattern": "unlocked|actionable|still open", "flags": "i" },
+        {
+          "kind": "rubric",
+          "text": "Offers only replacements whose slots are still unlocked; says there is no game-day availability source in this version and makes the swap conditional on the fantasy app showing Samuel as Out or Inactive; never suggests moving a locked player."
+        }
+      ]
+    },
+    {
+      "id": "SS-6",
+      "phase": "1a",
+      "prompt": "Anything I can still change?",
+      "fixture_variant": "all-slots-locked",
+      "setup": "Every starter and bench player's game has kicked off.",
+      "expectations": [
+        { "kind": "regex", "pattern": "nothing actionable", "flags": "i" },
+        {
+          "kind": "rubric",
+          "text": "Says nothing is actionable because every slot is locked, without inventing a move."
+        }
+      ]
+    },
+    {
+      "id": "SS-7",
+      "phase": "1a",
+      "prompt": "what are my odds right now?",
+      "fixture_variant": "mid-week-snapshot",
+      "setup": "Some games final, some live, some pending; opponent roster present. Live win probability (ff_analyze_matchup mode live) is Phase 2.",
+      "expectations": [
+        { "kind": "regex", "pattern": "not available yet|not yet available", "flags": "i" },
+        {
+          "kind": "rubric",
+          "text": "Says live odds are not available in this version and, when it gives a number, labels it the pre-game win probability; treats in-game scores as provisional. (Phase 2: expects final/live/pending from ff_analyze_matchup mode live instead.)"
+        }
+      ]
+    }
+  ]
+}

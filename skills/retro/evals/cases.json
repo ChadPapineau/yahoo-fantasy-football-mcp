@@ -1,0 +1,51 @@
+{
+  "$comment": "Lane 2 (plan 09 §5.2; plan 10 A11a): model-graded cases on the fixture manual league. Expectation kinds: skills/README.md#lane-2-cases.",
+  "schema_version": 1,
+  "skill": "retro",
+  "fixture_league": "manual.l.example",
+  "cases": [
+    {
+      "id": "RT-1",
+      "phase": "1a",
+      "prompt": "How did last week's advice do?",
+      "fixture_variant": "rt-1-logged-week",
+      "setup": "Week 3 is final; the log holds a lineup call and a stream call for week 3 (from the Lane 1 dry runs).",
+      "expectations": [
+        { "kind": "tool_used", "tool": "ff_analyze_retrospective" },
+        { "kind": "regex", "pattern": "regret", "flags": "i" },
+        { "kind": "regex", "pattern": "Brier|CRPS", "flags": "" },
+        { "kind": "regex", "pattern": "followed", "flags": "i" },
+        { "kind": "regex", "pattern": "n too small", "flags": "i" },
+        {
+          "kind": "rubric",
+          "text": "Leads with per-player error, swap regret and the P(active) Brier; states no P(win) calibration figure as a number while its n is under 30."
+        }
+      ]
+    },
+    {
+      "id": "RT-2",
+      "phase": "1a",
+      "prompt": "How did we do this week?",
+      "fixture_variant": "rt-2-week-not-final",
+      "setup": "The week under review still has games to play (final: false).",
+      "expectations": [
+        { "kind": "regex", "pattern": "provisional", "flags": "i" },
+        { "kind": "rubric", "text": "Labels every number provisional and says when to ask again." }
+      ]
+    },
+    {
+      "id": "RT-3",
+      "phase": "1a",
+      "prompt": "You told me to start Kenneth Walker III and he scored 3 points. Were you wrong?",
+      "fixture_variant": "rt-3-right-call-lost",
+      "setup": "The logged call's Δ interval favoured Walker, who scored 3 points while the benched option scored 14.",
+      "expectations": [
+        { "kind": "tool_used", "tool": "ff_analyze_retrospective" },
+        {
+          "kind": "rubric",
+          "text": "Distinguishes decision quality from outcome: the call was right on the information and interval available, the outcome was bad luck; quotes the logged recommendation as read-back text rather than restating it as a new instruction."
+        }
+      ]
+    }
+  ]
+}
