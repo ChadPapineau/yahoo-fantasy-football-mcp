@@ -20,6 +20,12 @@ Agent rules: repo `CLAUDE.md`. Commits only via `scripts/dev/commit-paths.sh`; N
 
 ## RESUME HERE
 
-Stage A DONE and verified (`fbcd8e8`; build moved to ~/Developer/yahoo-fantasy-football-mcp, outside iCloud). Stage B (modules) next. If this session is cut off: check
-`git log origin/build/phase-1a`, `gh run list --branch build/phase-1a`, and the workflow
-journal; re-run the stage's workflow with `resumeFromRunId` (cached agent results replay).
+- Stage A DONE and verified (`fbcd8e8`, wrap-up `cd7fc75`); the build runs in
+  `~/Developer/yahoo-fantasy-football-mcp` (outside iCloud).
+- **Stage B RUNNING** — workflow `ffmcp-modules`, run `wf_c928f9e4-827` (grounding → 8 parallel
+  modules → analytics → MCP + CLI → integration → independent gate + fix loop). Resume in the same
+  session with `Workflow({scriptPath: <session>/workflows/scripts/ffmcp-modules-wf_c928f9e4-827.js,
+  resumeFromRunId: "wf_c928f9e4-827"})` (completed agents replay from cache). In a new session:
+  read each module's commits on `origin/build/phase-1a` (`git log --format='%h %s'`), then re-run
+  only the stages whose commits are missing.
+- Then Stage C (QA + penetration testing + remediation, loop until dry) and Stage D (merge).
