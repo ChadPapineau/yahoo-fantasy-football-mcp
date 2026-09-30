@@ -204,7 +204,7 @@ These conventions bind every tool the product planner defines (plan 07+). They a
 
 ### 4.2 Output contract
 
-Every tool returns **both** a `structuredContent` object (validated against the tool's `outputSchema` — "Servers MUST provide structured results that conform to this schema" [V-spec tools "Output Schema"]) and one `text` block holding the same JSON serialised ("For backwards compatibility, a tool that returns structured content SHOULD also return the serialized JSON in a TextContent block" [V-spec tools "Structured Content"]). No Markdown mode. *Why:* the reference suggests markdown + json; 02 §4 #4 shows what happens when the text is not machine-parseable, and one format halves the test surface. *Alternative:* `response_format` parameter. *What would change it:* a client that renders Markdown blocks and the user preferring it — then Markdown becomes a **second** text block, never the only one.
+Every tool returns one `text` block holding the envelope as serialised JSON ("For backwards compatibility, a tool that returns structured content SHOULD also return the serialized JSON in a TextContent block" [V-spec tools "Structured Content"]). Tools that carry an `outputSchema` (all but the large list tools of plan 07 C10) **also** return a `structuredContent` object validated against it ("Servers MUST provide structured results that conform to this schema" [V-spec tools "Output Schema"]) — **except that the list tools omit `structuredContent` until the OBJ-06 spike answers whether the clients forward both copies to the model** (research 06 §A.6's rule; plan 10 A17: `ff_debug_echo` returns a nonce only in `structuredContent`, each client is asked to repeat it, the answer goes to HANDOFF "Stack facts", and plan 07 §5.1 is re-based on measured tokens per client) *(revised round 1, OBJ-06)*. No Markdown mode. *Why:* the reference suggests markdown + json; 02 §4 #4 shows what happens when the text is not machine-parseable, and one format halves the test surface. *Alternative:* `response_format` parameter. *What would change it:* nothing toward a second copy — the earlier "Markdown as a second text block" clause is **deleted** (it would be a third serialisation of the same data); if A17 shows a client forwards only one copy, list tools regain `structuredContent`.
 
 The envelope (`src/mcp/envelope.ts`, zod-typed, versioned):
 
@@ -223,7 +223,12 @@ The envelope (`src/mcp/envelope.ts`, zod-typed, versioned):
       { "source": "Yahoo Fantasy", "text": "Fantasy data provided by Yahoo Fantasy", "url": "https://football.fantasysports.yahoo.com/" },
       { "source": "nflverse", "license": "CC-BY-4.0", "url": "https://github.com/nflverse/nflverse-data" }
     ],
-    "untrusted_fields": ["data.teams[].name", "data.players[].injury_note"],  // JSON paths wrapped below
+    "untrusted_fields": [                // every third-party string in `data`, by JSON path (round 1, OBJ-07 / OBJ-15):
+      { "path": "data.players[].name",         "source": "yahoo.player.name" },          //   bare string (Yahoo-authored player name)
+      { "path": "data.teams[].name",           "source": "yahoo.team.name" },            //   wrapped (manager-authored)
+      { "path": "data.players[].injury_note",  "source": "yahoo.player.injury_note" },   //   wrapped (editor-authored)
+      { "path": "data.calls[].recommended",    "source": "store.recommendation_log" }    //   our own store, written by the model (OBJ-15)
+    ],
     "estimate": false                    // true for every number that is ours, not the platform's (04 §G.1)
   },
   "page": { "limit": 25, "offset": 0, "count": 25, "has_more": true, "next_offset": 25 },  // list tools only
@@ -233,7 +238,11 @@ The envelope (`src/mcp/envelope.ts`, zod-typed, versioned):
 ```
 
 - **Attribution** is mandatory on every result that used Yahoo data: the portal's exact wording, with the link [V-HANDOFF]. The logo requirement is met in `README.md` and the docs (docs-writer's file); a JSON payload cannot carry a logo, so the text+link form is what tool output uses. The Skills bundle and prompts repeat the wording where they render summaries.
-- **`untrusted_text` envelope** (plan 02 §6 has the security rules): every free-text field from *any* source is emitted as `{"untrusted_text": {"value": "...", "source": "yahoo.team.name", "chars": 17, "truncated": false}}`, never as a bare string. Which fields: team names, manager nicknames, league name, trade notes, `injury_note`, `status_full`, news titles/blurbs, depth-chart position names, nflverse `desc` play text, RSS anything. Player names are **also** wrapped (they arrive from third parties and the matcher uses them) — with `"source": "yahoo.player.name"`.
+- **Untrusted-text labelling — two mechanisms, one per text class** *(revised round 1, OBJ-07)*, both under plan 02 §6's caps/stripping/NFC rules:
+  1. **Manager- or editor-authored text** — team names, manager nicknames, league name, trade notes, `injury_note`, `status_full`, news titles/blurbs, depth-chart position names, nflverse `desc` play text, Sleeper `injury_notes`, RSS anything — is emitted inside the **`untrusted_text` wrapper** `{"untrusted_text": {"value": "...", "source": "yahoo.team.name", "chars": 17, "truncated": false}}`, never as a bare string. The wrapper is kept for these classes because they are where injection actually arrives, and its `source` tag and truncation state are what the `news-check` reliability model reads (05 §10).
+  2. **Yahoo-authored player names** are emitted as **bare strings** (cap 64, stripped, NFC) and labelled by JSON path in **`meta.untrusted_fields[]`** with `source: "yahoo.player.name"`. Wrapping them cost ~40 % of a list payload for a class with no injection exposure (names are Yahoo's, not a manager's); the path list gives the model and the Skills the same label for a few dozen chars per result. `tests/mcp/size.test.ts` records the before/after on the fixture league (plan 10 A6).
+  3. **Our own store** — the recommendation log's model-authored free text (`note`, `assumptions[].text`, `drivers[].name`, `alternatives[].action`, `action`) — is listed in `meta.untrusted_fields[]` with `source: "store.recommendation_log"` on every read (plan 07 E13/E14, `ff://rec/*`), because what the model wrote under an injected blurb's influence must not come back next week as "our own record" *(round 1, OBJ-15)*.
+  `meta.untrusted_fields[]` therefore lists **every** third-party or model-authored string in `data` — wrapped or bare — as `{ path, source }`; a test walks every tool's output and asserts the list is complete.
 - **Size budget:** 20 000 characters of serialised JSON per result (the reference's `CHARACTER_LIMIT` is 25 000; we keep headroom for the client's own framing). Over budget → the list is halved until it fits, `truncated: true`, and a warning says how to page or filter. Non-list results over budget are a bug (fail the test in plan 05 §2).
 - **Pagination:** `limit` (default 25, max 100) + `offset`; `page.has_more`/`next_offset`; Yahoo free-agent reads page at 25 natively [V-03 §B.2] so the server fetches ⌈limit/25⌉ pages behind one call and reports the true `offset`. Transactions are "most recent N" only [V-03 §B.2]; the tool says so in its description and `page.has_more` is always `false` for it.
 
@@ -430,7 +439,7 @@ The `license` field is not decoration: `ff status` and the docs list which sourc
 
 ### 8.2 Journal and recommendation log
 
-Both are store tables owned by the domain (`write_journal`, `recommendation_log`); plan 02 §4 specifies the journal's states and reconciliation; 05 §12/§19.3 specifies the log's content. They are named here so the store schema has them from migration 1.
+Both are store tables owned by the domain (`write_journal`, `recommendation_log`); plan 02 §4 specifies the journal's states and reconciliation; 05 §12/§19.3 specifies the log's content. They are named here so the store schema has them from migration 1. The log's free text is **model-authored and untrusted on read** (§4.2 item 3; plan 02 §6.1) — the store is an injection source like any other *(round 1, OBJ-15)*.
 
 ---
 
