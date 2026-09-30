@@ -97,8 +97,19 @@ describe("ff dispatcher", () => {
     expect(io.out.text).toBe("");
   });
 
-  it("loadServe refuses a module without a serve export", async () => {
-    await expect(loadServe("node:path")).rejects.toThrow(/does not export serve/);
+  it("loadServe resolves the real serve() from src/cli/serve.ts (a bad argument exits 2 before any I/O)", async () => {
+    sb = sandbox();
+    const io = makeIo(sb);
+    const serve = await loadServe();
+    const code = await serve({
+      argv: ["--bogus"],
+      env: {},
+      stdin: io.stdin,
+      stdout: io.stdout,
+      stderr: io.stderr,
+    });
+    expect(code).toBe(EXIT.USAGE);
+    expect(io.out.text).toBe("");
   });
 
   it("an unexpected error is exit 1 with a one-line message and no stack on stdout", async () => {

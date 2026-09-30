@@ -160,18 +160,11 @@ export type ServeFn = (opts: {
   clock?: CliIo["clock"];
 }) => Promise<number>;
 
-/**
- * The module `serve` lives in, resolved at run time relative to this file. A variable specifier
- * keeps the dispatcher compiling while src/cli/serve.ts (another owner's file) lands in parallel;
- * the export is checked at run time instead.
- */
-export const SERVE_MODULE = "./serve.js";
-
-/** Loads `serve` lazily, so the other subcommands never load the MCP SDK. */
-export async function loadServe(specifier: string = SERVE_MODULE): Promise<ServeFn> {
-  const mod = (await import(specifier)) as { serve?: unknown };
-  if (typeof mod.serve !== "function") throw new Error("src/cli/serve.ts does not export serve()");
-  return mod.serve as ServeFn;
+/** Loads `serve` lazily (src/cli/serve.ts), so the other subcommands never load the MCP SDK. */
+export async function loadServe(): Promise<ServeFn> {
+  const mod = await import("./serve.js");
+  const serve: ServeFn = (opts) => mod.serve(opts);
+  return serve;
 }
 
 /** Extra wiring for tests (never reachable from argv). */
