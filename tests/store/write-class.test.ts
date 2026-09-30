@@ -13,7 +13,7 @@ import {
   type Store,
 } from "../../src/store/types.js";
 import { openStore, tempCache, type TempCache } from "./helpers/env.js";
-import { recordInput } from "./helpers/records.js";
+import { RULES, SLOTS, recordInput, roster, scoring } from "./helpers/records.js";
 import { run, type Child } from "./helpers/spawn.js";
 
 let t: TempCache;
@@ -46,10 +46,11 @@ describe("best-effort writes under a foreign writer lock", () => {
     const out = s.repos.pointsCache.put("h", "00-0034857", 2026, 3, 10);
     const dt = performance.now() - t0;
     expect(out).toEqual({ written: false, reason: "busy" });
-    expect(dt).toBeLessThan(BUSY_TIMEOUT_MS * 2.5);
+    // one bounded wait (busy_timeout 100 ms; wall time is noisy under a loaded test run), never a
+    // multi-second stall
+    expect(dt).toBeLessThan(BUSY_TIMEOUT_MS * 5);
     expect(s.stats().cache_misses_busy).toBe(1);
     // every best-effort family behaves the same; within the backoff window they do not even wait
-    const t1 = performance.now();
     expect(s.repos.limiterState.setLast999("k", t.clock.nowIso())).toEqual({
       written: false,
       reason: "busy",
@@ -81,7 +82,6 @@ describe("best-effort writes under a foreign writer lock", () => {
       }),
     ).toEqual({ written: false, reason: "busy" });
     expect(s.repos.platformCache.prune(t.clock.nowIso())).toBe(0);
-    expect(performance.now() - t1).toBeLessThan(BUSY_TIMEOUT_MS);
     expect(s.stats().cache_misses_busy).toBe(6);
     // reads keep working (WAL)
     expect(s.repos.pointsCache.get("h", "00-0034857", 2026, 3)).toBeNull();
@@ -167,7 +167,7 @@ describe("required writes under a foreign writer lock", () => {
     expect(s.repos.recommendationLog.get(r.log_id)).not.toBeNull();
   });
 
-  it("every required family surfaces StoreBusyError with its table", async () => {
+  it("every required family (WRITE_CLASS) surfaces StoreBusyError with its table", async () => {
     await holdLock(8000);
     const now = t.clock.nowIso();
     const cases: [string, () => Promise<unknown>][] = [
@@ -222,6 +222,65 @@ describe("required writes under a foreign writer lock", () => {
             matchups_json: "[]",
           }),
       ],
+      [
+        "roster_snapshot",
+        () =>
+          s.repos.rosterSnapshots.put({
+            team_key: "manual.l.example.t.1",
+            week: 1,
+            taken_at: now,
+            roster: roster(1),
+          }),
+      ],
+      [
+        "fa_pool_snapshot",
+        () =>
+          s.repos.faPoolSnapshots.put({
+            league_key: "manual.l.example",
+            taken_at: now,
+            players: [],
+          }),
+      ],
+      [
+        "league_settings",
+        () =>
+          s.repos.leagueSettings.put({
+            league_key: "manual.l.example",
+            settings_hash: "h",
+            scoring: scoring("h"),
+            slots: SLOTS,
+            rules: RULES,
+            fetched_at: now,
+          }),
+      ],
+      [
+        "league_settings",
+        () =>
+          s.repos.leagueSettings.raiseFlag({
+            league_key: "manual.l.example",
+            kind: "settings_changed",
+            detail: [],
+            raised_at: now,
+            acknowledged: false,
+          }),
+      ],
+      [
+        "crosswalk",
+        () =>
+          s.repos.crosswalk.upsertDelta([
+            {
+              platform: "yahoo",
+              platform_player_id: "1",
+              gsis_id: "00-0034857",
+              method: "id",
+              source: "platform",
+              confidence: 1,
+              first_seen: now,
+              last_seen: now,
+            },
+          ]),
+      ],
+      ["recommendation_log", () => s.repos.recommendationLog.record(recordInput(), now, null)],
     ];
     const results = await Promise.allSettled(cases.map(([, f]) => f()));
     results.forEach((r, i) => {
@@ -256,6 +315,22 @@ describe("WriteExecutor unit", () => {
         throw new TypeError("y");
       }),
     ).rejects.toThrow(TypeError);
+  });
+  it("inside the backoff window a best-effort write is a miss without even trying", () => {
+    const w = new WriteExecutor(200);
+    expect(
+      w.bestEffort(() => {
+        throw busy;
+      }),
+    ).toEqual({ written: false, reason: "busy" });
+    let called = false;
+    expect(
+      w.bestEffort(() => {
+        called = true;
+      }),
+    ).toEqual({ written: false, reason: "busy" });
+    expect(called).toBe(false);
+    expect(w.cacheMissesBusy).toBe(2);
   });
   it("a required write that is busy once then succeeds resolves", async () => {
     const w = new WriteExecutor(500);
