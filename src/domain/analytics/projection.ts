@@ -473,6 +473,7 @@ function simulatePlayer(
     source: SOURCE,
   });
   const cv = POSITION_CV[pos];
+  const means = keys.map((k) => statOf(expectation, k));
   const out: StatLine[] = [];
   for (let i = 0; i < n; i++) {
     if (rng.next() >= p) {
@@ -481,7 +482,7 @@ function simulatePlayer(
     }
     const g = gammaMultiplier(rng, cv);
     const values: Record<Canonical, number> = {};
-    for (const k of keys) values[k] = statOf(expectation, k) * g;
+    for (const [j, k] of keys.entries()) values[k] = (means[j] ?? 0) * g;
     out.push({ values, present, position_type: pt, provisional: false, source: SOURCE });
   }
   return out;
@@ -771,7 +772,7 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
         made_at: req.clock.nowIso(),
         inputs_as_of: ctx.inputsAsOf,
         expectation: Object.freeze({ ...expectation }),
-        samples: lines,
+        samples: lines.length > SIMS.stored ? lines.slice(0, SIMS.stored) : lines,
       });
       if (out.written) ctx.written.count += 1;
       else ctx.written.busy += 1;

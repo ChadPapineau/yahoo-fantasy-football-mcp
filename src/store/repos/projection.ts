@@ -1,9 +1,10 @@
 // projection.ts — the append-only `projection` table (plan 08 §5; plan 10 T12 never pruned; critic
 // C-03: rows keyed subject + made_at so `getAsOf(before)` reads only pre-lock projections). Writes
-// are best-effort (decision C-03b): a busy lock is a counted miss, never an error.
+// are best-effort (decision C-03b): a busy lock is a counted miss, never an error. Samples are stored
+// in the compact form of ./samples-codec.ts (plan 08 §5 "compressed"; A15 latency).
 import { GSIS_ID_RE, isNflTeam, type NflTeam } from "../../config/schema.js";
 import type { ProjectionRepository } from "../../domain/analytics/types.js";
-import type { ProjectionSubject, StatLine, StoredProjection } from "../../domain/scoring/types.js";
+import type { ProjectionSubject, StoredProjection } from "../../domain/scoring/types.js";
 import {
   intIn,
   isoMs,
@@ -14,6 +15,7 @@ import {
   WEEK_MAX,
   type RepoDeps,
 } from "./common.js";
+import { decodeSamples, encodeSamples } from "./samples-codec.js";
 
 /** The stored key of a subject: `p:<gsis_id>` or `d:<TEAM>`; RangeError on an invalid subject. */
 export function subjectKey(s: ProjectionSubject): string {
@@ -50,7 +52,7 @@ const toStored = (r: Row): StoredProjection => ({
   made_at: r.made_at,
   inputs_as_of: r.inputs_as_of,
   expectation: parseJson<Record<string, number>>(r.expectation_json),
-  samples: parseJson<StatLine[]>(r.samples_json),
+  samples: decodeSamples(r.samples_json),
 });
 
 export function projectionRepository({ db, writes }: RepoDeps): ProjectionRepository {
@@ -68,7 +70,7 @@ export function projectionRepository({ db, writes }: RepoDeps): ProjectionReposi
       const madeMs = isoMs(p.made_at, "made_at");
       isoMs(p.inputs_as_of, "inputs_as_of");
       const expectation = JSON.stringify(p.expectation);
-      const samples = JSON.stringify(p.samples);
+      const samples = encodeSamples(p.samples);
       return writes.bestEffort(() => {
         // Append-only: the same (subject, season, week, model, made_at) twice keeps the first row.
         db.prepare(

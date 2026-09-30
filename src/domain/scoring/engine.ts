@@ -50,6 +50,8 @@ interface CompiledType {
   readonly families: readonly CompiledFamily[];
   /** Every canonical a line of this type can use (rules, family members, family scalars). */
   readonly consumed: ReadonlySet<Canonical>;
+  /** `bonusFired` of a line on which no bonus fired (shared: most samples fire none). */
+  readonly noneFired: readonly boolean[];
 }
 
 interface Compiled {
@@ -120,7 +122,12 @@ function compile(settings: ScoringSettings): Compiled {
         scores: r.modifier !== null || r.bonuses.length > 0,
       });
     }
-    byType[pt] = { linear, families, consumed };
+    byType[pt] = {
+      linear,
+      families,
+      consumed,
+      noneFired: Object.freeze(linear.map(() => false)),
+    };
   }
   const compiled: Compiled = { byType, unmapped: unmappedIds(settings) };
   COMPILED.set(settings, compiled);
@@ -173,7 +180,11 @@ export function appliedRounding(
   return "exact";
 }
 
-function evaluate(line: StatLine, settings: ScoringSettings): Evaluation {
+/**
+ * `detail: false` (the scoreSamples path) skips building `contributions` and `ignored` — thousands
+ * of samples per player-week never read them (A15 latency); every number is computed identically.
+ */
+function evaluate(line: StatLine, settings: ScoringSettings, detail: boolean): Evaluation {
   const compiled = compile(settings);
   const raw: unknown = line;
   if (raw === null || typeof raw !== "object") throw invalidLine("stat line must be an object");
@@ -197,14 +208,16 @@ function evaluate(line: StatLine, settings: ScoringSettings): Evaluation {
   const provisional = (raw as { provisional?: unknown }).provisional === true;
   const t = compiled.byType[pt];
 
-  const contributions: ScoreContribution[] = [];
+  const contributions: ScoreContribution[] | null = detail ? [] : null;
   const linearPts: number[] = [];
   const bonusPts: number[] = [];
   const bracketPts: number[] = [];
-  const bonusFired = t.linear.map(() => false);
+  let bonusFired: boolean[] | null = null; // allocated on the first bonus that fires
   let incomplete = false;
 
-  for (const [li, r] of t.linear.entries()) {
+  let li = -1;
+  for (const r of t.linear) {
+    li += 1;
     if (!has(r.canonical)) {
       if (r.scores) incomplete = true;
       continue;
@@ -213,7 +226,7 @@ function evaluate(line: StatLine, settings: ScoringSettings): Evaluation {
     if (r.modifier !== null) {
       const points = denoise(r.modifier * v);
       linearPts.push(points);
-      contributions.push({
+      contributions?.push({
         canonical: r.canonical,
         value: v,
         modifier: r.modifier,
@@ -221,12 +234,12 @@ function evaluate(line: StatLine, settings: ScoringSettings): Evaluation {
         kind: "linear",
       });
     }
-    let fired = false;
     for (const b of r.bonuses) {
       if (v < b.target) continue;
-      fired = true;
+      bonusFired ??= t.linear.map(() => false);
+      bonusFired[li] = true;
       bonusPts.push(b.points);
-      contributions.push({
+      contributions?.push({
         canonical: r.canonical,
         value: v,
         modifier: b.points,
@@ -234,7 +247,6 @@ function evaluate(line: StatLine, settings: ScoringSettings): Evaluation {
         kind: "bonus",
       });
     }
-    bonusFired[li] = fired;
   }
 
   const familyValues: (readonly number[] | null)[] = [];
@@ -253,7 +265,7 @@ function evaluate(line: StatLine, settings: ScoringSettings): Evaluation {
         const v = val(m.canonical);
         const points = denoise(mod * v);
         bracketPts.push(points);
-        contributions.push({
+        contributions?.push({
           canonical: m.canonical,
           value: v,
           modifier: mod,
@@ -292,7 +304,7 @@ function evaluate(line: StatLine, settings: ScoringSettings): Evaluation {
         if (mod !== null) {
           const member = at(members, idx).canonical;
           bracketPts.push(mod);
-          contributions.push({
+          contributions?.push({
             canonical: member,
             value: 1,
             modifier: mod,
@@ -310,17 +322,29 @@ function evaluate(line: StatLine, settings: ScoringSettings): Evaluation {
   const linear = stableSum(linearPts);
   const bonus = stableSum(bonusPts);
   const bracket = stableSum(bracketPts);
-  const exact = denoise(stableSum([...linearPts, ...bonusPts, ...bracketPts]));
-  const ignored = keys.filter((k) => CANONICAL_NAME_RE.test(k) && !t.consumed.has(k)).sort();
+  // the same summation sequence as the concatenation: with no bonus/bracket terms it IS `linear`
+  const exact = denoise(
+    bonusPts.length === 0 && bracketPts.length === 0
+      ? linear
+      : stableSum([...linearPts, ...bonusPts, ...bracketPts]),
+  );
+  const ignored = detail
+    ? keys.filter((k) => CANONICAL_NAME_RE.test(k) && !t.consumed.has(k)).sort()
+    : [];
   const result: ScoreResult = {
     points: applyPolicy(exact, settings),
     points_exact: exact,
     complete: !(provisional && incomplete),
     unmapped: compiled.unmapped,
     ignored,
-    contributions,
+    contributions: contributions ?? [],
   };
-  return { result, bonusFired, familyValues, parts: { linear, bonus, bracket } };
+  return {
+    result,
+    bonusFired: bonusFired ?? t.noneFired,
+    familyValues,
+    parts: { linear, bonus, bracket },
+  };
 }
 
 /**
@@ -331,7 +355,7 @@ function evaluate(line: StatLine, settings: ScoringSettings): Evaluation {
  * range). The line's `values` keys ARE its present set; `present` is not consulted.
  */
 export function score(line: StatLine, settings: ScoringSettings): ScoreResult {
-  return evaluate(line, settings).result;
+  return evaluate(line, settings, true).result;
 }
 
 /** `score`, named for the tools that render `contributions` (plan 08 §2). */
@@ -378,7 +402,7 @@ export function scoreSamples(
   const acc = new Map<PositionType, { bonus: number[]; fam: number[][] }>();
 
   for (const line of batch) {
-    const e = evaluate(line, settings);
+    const e = evaluate(line, settings, false);
     const t = compiled.byType[line.position_type];
     let a = acc.get(line.position_type);
     if (a === undefined) {
@@ -389,9 +413,10 @@ export function scoreSamples(
       acc.set(line.position_type, a);
     }
     const bonusCounts = a.bonus;
-    e.bonusFired.forEach((fired, i) => {
-      if (fired) bonusCounts[i] = at(bonusCounts, i) + 1;
-    });
+    if (e.bonusFired !== t.noneFired)
+      e.bonusFired.forEach((fired, i) => {
+        if (fired) bonusCounts[i] = at(bonusCounts, i) + 1;
+      });
     const famTotals = a.fam;
     e.familyValues.forEach((vec, i) => {
       if (vec === null) return;

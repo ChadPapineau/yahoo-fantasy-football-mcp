@@ -12,7 +12,42 @@ export const MAX_ABS_MODIFIER = 1e6;
  */
 export function denoise(x: number): number {
   if (x === 0) return 0;
-  return Number(x.toPrecision(15));
+  const fast = denoiseFast(x);
+  return fast ?? denoiseReference(x);
+}
+
+/** The definition: `Number(x.toPrecision(15))` (string round trip — correct, but slow). */
+export function denoiseReference(x: number): number {
+  return Number(x.toPrecision(15)); // −0 prints "0.000…" → 0
+}
+
+/** 10^k for k = 0..22, parsed (every one is exactly representable; `10 ** k` need not be exact). */
+const POW10: readonly number[] = Array.from({ length: 23 }, (_, k) => Number(`1e${String(k)}`));
+
+/**
+ * The same value as `denoiseReference` without a string, or null when it cannot be proved equal
+ * (the caller then takes the reference path). For |x| in [1e-8, 1e15), k = 14 − ⌊log10|x|⌋ and
+ * t = |x|·10^k (10^k exact, t < 2^50, so every multiple of ½ is a double). Correct rounding is
+ * monotone and fixes representable points, so t lies on the same side of every half-integer as the
+ * exact product — only t landing exactly ON a half is undecidable (the exact value may be a tie,
+ * which toPrecision rounds up, or just below one). Otherwise m = ⌊t⌉ is the exact 15-digit mantissa
+ * and m / 10^k (both exact, one correctly rounded division) is the double nearest m·10^−k — what
+ * `Number(x.toPrecision(15))` parses to. A mis-estimated exponent (log10 near a power of ten) puts
+ * m outside (1e14, 1e15) — or exactly on 1e14 after rounding up — and is refused.
+ */
+function denoiseFast(x: number): number | null {
+  const a = Math.abs(x);
+  const k = 14 - Math.floor(Math.log10(a));
+  const s = POW10[k];
+  if (s === undefined) return null; // |x| ≥ 1e15, |x| < 1e-8, or not finite
+  const t = a * s;
+  const floor = Math.floor(t);
+  const frac = t - floor;
+  if (frac === 0.5) return null; // on a half: a tie or not, undecidable from t
+  const m = frac < 0.5 ? floor : floor + 1;
+  if (m <= 1e14 || m >= 1e15) return null; // 1e14 itself may be a rounded-up mis-estimate
+  const y = m / s;
+  return x < 0 ? -y : y;
 }
 
 /** Neumaier-compensated sum (Kahan–Babuška): order-robust, no cumulative drift. */
