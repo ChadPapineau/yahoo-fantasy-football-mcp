@@ -63,9 +63,7 @@ describe("per-player lock times (per_game)", () => {
       game("c", 1, "CHI", "DET", "2026-09-13T17:00:00.000Z"),
     ];
     expect(teamGame("DET", two)?.game_id).toBe("c");
-    expect(
-      teamGame("DET", [two[1]!, two[0]!])?.game_id,
-    ).toBe("a");
+    expect(teamGame("DET", [two[1]!, two[0]!])?.game_id).toBe("a");
     expect(teamGame("KC", two)).toBeNull();
   });
 });
