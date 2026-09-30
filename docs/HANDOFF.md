@@ -56,6 +56,20 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 2026-09-29 | Concurrency capped at two agents | Chad's credit-efficiency rule (2026-09-24) |
 | 2026-09-29 | Orchestration artefacts (roster, verbatim briefs, program) are committed in `docs/scratch/` | resumability after usage-limit cutoffs |
 
+## Yahoo terms the plan must honor (verified on sports.yahoo.com/developer, 2026-09-29)
+
+- Attribution: *"Fantasy data provided by Yahoo Fantasy"*, linking back to
+  Yahoo Fantasy, with the official logo used unaltered → README, docs, and a
+  `source` field in tool output.
+- *"Developers may create only a single account and must not use automated
+  tools or other means to create multiple accounts."*
+- *"Developers may not modify, reverse engineer, decompile, or otherwise
+  alter the API or separate its underlying data."*
+- Throttling is discretionary and unnumbered (*"may temporarily throttle or
+  limit access"*). The full "API Access and Use Agreement" is not public —
+  it is presented at application time; the canonical ToS URL cited by
+  wrappers (`legal.yahoo.com/…/fantasysportsapi/`) returns 404 today.
+
 ## Things Chad needs to know / decide (accumulating; summarized at the end)
 
 1. Repo visibility is **PUBLIC** with no branch protection and no rulesets.
