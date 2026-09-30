@@ -130,3 +130,40 @@ describe("ff dispatcher", () => {
     }
   });
 });
+
+describe("hostile arguments", () => {
+  it("doctor path flags must be absolute; ~/ expands against HOME", async () => {
+    sb = sandbox();
+    for (const v of ["relative.json", "", "~other/x", "a\0b"]) {
+      const io = makeIo(sb);
+      expect(await main(["doctor", "--client-config", v], io), JSON.stringify(v)).toBe(EXIT.USAGE);
+      expect(io.out.text).toBe("");
+    }
+    const io = makeIo(sb);
+    expect(await main(["doctor", "--json", "--client-log", "~/none.log"], io)).toBe(EXIT.ERROR);
+    expect(io.out.text).toContain(`${sb.home}/none.log`);
+  });
+
+  it("a megabyte-long argument is refused quickly without echoing it", async () => {
+    sb = sandbox();
+    const huge = "9".repeat(1024 * 1024);
+    const t0 = Date.now();
+    for (const argv of [
+      ["refresh", "all", "--seasons", huge],
+      ["refresh", huge],
+      ["install-launchd", "--jobs", huge],
+    ]) {
+      const io = makeIo(sb);
+      expect(await main(argv, io)).toBe(EXIT.USAGE);
+      expect(io.err.text.length).toBeLessThan(2000);
+    }
+    expect(Date.now() - t0).toBeLessThan(3000);
+  });
+
+  it("unicode and control characters in a target are refused, never echoed raw", async () => {
+    sb = sandbox();
+    const io = makeIo(sb);
+    expect(await main(["refresh", "nflverse:‮schedules\u0007"], io)).toBe(EXIT.USAGE);
+    expect(io.err.text).not.toContain("‮");
+  });
+});
