@@ -18,7 +18,7 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | ci-bootstrap | afe971bb2e5796cc9 | 4 | ✅ done (orchestrator verified: `docs` + `secrets` green on `f3a0a48`; full-history scan green; 20 files tracked) | `.github/**`, `.gitleaks.toml`, `scripts/**`, `docs/scratch/ci-bootstrap.md` | `f3a0a48` | — |
 | devils-advocate | a2ed55e691cda6d2a | 5 | ✅ **rested** after round 3 (`4c1d981`: 7/7 round-2 rulings landed, 0 new objections, remainder marginal, closing verdict written; 30/30 answered over three rounds) | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | `618ab31` | — |
 | plan-reviser | a4ae16bdc0e7b6482 | 5 | ✅ done (rounds 1–2 applied and verified; round-3 nits fixed by the orchestrator) | `docs/plan/01-*`…`10-*`, `docs/plan/changelog.md`, `.github/workflows/docs.yml` (OBJ-12 only), `docs/scratch/plan-reviser.md` | `b904a6f` | — |
-| docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md`, `docs/scratch/docs-writer.md` | — | brief: `docs/scratch/briefs/docs-writer.md` |
+| docs-writer | a0448bd44708ee02e | 6 | 🟢 running (on the final plan at `72301ad`) | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md`, `docs/scratch/docs-writer.md` | — | `docs/scratch/docs-writer.md` §RESUME HERE |
 
 ## Cutoff procedure
 
@@ -118,3 +118,6 @@ only if the ID is gone.
   1 withdrawn on evidence, 0 pressed.** Orchestrator fixed the three nits
   directly (plans 01/02/06/07/10) and finalised `docs/plan/changelog.md`
   (process in numbers, closing summary, Round 3). Phase 3 complete.
+- 2026-09-30 — wave 6 spawned: `docs-writer` on the final plan (`72301ad`)
+  — README (16 sections, 7 Mermaid diagrams validated by `docs.yml` on
+  push), LICENSE (MIT), SECURITY.md, `docs/README.md`, `docs/plan/00-index.md`.
