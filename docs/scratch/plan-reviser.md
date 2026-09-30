@@ -27,7 +27,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 | 12 | OBJ-20 / plan 01 D7 + §5.5, plan 05 sources row (snappy, upload.R:85, codec assertion) | [x] | 866ac36 |
 | 13 | D.2 items (Yahoo-dependency header tag ×10 here; cannot-rule G2; FF_TOOLSET default G4; re-tag sweep in C) | [x] | a472362 |
 | 14 | T1–T13 per plan 10 §4 + log §1.3 additions (T2 in G7; T8/T9 in G9; rest here) | [x] | ce8843d |
-| C | Consistency pass (xrefs, decisions tables, assumptions tables, Mermaid) | [ ] | — |
+| C | Consistency pass (xrefs, decisions tables, assumptions tables; Mermaid proven by the final docs run) | [x] | 6a7c567 |
 | L | `docs/plan/changelog.md` `## Round 1` | [ ] | — |
 | F | Final reply: SHAs per group, run URLs, landing table, could-not-apply, choices, xref fixes | [ ] | — |
 
@@ -52,6 +52,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 - G1: "plan 01 §3" in the brief read as §8 (the `FantasyPlatform` seam lives there); also touched §1 diagram and §11.
 
 ### Cross-reference inconsistencies found
+- C: plan 07 C6 still called `ff_analyze_scoring` P1 after OBJ-21; plan 10 Ph1/Ph2/Ph3 rows still said 'Phase 1' after the split; plan 04 §4.2 cited 'plan 02 §6.4' for the verbatim sentence (it is §6.3) — all fixed.
 - G9: plan 03 §1.1 step 3 cited '(§6)' for migrations; plan 03's migration section is §7 (§6 is token expiry) → fixed.
 - G4: plan 09 §3.12 `news-check` called E10 (now P2) at P1 → the Skill reconciles D6/D2/D1/D3 itself at P1 and says "priors are hand-set".
 - Plan 07 C3 "34 read tools (19 P0 + 15 P1)" was a miscount: the P1 list (C3, D1, D4–D6, E4, E6–E11, E15, G2) is 14. After OBJ-21 (E15, G2 → later; E10 → P2): v1 = 31 (19 P0 + 11 P1 + 1 P2); Phase 2 tools/list = 30 under `FF_TOOLSET=full`. Plan 10 B10/B12 said 34 → fix to 30 (G4).
