@@ -12,7 +12,7 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | yahoo-api-specialist | a38988c557adbd317 | 1 | ✅ done (SHAs verified; read-only/write-unavailable claim verified on sports.yahoo.com/developer/access) | `docs/research/03-yahoo-api.md`, `docs/scratch/yahoo-api-specialist.md` | `473a6d9` | — |
 | data-source-evaluator | a3b161a00df32916a | 2 | ✅ done (SHAs verified; nflverse 2026 freshness + Sleeper keyless spot-checked live) | `docs/research/04-data-sources.md`, `docs/scratch/data-source-evaluator.md` | `7dad267` | — |
 | fantasy-strategy-analyst | a370e42955935355b | 2 | ✅ done (SHAs verified; Questionable-tag 71% claim spot-checked at source) | `docs/research/05-strategy-and-analytics.md`, `docs/scratch/fantasy-strategy-analyst.md` | `d9bd716` | — |
-| skills-mcp-researcher | a5edf2189cef8e218 | 3 | 🟢 running | `docs/research/06-skills-and-mcp-design.md`, `docs/scratch/skills-mcp-researcher.md` | — | `docs/scratch/skills-mcp-researcher.md` §RESUME HERE |
+| skills-mcp-researcher | a5edf2189cef8e218 | 3 | ✅ done (SHAs verified; spec rev 2026-07-28 confirmed at source; claude-code#41110 is closed `completed` with no visible out-of-scope statement → Desktop elicitation = unverified, design falls back automatically) | `docs/research/06-skills-and-mcp-design.md`, `docs/scratch/skills-mcp-researcher.md` | `5b30fba` | — |
 | architecture-planner-core | a45fab2bbf0065893 | 3 | 🟢 running | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | — | `docs/scratch/architecture-planner-core.md` §RESUME HERE |
 | product-planner | — | 4 | ⚪ not started | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | — | brief: `docs/scratch/briefs/product-planner.md` |
 | devils-advocate | — | 5 | ⚪ not started | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | brief: `docs/scratch/briefs/devils-advocate.md` |
@@ -46,3 +46,9 @@ only if the ID is gone.
   2026-09-29 15:45 GMT (timestamp.txt 11:46 EDT); Sleeper trending endpoint
   HTTP 200 with no key.
 - 2026-09-29 — wave 3 (second slot) spawned: `architecture-planner-core`.
+- 2026-09-29 — `skills-mcp-researcher` ✅ (`b6f7fdc`…`5b30fba`), 567 lines,
+  14-Skill catalog. Orchestrator verified the MCP spec revision
+  (2026-07-28) at source; the cited Desktop-elicitation issue is closed
+  `completed` with no statement → recorded as unverified in HANDOFF.
+  Research phase complete: 01–06 all verified. `product-planner` waits for
+  the core plan (`docs/plan/01-*`…`06-*`).
