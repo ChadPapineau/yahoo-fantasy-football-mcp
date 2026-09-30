@@ -555,6 +555,8 @@ interface Ctx {
   /** The newest as_of among the loaded datasets (a stored projection's `inputs_as_of`). */
   readonly inputsAsOf: string;
   readonly written: { count: number; busy: number };
+  /** Samples for weeks after the first (E5 look-ahead); equals `n` for E1. */
+  readonly nLater: number;
 }
 
 function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
@@ -594,7 +596,8 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
   let firstWeather: number | null = null;
   const drivers: Driver[] = [];
 
-  for (const week of req.weeks) {
+  for (const [wi, week] of req.weeks.entries()) {
+    const nWeek = wi === 0 ? n : ctx.nLater;
     const weekGames = loaded.games.get(gameKey(req.season, week)) ?? [];
     const game = team === null ? null : teamGame(team, weekGames);
     const rng = req.rng.fork(`projection:${subjectId}:${String(week)}`);
@@ -728,8 +731,8 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
     const p = availability.p ?? 1;
     const lines =
       pos === "DEF"
-        ? simulateDefense(expectation, n, rng)
-        : simulatePlayer(expectation, pos, p, n, rng);
+        ? simulateDefense(expectation, nWeek, rng)
+        : simulatePlayer(expectation, pos, p, nWeek, rng);
     const samples = engine.scoreSamples(lines, req.settings, "position_cv");
     const eBase = engine.score(lineOf(base, pt), req.settings).points_exact;
     const eActive =
@@ -839,9 +842,9 @@ function rosTotal(weeks: readonly ProjectedWeek[]): Dist | null {
 
 // --- entry point ------------------------------------------------------------------------------------------
 
-function validate(req: ProjectionRequest): number {
+function validate(req: ProjectionRequest, minSims: number): number {
   const n = req.n_sims ?? SIMS.default;
-  if (!Number.isInteger(n) || n < SIMS.min || n > SIMS.max) {
+  if (!Number.isInteger(n) || n < minSims || n > SIMS.max) {
     throw new AnalyticsError("invalid_request", "n_sims out of range", ["n_sims"]);
   }
   if (!Number.isInteger(req.season) || req.season < 1999 || req.season > 2100) {
@@ -868,7 +871,22 @@ function validate(req: ProjectionRequest): number {
  * `dataset_never_loaded` (schedules / current-season stats never loaded → STALE_ONLY).
  */
 export function projectPlayers(req: ProjectionRequest): ProjectionOutcome {
-  const n = validate(req);
+  return run(req, validate(req, SIMS.min), null);
+}
+
+/**
+ * The E5 path: the same projection with engine-internal sample sizes below E1's public floor — a
+ * ranking needs means, not tails (A15 latency) — and a smaller size for the look-ahead weeks.
+ */
+export function projectForRanking(req: ProjectionRequest, nLater: number): ProjectionOutcome {
+  const n = validate(req, KDEF.minSims);
+  if (!Number.isInteger(nLater) || nLater < KDEF.minSims || nLater > n) {
+    throw new AnalyticsError("invalid_request", "look-ahead n_sims out of range", ["n_sims"]);
+  }
+  return run(req, n, nLater);
+}
+
+function run(req: ProjectionRequest, n: number, nLater: number | null): ProjectionOutcome {
   const weeks = [...req.weeks].sort((a, b) => a - b);
   const sorted: ProjectionRequest = { ...req, weeks };
   const needDefense = req.targets.some((t) => t.subject.kind === "defense");
@@ -879,6 +897,7 @@ export function projectPlayers(req: ProjectionRequest): ProjectionOutcome {
     loaded,
     engine: req.engine ?? scoringEngine,
     n,
+    nLater: nLater ?? n,
     inputsAsOf: newestAsOf(
       loaded.stamps.flatMap((st) => (st === null ? [] : [{ as_of: st.as_of }])),
       req.clock.nowIso(),

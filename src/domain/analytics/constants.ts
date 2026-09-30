@@ -277,8 +277,16 @@ export const KDEF = Object.freeze({
   holdMargin: 1,
   /** Candidates returned per position. */
   maxCandidatesPerPosition: 10,
-  /** Candidate sample size for E5 (smaller than E1's default: rankings, not tails). */
-  nSims: 1000,
+  /** E5 samples for the decision week (a ranking needs means, not tails — A15 < 500 ms). */
+  nSims: 400,
+  /** E5 samples for each look-ahead week (only its mean is reported). */
+  nSimsLookAhead: 150,
+  /** The smallest E5 sample size accepted. */
+  minSims: 100,
+  /** E5 pass 1 (this week only) sample size that shortlists each position. */
+  shortlistSims: 150,
+  /** Candidates per position kept for pass 2 (≥ maxCandidatesPerPosition). */
+  shortlistPerPosition: 12,
 });
 
 /** Roof values under which weather is irrelevant. */
