@@ -138,7 +138,7 @@ yahoo-fantasy-football-mcp/
 
 That is it: **four direct runtime packages** — and the **allow-list is the full transitive tree with its count** *(round 1, OBJ-14)*: `@modelcontextprotocol/server` → `@modelcontextprotocol/core` → `zod` (3) + `fast-xml-parser` and its dependencies (2 at 4.x, 7 at 5.x) + `hyparquet` (1) = **5 packages at the 4.x pin, 11 at the 5.x pin**. The count and the names are what `npm ls --omit=dev --all` must print, and what the CI diff (§4.1) compares against. Everything else is Node built-ins: `node:sqlite`, `fetch`, `node:crypto`, `node:zlib`, `node:util.parseArgs`, `node:fs/promises`, `node:child_process` (for `osascript`, `openssl`, `lsof`, `launchctl` — all invoked with argument arrays, never a shell string).
 
-**Dev dependencies:** `typescript`, `vitest` + `@vitest/coverage-v8`, `fast-check`, `eslint` + `typescript-eslint` + `eslint-plugin-import-x` (boundaries), `prettier`, `tsx`, `@types/node`. Run via `npx` with pinned versions in CI only: `@modelcontextprotocol/inspector`, `@mermaid-js/mermaid-cli`.
+**Dev dependencies:** `typescript`, `vitest` + `@vitest/coverage-v8`, `fast-check`, `eslint` + `typescript-eslint` + `eslint-plugin-import-x` (boundaries), `prettier`, `tsx`, `@types/node`, and **`@modelcontextprotocol/client` 2.2.0 exact** *(added round 1, OBJ-23 c)* — test-only, for `InMemoryTransport.createLinkedPair()` in the in-process client↔server tests (plan 05 §4.3) and the Skills Lane 1 dry run (plan 09 §5.1 items 3 and 7); it brings `jose`, `cross-spawn`, `eventsource`, `pkce-challenge`, `eventsource-parser` and `core` [V-npm 2026-09-30, log §1.0] into the **dev** tree only — never in `files`, never in the runtime allow-list, and `npm audit --omit=dev` does not see it (the full `npm audit` reports it). Run via `npx` with pinned versions in CI only: `@modelcontextprotocol/inspector`, `@mermaid-js/mermaid-cli` (+ its `puppeteer` peer, §4.2).
 
 `package.json` essentials: `"type": "module"`, `"bin": { "ff": "dist/cli.js" }`, `"engines": { "node": ">=24.15" }` (round 1, OBJ-09), `"files": ["dist", "skills", "README.md", "LICENSE", "CHANGELOG.md"]` (fixtures and tests never ship), scripts: `build`, `typecheck`, `lint`, `format:check`, `test`, `test:coverage`, `test:process`, `smoke` (Inspector CLI), `eval` (manual, tokens), `check:commits`, `check:licenses`, `check:no-scripts`, `check:mermaid`, `check:skills`, `check:docs` (generated README table current), `pack:scan`.
 
@@ -201,7 +201,7 @@ All workflows: `permissions: contents: read` by default; actions pinned by **com
 
 | Rule id | Pattern (sketch) | Why |
 |---|---|---|
-| `yahoo-client-id` | `dj0yJmk9[A-Za-z0-9=\-]{20,}` **[A-3: the `dj0yJmk9` prefix is the base64 of `2&i=` that Yahoo app ids start with — verify against a real id before relying on it]** | app registration id |
+| `yahoo-client-id` | `dj0yJmk9[A-Za-z0-9=\-]{20,}` **[A-3: `dj0yJmk9` is the base64 of `v=2&i=` (corrected round 1, OBJ-23 d — the earlier text said `2&i=`, which encodes to `MiZpPQ==`); that Yahoo app ids start with it is still assumed — verify against a real id locally before relying on it]** | app registration id |
 | `yahoo-client-secret` | context `(consumer|client)_?secret` + 40 hex chars | secret |
 | `yahoo-oauth-token` | context `refresh_token\|access_token` + long base64/URL-safe string | tokens |
 | `yahoo-guid` | `xoauth_yahoo_guid` + 26 uppercase alnum | user identifier |
@@ -256,6 +256,6 @@ The tests inside each job (plan 05); the schedule and inputs of every zero-token
 |---|---|---|
 | ~~A-1~~ | ~~`fast-xml-parser` current major is 5.x and has the no-DTD default~~ — **resolved round 1**: 5.x is current (5.11.2 [V-npm 2026-09-30]) and its entity default is expansion **on**; the flags are set explicitly (plan 02 §5) and the §2 pin-time rule decides 4.x vs 5.x | closed |
 | A-2 | Skills frontmatter rules (`name`, `description` ≤ 1024) | `docs/research/06` |
-| A-3 | Yahoo app ids start with `dj0yJmk9` | one real id, checked locally, never committed |
+| A-3 | Yahoo app ids start with `dj0yJmk9` (= base64 of `v=2&i=`; derivation corrected round 1, OBJ-23 d) — stays [U] until checked | one real id, checked locally, never committed; the gitleaks rule is already live (`ci-bootstrap`), so a wrong prefix means a silent non-match, not a false positive |
 | A-4 | GitHub rulesets can require passing checks on direct pushes to `main` | GitHub docs at setup time; fallback stated in §5 |
 | A-5 | `import-x/no-restricted-paths` expresses the plan 01 §1.1 zones | write the config; a boundary test imports the wrong module and expects a lint error |

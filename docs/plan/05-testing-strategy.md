@@ -1,7 +1,7 @@
 # 05 — Testing strategy
 
 **Author:** `architecture-planner-core` · **Date:** 2026-09-29 · **Brief:** `docs/scratch/briefs/architecture-planner-core.md`
-**Inputs:** plans 01–04; `docs/research/03-yahoo-api.md` §A.2, §B.6, §D.1, §F; `05-strategy-and-analytics.md` §15 (engine verification); `04-data-sources.md` §B1, §H.8; the mcp-builder `evaluation.md` (read 2026-09-29); MCP Inspector README (`--cli`, `docs/cli-smoke-testing.md` "connect → list → call → assert … `--format json` + `jq`, the exit-code map" [V-inspector README, read 2026-09-29]); TypeScript SDK v2 docs listing (`docs/testing.md` exists — contents not read, marked [A-1]). Legend as in plan 01.
+**Inputs:** plans 01–04; `docs/research/03-yahoo-api.md` §A.2, §B.6, §D.1, §F; `05-strategy-and-analytics.md` §15 (engine verification); `04-data-sources.md` §B1, §H.8; the mcp-builder `evaluation.md` (read 2026-09-29); MCP Inspector README (`--cli`, `docs/cli-smoke-testing.md` "connect → list → call → assert … `--format json` + `jq`, the exit-code map" [V-inspector README, read 2026-09-29]); TypeScript SDK v2 `docs/testing.md` (`InMemoryTransport.createLinkedPair()` from `@modelcontextprotocol/client` — read 2026-09-30 by the advocate, log §1.0; the former [A-1] is resolved positive). Legend as in plan 01.
 
 Standard carried over from SOTARA (`docs/12-testing-standards.md` there): **everything ships with tests, adversarial by default, the coverage gate is never lowered to pass, and a regression test is only real once it has been shown red against the un-fixed code** (the `mutation-verify` discipline). Two SOTARA lessons shape this plan: *2,376 green tests shipped a broken run because the fake modelled the API we wished for* (fake the native seam with its failure modes), and *4 of 10 field findings were regressions from fixes that passed their own tests* (test the property, not the value).
 
@@ -59,7 +59,7 @@ Standard carried over from SOTARA (`docs/12-testing-standards.md` there): **ever
 | `cli/log` | **property:** for any object containing the current token/secret values, or strings matching the token/secret/`code=`/`state=`/guid/email patterns, the emitted line does not contain them; query strings stripped from URLs; bodies truncated to 500 after HTML stripping; never writes to stdout (fd 1 is a closed pipe in the test and nothing throws) |
 | `http/client` | host allow-list: any host not listed → rejected before DNS; timeouts via `AbortSignal.timeout`; redirects to a non-allow-listed host rejected |
 | `sources/*` | schema assertion: a fixture with one renamed column fails with the column name; a fixture with an extra column passes with a warning; loader is transactional (a failure mid-load leaves the previous dataset); `timestamp.txt` unchanged → no download; the license/attribution fields are present on every source (a test enumerates them) |
-| `store` | migrations apply in order from empty and from each historical version; newer-store refusal; backup created before the first pending migration; `busy_timeout` honoured under a concurrent writer |
+| `store` | migrations apply in order from empty and from each historical version; newer-store refusal; **a consistent backup** (`sqlite.backup()` / `VACUUM INTO` under the process lock) is created before the first pending migration *while a second process has uncheckpointed rows in `-wal`*, and restoring from it yields the exact `write_journal` and `recommendation_log` row counts (round 1, OBJ-10); **latency under contention (round 1, OBJ-11):** another process holds a 3-s writer lock (`BEGIN IMMEDIATE` + sleep) while the server answers 50 fixture-mode reads that each miss the cache — p95 tool latency < 300 ms, zero errors, every cache write skipped and counted as a miss, and a concurrent `ff_record_recommendation` returns `STORE_BUSY` within ≤ 1 s, never hangs; the refresh path loads into the attached staging database and the swap transaction on `store.sqlite` lasts < 50 ms |
 | `cli/doctor` | each check row has a passing and a failing fixture; `--json` shape stable; exit code = worst finding; offline mode makes zero network calls (the injected `fetch` throws if called) |
 | `cli/print-config` | output paths are absolute and exist; no secret value present; `command` equals `process.execPath` |
 
@@ -118,6 +118,8 @@ Standard carried over from SOTARA (`docs/12-testing-standards.md` there): **ever
 | POST returns `201` | success | journal `applied` | — |
 | PUT returns `400` with body | `VALIDATION` | journal `rejected_validation`; body in log only | body not in result; no retry |
 | write times out | `applied: "unknown"` | journal `sent_unknown` | **no retry** |
+| `fetch` throws `ENOTFOUND` / `ECONNREFUSED` (network, not HTTP) on a Yahoo read or a refresh *(round 1, OBJ-22)* | `UPSTREAM_UNAVAILABLE`, or stale data + warning when cache within hard limit | refresh: `refresh_log.ok=0`, `error: "network"`, previous load intact | never `INTERNAL`; no throw escapes |
+| SQLite write lock held 3 s by another process *(round 1, OBJ-11)* | reads succeed (p95 < 300 ms); `ff_record_recommendation` → `STORE_BUSY` | cache writes skipped (miss counter) | no stall > 300 ms; no silently dropped journal/log write |
 
 ### 4.2 Lifecycle (`tests/process/`, spawning `dist/cli.js`)
 
@@ -125,7 +127,7 @@ Startup < 1 s with no network (fetch stub via env that makes any network call ex
 
 ### 4.3 Confirmation gate (`tests/domain/gate/` + `tests/mcp/gate/`)
 
-Using the SDK's client package in-process (an in-memory client ↔ server pair; **[A-1]** that v2 ships such test transports — `docs/testing.md` exists in the SDK repo and is the first thing to read when building this):
+Using the SDK's client package in-process — `InMemoryTransport.createLinkedPair()` from `@modelcontextprotocol/client` "returns two transports that are each other's wire" [V-sdk `docs/testing.md`, read 2026-09-30 — log §1.0; the former [A-1] is resolved positive], the package being a **devDependency** (plan 04 §2, round 1 OBJ-23 c):
 
 - prepare → commit with **elicitation accept** → one write; **decline** → `CONFIRMATION_DENIED`, zero writes; **cancel within 2 s** → OOB code path offered; client without the capability → OOB path directly.
 - **OOB code:** wrong code ×3 → prepared write voided; correct code → one write; the code never appears in any tool result (grep the transcript); the notification payload contains the diff summary **and the code**; **no file is written under `<config>/`** during the channel (an `fs` spy asserts zero writes — plan 02 §4.2 row 2, revised round 1); the journal row holds `sha256(code)` and never the code.
@@ -201,7 +203,7 @@ Analytics-model evaluation (backtests, Brier/CRPS — 05 §12; product planner);
 
 | # | Assumption | Verify by |
 |---|---|---|
-| A-1 | SDK v2 ships in-memory/test transports for client↔server tests | `docs/testing.md` in the SDK repo (exists; not read) |
+| ~~A-1~~ | ~~SDK v2 ships in-memory/test transports for client↔server tests~~ — **resolved positive (round 1, OBJ-23 c)**: `InMemoryTransport.createLinkedPair()` in `@modelcontextprotocol/client` per SDK `docs/testing.md` (read 2026-09-30); the package is added to devDependencies (plan 04 §2) | closed |
 | A-2 | A pure-JS parquet *writer* exists for making excerpts | npm search at build time; csv.gz excerpts are the fallback already chosen |
 | A-3 | Which protocol era the Inspector CLI speaks by default, and whether it can pin one | Inspector docs at build time |
 | A-4 | 8/10 as the eval pass bar | first run; the bar is a constant in the eval script |
