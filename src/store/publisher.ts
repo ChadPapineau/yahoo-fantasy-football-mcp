@@ -23,7 +23,7 @@ import { isDatasetSourceId, type DatasetSourceId } from "../config/freshness.js"
 import { BACKUP_DIR_NAME, datasetFileStem, ensureSecureDir } from "../config/paths.js";
 import type { RefreshLogRow } from "../domain/analytics/types.js";
 import { DATASET_META_TABLE, DS_SCHEMA_VERSION } from "./attach.js";
-import { ddlFor } from "./datasets/tables.js";
+import { ddlFor, tablesFor } from "./datasets/tables.js";
 import { MIGRATIONS, type Migration } from "./migrations/index.js";
 import type { RepoDeps } from "./repos/common.js";
 import {
@@ -275,6 +275,9 @@ export function openPublisher(
       stage = "fill_failed";
       const stats = checkStats(await fill(writer));
       writer.close();
+      // A file the server would refuse (a contract table missing) is never published.
+      if (!tablesFor(sourceId).every((t) => writer?.counts.has(t.name) === true))
+        throw new PublishError("tables_missing");
       stage = "meta_failed";
       wdb.exec(
         `CREATE TABLE ${DATASET_META_TABLE} (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT`,

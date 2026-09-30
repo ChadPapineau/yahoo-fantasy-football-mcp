@@ -11,6 +11,7 @@ import { isDatasetSourceId, SOURCE_REGISTRY, type DatasetSourceId } from "../con
 import { datasetFileStem, datasetSchemaName } from "../config/paths.js";
 import type { AttachedDataset, DatasetStamp } from "../domain/analytics/types.js";
 import type { Clock } from "../domain/clock.js";
+import { tablesFor } from "./datasets/tables.js";
 import { currentRefreshRow } from "./repos/ops.js";
 import type { RepoDeps } from "./repos/common.js";
 import { MAX_ATTACHED, RESERVED_ATTACH_SLOTS, type ReattachReport } from "./types.js";
@@ -137,6 +138,20 @@ export class Attachments {
     };
   }
 
+  /** Whether the file holds every ds_* table the contract gives its source (READER_QUERIES read them). */
+  private hasContractTables(schema: string, source: DatasetSourceId): boolean {
+    const want = tablesFor(source).map((t) => t.name);
+    if (want.length === 0) return true;
+    const have = new Set(
+      (
+        this.o.db
+          .prepare(`SELECT name FROM ${q(schema)}.sqlite_master WHERE type = 'table'`)
+          .all() as unknown as { name: string }[]
+      ).map((r) => r.name),
+    );
+    return want.every((n) => have.has(n));
+  }
+
   private attach(source: DatasetSourceId, st: Stats): Slot | null {
     if (!this.makeRoom(source)) return null;
     const schema = datasetSchemaName(source);
@@ -159,6 +174,11 @@ export class Attachments {
     if (meta.source !== null && meta.source !== source) {
       this.o.db.exec(`DETACH DATABASE ${q(schema)}`);
       this.o.warn("dataset_source_mismatch");
+      return null;
+    }
+    if (!this.hasContractTables(schema, source)) {
+      this.o.db.exec(`DETACH DATABASE ${q(schema)}`);
+      this.o.warn("dataset_tables_missing");
       return null;
     }
     const version =
