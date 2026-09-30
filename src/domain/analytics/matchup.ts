@@ -6,6 +6,7 @@
 import type { Clock, Rng } from "../clock.js";
 import { isLocked } from "../league/schedule.js";
 import type { RosterSlots } from "../league/types.js";
+import { at } from "../scoring/numeric.js";
 import type { Dist } from "../scoring/types.js";
 import { LIMITS, SIMS, Z90 } from "./constants.js";
 import { AnalyticsError } from "./errors.js";
@@ -63,14 +64,14 @@ export function distQuantile(d: Dist, u: number): number {
     [1, Math.max(hi, d.p90)],
   ];
   const x = clamp(u, 0, 1);
-  for (let i = 1; i < knots.length; i++) {
-    const [u1, v1] = knots[i] ?? [1, d.p90];
-    if (x <= u1) {
-      const [u0, v0] = knots[i - 1] ?? [0, d.p10];
-      return u1 === u0 ? v1 : v0 + ((x - u0) / (u1 - u0)) * (v1 - v0);
-    }
-  }
-  return knots[knots.length - 1]?.[1] ?? d.p90;
+  // the first knot at or above x (the last knot is at u = 1, so one always exists)
+  const i = Math.max(
+    1,
+    knots.findIndex(([k]) => x <= k),
+  );
+  const [u0, v0] = at(knots, i - 1);
+  const [u1, v1] = at(knots, i);
+  return v0 + ((x - u0) / (u1 - u0)) * (v1 - v0);
 }
 
 /** Lower-triangular Cholesky factor of a correlation matrix; a non-PD pivot falls back to 1e-9. */
@@ -79,12 +80,11 @@ export function cholesky(c: readonly (readonly number[])[]): number[][] {
   const l = Array.from({ length: n }, () => new Array<number>(n).fill(0));
   for (let i = 0; i < n; i++) {
     for (let j = 0; j <= i; j++) {
-      let s = c[i]?.[j] ?? 0;
-      for (let k = 0; k < j; k++) s -= (l[i]?.[k] ?? 0) * (l[j]?.[k] ?? 0);
-      const row = l[i];
-      if (row === undefined) continue;
-      if (i === j) row[j] = Math.sqrt(Math.max(s, 1e-9));
-      else row[j] = s / (l[j]?.[j] ?? 1);
+      const li = at(l, i);
+      const lj = at(l, j);
+      let s = at(at(c, i), j);
+      for (let k = 0; k < j; k++) s -= at(li, k) * at(lj, k);
+      li[j] = i === j ? Math.sqrt(Math.max(s, 1e-9)) : s / at(lj, j);
     }
   }
   return l;
@@ -110,9 +110,9 @@ function pWinMc(
     let o = 0;
     for (let i = 0; i < k; i++) {
       let z = 0;
-      const row = l[i] ?? [];
-      for (let j = 0; j <= i; j++) z += (row[j] ?? 0) * (eps[j] ?? 0);
-      const x = distQuantile(all[i]?.points ?? ZERO, normalCdf(z));
+      const row = at(l, i);
+      for (let j = 0; j <= i; j++) z += at(row, j) * at(eps, j);
+      const x = distQuantile(at(all, i).points, normalCdf(z));
       if (i < me.length) m += x;
       else o += x;
     }
@@ -120,17 +120,6 @@ function pWinMc(
   }
   return wins / n;
 }
-
-const ZERO: Dist = {
-  mean: 0,
-  p10: 0,
-  p25: 0,
-  p50: 0,
-  p75: 0,
-  p90: 0,
-  p_zero: 1,
-  basis: "position_cv",
-};
 
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
 

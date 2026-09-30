@@ -3,6 +3,7 @@
 // P(win) = Φ((μ_m − μ_o) / sqrt(σ_m² + σ_o² − 2 cov)). Pure.
 import type { NflTeam } from "../../config/schema.js";
 import type { PlayerKey } from "../league/types.js";
+import { at } from "../scoring/numeric.js";
 import type { Dist } from "../scoring/types.js";
 import { CORRELATION, LINEUP, Z90 } from "./constants.js";
 import { normalCdf, sigmaOf } from "./math.js";
@@ -20,8 +21,7 @@ export interface TotalMember {
 export function rho(a: TotalMember, b: TotalMember): number {
   if (a.player_key === b.player_key) return 1;
   if (a.nfl_team === null || a.nfl_team !== b.nfl_team) return 0;
-  const [x, y] = [a.position, b.position].sort();
-  return CORRELATION.sameTeam[`${x ?? ""}|${y ?? ""}`] ?? 0;
+  return CORRELATION.sameTeam[[a.position, b.position].sort().join("|")] ?? 0;
 }
 
 /** μ and σ² of a lineup's total. */
@@ -31,10 +31,9 @@ export function lineupMoments(members: readonly TotalMember[]): { mu: number; v:
   const sig = members.map((m) => sigmaOf(m.points));
   members.forEach((m, i) => {
     mu += m.points.mean;
-    v += (sig[i] ?? 0) ** 2;
+    v += at(sig, i) ** 2;
     for (let j = i + 1; j < members.length; j++) {
-      const other = members[j];
-      if (other !== undefined) v += 2 * rho(m, other) * (sig[i] ?? 0) * (sig[j] ?? 0);
+      v += 2 * rho(m, at(members, j)) * at(sig, i) * at(sig, j);
     }
   });
   return { mu, v: Math.max(0, v) };
