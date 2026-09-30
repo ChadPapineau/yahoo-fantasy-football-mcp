@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { datasetDir, backupDir, storePath } from "../../../src/config/paths.js";
 import { loadConfig, type Config } from "../../../src/config/schema.js";
 import { buildServices, loadOverrides, loadTexts } from "../../../src/cli/serve.js";
@@ -151,17 +152,33 @@ export async function makeWorld(o: WorldOptions = {}): Promise<World> {
   };
 }
 
-/** A connected client over a server built from `world` (legacy era unless `modern`). */
+/**
+ * A connected client over a server built from `world`: the legacy era through `server.connect`, or
+ * the 2026-07-28 era through `serveStdio` (the production entry) over an in-memory transport.
+ */
 export async function connect(
   world: Pick<World, "services" | "options">,
   opts: { modern?: boolean; options?: Partial<McpServerOptions> } = {},
 ): Promise<{ client: Client; close: () => Promise<void> }> {
-  const server = createServer(world.services, { ...world.options, ...opts.options });
+  const options = { ...world.options, ...opts.options };
   const [a, b] = InMemoryTransport.createLinkedPair();
-  const client = new Client(
-    { name: "ff-test-client", version: "0.0.0" },
-    opts.modern === true ? { versionNegotiation: { mode: "auto" } } : {},
-  );
+  if (opts.modern === true) {
+    const handle = serveStdio(() => createServer(world.services, options), { transport: a });
+    const client = new Client(
+      { name: "ff-test-client", version: "0.0.0" },
+      { versionNegotiation: { mode: "auto" } },
+    );
+    await client.connect(b);
+    return {
+      client,
+      close: async () => {
+        await client.close();
+        await handle.close();
+      },
+    };
+  }
+  const server = createServer(world.services, options);
+  const client = new Client({ name: "ff-test-client", version: "0.0.0" });
   await Promise.all([server.connect(a), client.connect(b)]);
   return {
     client,

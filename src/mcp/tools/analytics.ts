@@ -395,12 +395,11 @@ const coarse = z.strictObject({
   band: z.enum(["small", "medium", "large"]),
 });
 
-/** compact current_lineup: the seat only (the players' Dists are in recommended_lineup / E1). */
+/** current_lineup: the seats (full adds name + lock_at; the Dists are in recommended_lineup / E1). */
 const currentSeat = z.strictObject({
   slot: slotName,
   player_key: playerKey,
   name: bareName.optional(),
-  points: dist.optional(),
   lock_at: iso.nullable().optional(),
 });
 
@@ -530,9 +529,16 @@ export const analyzeLineupTool = defineTool({
     });
     const data = {
       ...rec,
+      // the seats only: every starter's Dist is in recommended_lineup (and E1), so repeating
+      // them here would push a 16-man roster past the 10 000-char budget (plan 07 C8)
       current_lineup:
         args.detail === "full"
-          ? rec.current_lineup.map(assignmentRow)
+          ? rec.current_lineup.map((a) => ({
+              slot: a.slot,
+              player_key: a.player_key,
+              name: bareUntrusted(a.name, "player_name"),
+              lock_at: a.lock_at,
+            }))
           : rec.current_lineup.map((a) => ({ slot: a.slot, player_key: a.player_key })),
       recommended_lineup: rec.recommended_lineup.map(assignmentRow),
       swaps: rec.swaps.map((s) => ({
