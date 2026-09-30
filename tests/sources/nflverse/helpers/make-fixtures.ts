@@ -119,6 +119,16 @@ const roster = JSON.parse(
   readFileSync(join(ROOT, "fixtures/players/fixture-roster.json"), "utf8"),
 ) as RosterFile;
 const ids = new Set(roster.players.map((p) => p.gsis_id));
+// every gsis id the fixture league lists (my team + Team B's roster + Nico Collins on IR), so the
+// crosswalk resolves the whole fixture league by roster_weekly id (plan 10 A5a) and E2/E3's
+// opponent is a full roster
+const leagueIds = new Set(
+  [
+    ...readFileSync(join(ROOT, "fixtures/manual/league.yaml"), "utf8").matchAll(
+      /gsis_id:\s*"?(00-\d{7})/g,
+    ),
+  ].map((m) => m[1]),
+);
 const surnames = new Set(
   roster.players.filter((p) => p.tags.includes("same_surname")).map((p) => p.last_name),
 );
@@ -151,10 +161,11 @@ await excerpt(
   `${REL}/weekly_rosters/roster_weekly_2026.parquet`,
   (r) =>
     ids.has(r.gsis_id as string) ||
+    leagueIds.has(r.gsis_id as string) ||
     surnames.has(r.last_name as string) ||
     r.gsis_id === null ||
     r.yahoo_id === "",
-  "every row of the fixture-roster players (weeks 1-4), every row sharing a same_surname tag's last name (Allen, Love, Henry — matcher distractors), and the real anomalies: rows with null gsis_id and rows with yahoo_id = ''; all 36 columns",
+  "every row of the fixture-roster players and of every gsis id in fixtures/manual/league.yaml (weeks 1-4), every row sharing a same_surname tag's last name (Allen, Love, Henry — matcher distractors), and the real anomalies: rows with null gsis_id and rows with yahoo_id = ''; all 36 columns",
 );
 verbatim(
   "stats_player_stats_player_week_2026.parquet",
