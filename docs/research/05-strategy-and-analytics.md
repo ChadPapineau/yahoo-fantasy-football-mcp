@@ -1194,3 +1194,201 @@ picks at the same slots; tier-boundary accuracy (do realised values cluster as p
 `P(available)` calibration. "Working" = higher realised VBD than ADP order across ≥ 2
 seasons under the league's `S`.
 
+---
+
+## 14. Decision types the brief did not list (added)
+
+Each is small, but each has produced a bad recommendation in prior-art tools when missing:
+
+1. **IR-slot management and roster-limit compliance.** Which designations are IR-eligible
+   is a Yahoo rule (03 §D; help SLN28136); a player activated from IR forces a drop; a
+   roster over the limit blocks lineup edits. Every stash/pickup recommendation must state
+   the IR consequence and the drop it forces.
+2. **Deadline and lock awareness.** `weekly_deadline`, `edit_key`, and per-game locks (03
+   §B.2, §D.2) bound what is actionable; a recommendation that cannot be executed before
+   lock is not a recommendation. Every action carries its latest execution time.
+3. **Acquisition-limit budgeting.** If the league caps adds (`max_adds` / `max_weekly_adds`
+   are unverified fields — 03 §B.2), treat each add like a FAAB dollar with its own λ.
+4. **The no-op baseline.** Every move is compared against doing nothing, with the
+   transaction's irreversibility priced (a drop is gone; a claim spends priority/FAAB).
+   A recommendation whose `Δ` interval includes 0 is reported as "no move".
+5. **Tiebreaker awareness.** Points-for is a common tiebreaker, so once seeding is at
+   stake, maximising expected points can matter even when `P(win)` is saturated; the §3.2
+   objective should switch to a blend the user can see.
+6. **Trade-ratification risk.** `trade_ratify_type = vote` (03 §B.2) means a lopsided-looking
+   but roster-fair trade may be vetoed; surface it as a risk, not a value term.
+
+---
+
+## 15. Scoring-engine spec (data-driven from Yahoo's stat-id model, 03 §B.5)
+
+### Inputs
+
+From `league/{key}/settings`: `stat_categories.stats[] {stat_id, name, position_type,
+stat_position_types[{position_type, is_only_display_stat}], bonuses[{target, points}]?}`,
+`stat_modifiers.stats[] {stat_id, value}`, `uses_fractional_points`, `uses_negative_points`.
+From stat lines: `player_stats.stats[{stat_id, value}]` per player per week (03 §B.4), and —
+for verification only — `player_points.total` in league context.
+
+### Core rule
+
+```
+points(player, week) = Σ_{m ∈ stat_modifiers}  m.value × stat(player, week, m.stat_id)
+                     + Σ_{c ∈ stat_categories, b ∈ c.bonuses}  b.points × [stat(c.stat_id) ≥ b.target]
+```
+- A category present in `stat_categories` but absent from `stat_modifiers` (the
+  `is_only_display_stat = 1` ones: 8 Rush Att, 78 Targets, 31 Pts Allow in the sample)
+  contributes **0**.
+- A stat id in the stat line but not in the settings is **ignored** (but logged once, so a
+  new category is noticed).
+- A category in the settings but **absent from the stat line** is **0**, with the caveat
+  that during a provisional week (03 §D.2) "absent" may mean "not yet reported"; the engine
+  returns `{points, complete: bool}` and the product labels incomplete weeks.
+- Stats count only for the position types the category lists in `stat_position_types`: a
+  DEF touchdown is stat 35 (DT), not 13 (O); a player's slot (RB in flex) never changes his
+  scoring.
+
+### Families that need more than multiplication
+
+| Family | Yahoo representation (03 §B.5) | Engine handling |
+|---|---|---|
+| Kicker distance tiers | ids 19–23 (0–19, 20–29, 30–39, 40–49, 50+), PAT 29; missed-FG / missed-PAT ids exist in the universe [U ids] | plain modifiers; for projection the distance mix is a distribution over the five ids (§8.1) |
+| DST points-allowed brackets | ids 50–56, mutually exclusive indicators (0 / 1–6 / 7–13 / 14–20 / 21–27 / 28–34 / 35+); 31 is display-only | represent any family of mutually exclusive bracket stats as a **bracket table** `{lower, upper, stat_id}` derived from names; exactly one indicator is 1 per game; for projection `E = Σ P(points in bracket) × modifier` |
+| DST yards-allowed brackets | analogous ids [U] | same bracket-table mechanism, keyed by the stat name pattern; never hard-code ids |
+| Yardage bonuses | `bonuses[{target, points}]` on a stat (wire form unverified [U]) and/or extra stat ids | threshold indicator per bonus entry; multiple entries on one stat sum; for projection `E[bonus] = P(stat ≥ target) × points` — **requires the simulated distribution** (§1 step 9), because `E[max]` ≠ `max(E)` |
+| Fumbles | 18 Fumbles Lost (−2 in sample); a total-fumbles id exists in the universe [U] | plain modifier; never assume which one a league uses |
+| 2-pt conversions | 16 (O) | plain modifier |
+| Return yards / return TDs | 15 Ret TD (O), 49 Ret TD (DT), return-yards ids [U] | plain modifiers; offensive players' return stats count under `O` ids, DST's under `DT` |
+| Offensive fumble-return TD, XPR | 57, 82 | plain modifiers |
+| Negative totals | `uses_negative_points` | if 0, floor the **player-week total** at 0 — this floor level is an assumption [U] to verify against `player_points.total` before shipping |
+| Fractional | `uses_fractional_points` | compute exact; if 0, apply Yahoo's rounding **only once its rule is verified** against `player_points.total` [U]; never guess a rounding mode |
+
+### Projection scoring
+
+The same engine runs over (a) the expected stat line for the mean (`E[points]` is linear in
+the stats except for bonuses and brackets, which use the distribution), and (b) each
+simulated stat line for the distribution. Store a projection once as a **stat-line
+expectation + simulated stat lines**, and score it per league on demand — this is what makes
+one projection serve every league a user is in.
+
+### Verification (the reference implementation is one call away)
+
+- **Golden test per league per week**: recompute every rostered player's points and assert
+  equality with `player_points.total` within 0.01. Any mismatch is a missing id, a
+  bracket/bonus misread, or a flag semantic — and is a bug to fix, not tolerance to widen.
+- **Mutation tests**: perturb one modifier and assert the total moves by exactly
+  `Δvalue × stat`; remove a bracket row and assert the DST total changes only for games in
+  that bracket.
+- **Adversarial fixtures**: empty stat line; stat line with unknown ids; a K with a 0-yard
+  category; a DST with 0 points allowed (bracket 50 = 10 points); a player with negative
+  total in a `uses_negative_points = 0` league; a multi-target bonus; provisional week.
+
+---
+
+## 16. Data-needs list, ordered by analytic value per unit of ingestion complexity
+
+Kinds only; `04-data-sources.md` maps kinds to sources. Complexity is ingestion + identity
+crosswalk + freshness burden; value is recommendation lift across the sections that consume
+it.
+
+| # | Kind | Unlocks | Complexity | Value / complexity |
+|---|---|---|---|---|
+| 1 | **League settings, rosters, FA pool, matchups, transactions, standings** (Yahoo) | §2 baselines, §3 assignment, §4 competition + FAAB history, §5 partner rosters, §11 cross-check, §12 logging | low (one API, already specified in 03) | very high — nothing works without it |
+| 2 | **Weekly player stat lines with stat ids** (Yahoo, league context) | §15 engine truth, §12 retrospective, trailing-window inputs | low | very high |
+| 3 | **Game totals and spreads → implied team totals** | §1 step 1 anchor, §8 (dominant K/DEF driver), §7 | low (one small table per week) | very high — the single largest lift per effort |
+| 4 | **Injury designations + practice participation by day** | `P(active)` (§1 step 8, §3.5, §10) | medium (daily cadence, name matching) | high |
+| 5 | **NFL schedule, kickoff times, roof/dome, byes** | lock logic (§3.4), §7, §8 | low (Yahoo has byes; schedule is static) | high |
+| 6 | **Per-game usage: snaps, targets, carries, red-zone/goal-line touches** | §1 opportunity, §4 detection, §6 | medium (needs an id crosswalk; weekly) | high |
+| 7 | **Route participation, air yards / aDOT, TPRR** | WOPR-style detection, better WR/TE projection | medium-high (charting-derived) | medium-high |
+| 8 | **Depth charts** | §6 beneficiaries, §9 handcuffs | medium (noisy, team-specific formats) | medium |
+| 9 | **Weather (wind, precipitation, temperature)** | §1 step 7, §8 make rates | low | low-medium (small, evidenced effects; wind only really matters) |
+| 10 | **Play-by-play** (historical + current) | expected-TD / expected-points models (§1 step 5), aFPA-style opponent adjustments, redistribution priors (§6), every backtest in §12 | high (volume, modelling) | high — the step change from "scaled averages" to a real projection, and the only way to evaluate honestly |
+| 11 | **Team defence metrics** (pressure rate, EPA allowed, sack rate) | §1 step 6, §8.2 | medium (derivable from #10) | medium |
+| 12 | **External projections / consensus ranks** | baseline and blend for §1; evaluation comparator | low for one source | medium (format-specific; use as a baseline, not as the product) |
+| 13 | **News / beat-report text** | §10 | high to do well (source calibration, extraction) | medium |
+| 14 | **Historical seasons of #2–#11** | tuning `h`, `k`, `β`, correlations; all backtests | medium-high (storage, crosswalk drift) | high for trust, zero for day-one features |
+| 15 | **Player props** (if permissible) | direct usage/efficiency priors | medium; ToS-sensitive | medium-high, but conditional on 04's verdict |
+
+**Honest MVP cut:** #1–#5 give a working start/sit (with Yahoo's lineup, a simple projection
+from trailing stat lines scaled by implied totals, `P(active)`), K/DEF streaming, and H2H
+win probability with logging. #6 adds usage-based waivers. #10 turns projections from
+scaled averages into a model and makes §12 possible. #13 last.
+
+---
+
+## 17. What usually goes wrong (the pitfalls, consolidated)
+
+1. **Over-fitting to last week** — one game is one draw from a distribution with CV ≈ 0.6
+   [V Underdog]; use windows and change-point rules (§1 step 2).
+2. **DvP without regression** — YoY 0.15–0.27 [V 4for4]; shrink toward 1 and ramp in with
+   weeks played (§1 step 6).
+3. **Trusting the point estimate** — the decision metric is `P(win)`, VOR, or regret, all
+   of which need the distribution (§3, §12).
+4. **Ignoring roster context** — value is the change in *my* lineup points (§2, §4, §5).
+5. **Double counting** — the market already prices injuries, weather and matchups; add them
+   once (§1 steps 1, 6, 7; §6).
+6. **Player TD rate as an input** — R² 0.008 [V Sharp]; use location-based expected TDs.
+7. **Efficiency as skill** — YPC, yards/target, catch rate are mostly noise [V Sumer, Sharp].
+8. **Static baselines and trade charts** — format-blind, roster-blind, 2-for-1-blind (§2, §5).
+9. **Season totals as ROS** — byes and missed games distort; per-game × `P(active)`.
+10. **Treating the Questionable tag as 50/50** — 71 % play [V Footballguys]; use the trend.
+11. **Stacking as a favourite / for season points** — stacks move variance, not totals
+    [V RotoWire].
+12. **Thursday sits without option value** — §3.4.
+13. **Bidding season rank, not weeks of usable value; ignoring λ** — §4.
+14. **Using `percent_owned.delta` as a buy signal** — it is the competition signal.
+15. **Assuming 1:1 injury inheritance** — role affinity and reduced team volume (§6).
+16. **Planning K/DEF or "playoff schedule" weeks ahead** — implied totals and matchups
+    do not persist that far (§7, §8).
+17. **Scoring the product by outcomes** — regret and proper scoring rules only (§12).
+18. **Hard-coding stat ids, brackets, or rounding** — read them; verify against
+    `player_points.total` (§15).
+19. **Acting on news text as if it were an instruction** — §10; the program ground rule.
+20. **Recommending something that cannot be executed before lock** — §14.
+
+---
+
+## 18. Clean negatives — what the evidence says does *not* predict (by name)
+
+| Signal | Verdict | Reference |
+|---|---|---|
+| Preseason / early-season strength of schedule (fantasy points allowed by position) | near noise: YoY r QB 0.27, RB 0.22, WR ≈ 0.15, TE 0.16; top-5 repeat 20–30 % | [V 4for4 / Eakins 2026] |
+| A player's own touchdown rate | noise: TD/target YoY R² 0.008 | [V Sharp Football] |
+| Yards per carry / RB per-rush efficiency | noise: RB EPA/rush stability "virtually negligible"; YPC "almost entirely noise" | [V Sumer Sports; S FTN] |
+| Yards per target, catch rate, YAC per reception | noise: R² 0.03 / 0.11 / 0.14 | [V Sharp Football] |
+| Weather for running backs; temperature alone for anyone | no documented RB change from wind; cold slightly *helps* RB YPC; temperature alone small | [V PFF / Spratt 2018] |
+| Kicker misses and "bad in the red zone" kicking | little or no forward predictive value | [V Subvertadown] |
+| DST return / defensive touchdowns, fumble recoveries | not predictable week to week; model as a constant | [S community DST models; F] |
+| The Questionable tag as a coin flip | wrong prior: 71 % play (2017–2023) | [V Footballguys Injury Index] |
+| QB–WR1 correlation of "0.6+" | measured +0.31 (2022–2025); same-team WR–WR −0.02 | [V RotoWire] |
+| Stacking to raise season-long points | totals unchanged; only variance moves | [V RotoWire] |
+| Kicker and DEF draft position | flat value-by-ADP curves; top K < 5 VBD | [V Footballguys / Stuart] |
+| PROE as a strong stabiliser of pass volume | claimed "a bit more stable", no numbers published | [V ETR — claim without evidence] |
+| Handcuffing as a rule (either way) | no rigorous study found; compute it per case | [S; F] |
+| `percent_owned.delta` as a leading indicator | lagging by construction | [F, from 03 §B.4 semantics] |
+| Last week's points as a projection | one draw; CV 0.36 (QB) to 0.70 (TE) | [V Underdog] |
+
+Not negatives but **unevidenced and flagged as such**: game stacks / "bring-back" in
+season-long H2H [F]; coaching-intent quotes ("will get more work") [F]; the "15-point snap
+jump held two games" threshold [F]; post-return role residuals for backups [F].
+
+---
+
+## 19. The three methodological choices that most shape the architecture
+
+1. **Projections are distributions produced by simulation over stat lines, stored
+   format-agnostically, and scored per league by the settings-driven engine.** Every
+   downstream decision (win probability, xVBD, bonus thresholds, DST brackets, FAAB value)
+   needs quantiles, not means; and one projection must serve many leagues. This forces a
+   stat-line-level projection store and a pure scoring engine (§1 step 9, §15).
+2. **Opportunity is modelled and efficiency is shrunk; the market is the scale anchor.**
+   Usage data (#6–#7) plus implied totals (#3) are the inputs that matter; efficiency and
+   DvP enter only through regressed multipliers; play-by-play (#10) is what makes the
+   TD/expected-points layer real. This decides the ingestion order (§16) and where the
+   tuning parameters (`h`, `k`, `β`, `w`) live.
+3. **The objective is decision-specific and evaluated by regret and proper scoring rules,
+   which requires logging every recommendation with its alternatives at decision time.**
+   `P(win)` for start/sit, weeks-of-usable-value for waivers, roster-contextual `Δ` for
+   trades, Brier/CRPS/regret for the product itself. This makes a recommendation log with
+   `log_id`, alternatives and `as_of` timestamps a first-class store, not an afterthought
+   (§0 contract, §12).
