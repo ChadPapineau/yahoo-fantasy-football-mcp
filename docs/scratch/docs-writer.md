@@ -5,7 +5,7 @@ Started on `main` at 72301ad (plan FINAL after 3-round adversarial review).
 
 ## RESUME HERE
 
-**Status:** inputs read (HANDOFF, plans 01–10, adversarial log closing, changelog, research 00–06 maps, .env.example, CI). LICENSE + SECURITY.md written. README next.
+**Status:** inputs read (HANDOFF, plans 01–10, adversarial log closing, changelog, research 00–06 maps, .env.example, CI). LICENSE + SECURITY.md pushed (e89378a). README first half pushed; second half + indexes in progress. Mermaid: 7 blocks extract locally (check-mermaid.mjs), rendered by CI on push.
 
 **Owned paths (only these are edited):** `README.md`, `LICENSE`, `SECURITY.md`,
 `docs/README.md`, `docs/plan/00-index.md`, `docs/scratch/docs-writer.md`,
@@ -18,7 +18,7 @@ Started on `main` at 72301ad (plan FINAL after 3-round adversarial review).
 **Checkpoints (commit + push after each):**
 1. [x] Read HANDOFF, plan 01–10 + adversarial-log + changelog (closing summary first), research 00–06, .env.example
 2. [x] LICENSE (MIT, `Copyright (c) 2026 Chad Papineau`) + SECURITY.md
-3. [ ] README first half (banner, badges, pitch, status, features, 7 Mermaid diagrams)
+3. [x] README first half (pushed; links job red only on forward refs to the second half + index files — fixed by checkpoint 4/5) (banner, badges, pitch, status, features, 7 Mermaid diagrams)
 4. [ ] README second half (tool ref, skills ref, quickstart, config, launch, security, testing, contributing, roadmap, FAQ, acks, license)
 5. [ ] docs/README.md + docs/plan/00-index.md
 6. [ ] Mermaid validation: CI `docs` workflow on push (mermaid-cli 11.17.0) — `gh run list --branch main --limit 4`, `gh run watch <id> --exit-status`; fix any red before replying
