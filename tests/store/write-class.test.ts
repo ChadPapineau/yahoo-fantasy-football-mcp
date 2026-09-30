@@ -408,7 +408,9 @@ describe("WriteExecutor unit", () => {
     expect(tries).toBeGreaterThan(5);
   });
   it("reserves at least one poll plus the store's own stall before each yield", () => {
-    expect(REQUIRED_STALL_RESERVE_MS).toBe(REQUIRED_POLL_MS + BUSY_TIMEOUT_MS + BEST_EFFORT_POLL_MS);
+    expect(REQUIRED_STALL_RESERVE_MS).toBe(
+      REQUIRED_POLL_MS + BUSY_TIMEOUT_MS + BEST_EFFORT_POLL_MS,
+    );
     expect(REQUIRED_STALL_RESERVE_MS).toBeLessThan(REQUIRED_WRITE_BUDGET_MS / 2);
   });
   it("gives up without overrunning a small budget", async () => {
