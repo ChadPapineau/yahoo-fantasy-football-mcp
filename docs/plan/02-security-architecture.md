@@ -184,6 +184,7 @@ Notes on the edges:
 | `401` + `oauth_problem="unable_to_determine_oauth_type"` | we sent no/garbled credentials — a bug | `INTERNAL`, log |
 | `get_token` `401 {"error":"invalid_grant"}` | refresh token dead | `NOT_AUTHENTICATED` |
 | `999` / `429` / `5xx` / reset / non-XML body | throttled or down | backoff (plan 01 §6) |
+| `fetch` throws (`ENOTFOUND`, `ECONNREFUSED`, `EAI_AGAIN`, offline `TypeError`) — on a Yahoo call **or** a dataset refresh *(added round 1, OBJ-22)* | network unreachable | `UPSTREAM_UNAVAILABLE`: serve stale within the hard limit with a warning, else `STALE_ONLY`; a refresh job writes `refresh_log.ok=0, error: "network"` and keeps the previous load — never `INTERNAL` |
 | `400` on a write | validation by Yahoo | `VALIDATION` with our own message; body to log only; body shape is [U] (03 §B.6) |
 
 ### 3.3 Token store specification
@@ -217,7 +218,7 @@ Notes on the edges:
 
 Every write is two tools plus a human step:
 
-1. **`ff_prepare_<kind>`** (`readOnlyHint: true` — it writes only our journal) computes the intended change from the *current* state, produces a **human-readable diff** and a **structured diff**, records a `PreparedWrite` in `write_journal` with status `prepared`, and returns the diff plus `prepared_id`. It **never** touches Yahoo's write endpoints.
+1. **`ff_prepare_<kind>`** (local-write annotations — `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false`: it writes our journal, mints the gate key on first use and may fire a notification, so it is not read-only in the spec's sense; plan 01 §4.1, *round 1 OBJ-19 / T8*) computes the intended change from the *current* state, produces a **human-readable diff** and a **structured diff**, records a `PreparedWrite` in `write_journal` with status `prepared`, and returns the diff plus `prepared_id`. It **never** touches Yahoo's write endpoints.
 2. **A human confirmation** through one of three channels (§4.2).
 3. **`ff_commit_<kind>`** (`destructiveHint: true`, `idempotentHint: true`) verifies the ticket, **re-fetches the affected state and recomputes the precondition hash** (compare-and-set), performs exactly one write, journals the outcome, and returns a receipt. A repeated commit with the same `prepared_id` returns the original receipt without writing.
 
