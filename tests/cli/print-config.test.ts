@@ -165,6 +165,29 @@ describe("ff print-config --client code", () => {
 });
 
 describe("launchEnv", () => {
+  it("copies FF_CONFIG_DIR, FF_LEAGUE_FILE, FF_FIXTURE_DIR and FF_WEATHER_SOURCE from the env, resolved", () => {
+    const s = sandbox();
+    sb = s;
+    const config = loadConfig({
+      env: {
+        FF_CONFIG_DIR: `${s.configDir}/`,
+        FF_LEAGUE_FILE: "~/league.yaml",
+        FF_FIXTURE_DIR: "~/fx",
+        FF_WEATHER_SOURCE: "off",
+      },
+      file: undefined,
+      home: s.home,
+      repoRoot: ROOT,
+    });
+    expect(launchEnv(config)).toEqual({
+      FF_CONFIG_DIR: s.configDir,
+      FF_LEAGUE_FILE: `${s.home}/league.yaml`,
+      FF_FIXTURE_DIR: `${s.home}/fx`,
+      FF_WEATHER_SOURCE: "off",
+      FF_LOG_LEVEL: "info",
+    });
+  });
+
   it("copies only env-origin non-secret keys, resolved; FF_LOG_LEVEL always", () => {
     sb = sandbox();
     const config = loadConfig({

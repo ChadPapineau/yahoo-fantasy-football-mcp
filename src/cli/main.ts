@@ -4,6 +4,7 @@
 // every other subcommand prints human output to stdout and JSON log lines to stderr. src/cli.ts is
 // only the process entry around `main`.
 import { parseArgs, type ParseArgsConfig } from "node:util";
+import { resolveAbsolute } from "../config/paths.js";
 import { ConfigError } from "../config/schema.js";
 import { VERSION } from "../version.js";
 import { backup, prune } from "./maintenance.js";
@@ -139,6 +140,16 @@ const str = (p: Parsed, k: string): string | undefined => {
 };
 const flag = (p: Parsed, k: string): boolean => p.values[k] === true;
 
+/** An optional path flag: absolute (or `~/…`) only — a relative path would depend on the cwd. */
+function absOption(io: CliIo, v: string | undefined, name: string): string | undefined {
+  if (v === undefined) return undefined;
+  try {
+    return resolveAbsolute(v, io.home, name);
+  } catch {
+    throw new UsageError(`${name} must be an absolute path (or start with ~/)`);
+  }
+}
+
 /** The `serve` handler's contract (src/cli/serve.ts, owned by the MCP engineer). */
 export type ServeFn = (opts: {
   argv: readonly string[];
@@ -213,8 +224,8 @@ export async function main(
           online: flag(p, "online"),
           fix: flag(p, "fix"),
           yes: flag(p, "yes"),
-          clientConfig: str(p, "client-config"),
-          clientLog: str(p, "client-log"),
+          clientConfig: absOption(io, str(p, "client-config"), "--client-config"),
+          clientLog: absOption(io, str(p, "client-log"), "--client-log"),
         });
       default:
         break;
