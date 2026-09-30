@@ -393,6 +393,8 @@ One per user-invocable Skill in plan 09 — **12** *(revised round 1: `live` is 
 
 ### 5.1 Worst-case sizes (serialised chars at `compact`; the halving point is the budget)
 
+Measured on the fixture league — 12 teams, the plan 05 §3.1 recordings (or the fixture YAML in 1a) with the ≤ 300 KB nflverse excerpts of plan 05 §3.2 attached — by `tests/mcp/size.test.ts` (plan 05 T10's data-size rule, round 2).
+
 | Tool | typical | worst (budget) | paginated? | summarised server-side |
 |---|---|---|---|---|
 | `ff_list_players`, `ff_list_transactions`, `ff_list_recommendations` | 5 000 | 20 000 | yes (`limit`/`offset`; transactions `count`) | ownership/next-game joined; transactions merged with history |
