@@ -280,6 +280,14 @@ describe("joining a call to what happened", () => {
       scoreCall(stream!, points, roster, { my_points: 90, opponent_points: 90 }).call.decisive,
     ).toBe(true);
     expect(scoreCall(stream!, points, roster, null).call.decisive).toBeNull();
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(
+        scoreCall(stream!, points, roster, { my_points: bad, opponent_points: 90 }).call.decisive,
+      ).toBeNull();
+      expect(
+        scoreCall(stream!, points, roster, { my_points: 90, opponent_points: bad }).call.decisive,
+      ).toBeNull();
+    }
     expect(
       scoreCall(stream!, points, roster, { my_points: 80, opponent_points: 90 }).call.decisive,
     ).toBe(false);
@@ -473,11 +481,13 @@ describe("retroRec", () => {
         freshness: "fresh",
       },
       { source: "nflverse:schedules", as_of: "2026-10-06T06:00:00Z", age_s: 1, freshness: "stale" },
+      { source: "manual", as_of: "not a time", age_s: 1, freshness: "stale" },
     ];
     const r = retroRec([call(null)], swap, inputs, fixedClock(NOW));
     expect(r.distribution).toMatchObject({ mean: 0, p10: 0, p90: 0, p_zero: 0 });
     expect(r.as_of).toBe("2026-10-06T09:00:00+02:00");
-    expect(r.confidence.inputs).toHaveLength(3);
+    expect(r.confidence.inputs).toHaveLength(4);
+    expect(retroRec([], swap, [inputs[3]!], fixedClock(NOW)).as_of).toBe(NOW);
     const many = Array.from({ length: 30 }, () => inputs[0]!);
     expect(retroRec([], swap, many, fixedClock(NOW)).confidence.inputs).toHaveLength(25);
   });
