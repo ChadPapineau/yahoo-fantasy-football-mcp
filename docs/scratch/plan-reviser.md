@@ -19,7 +19,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 | 4 | OBJ-08 + OBJ-21 / plans 07, 10 (+01, 03, 05, 09) (`FF_TOOLSET`, outputSchema, E15/E10/G2, ledger, Skill desc ≤350) | [x] | 1403118 |
 | 5 | OBJ-09 / plans 01, 03, 04, 06 (Node >= 24.15, RC cite, CI matrix, fnm) | [x] | b5c8968 |
 | 6 | OBJ-14 / plans 02, 04 (+05, 10 A18) (fast-xml-parser flags, allow-list tree, pin-time rule) | [x] | 1cc2dfc |
-| 7 | OBJ-06/07/15 / plans 01, 02, 07 (untrusted_fields labelling, wrappers, structuredContent, rec-log source) | [ ] | — |
+| 7 | OBJ-06/07/15 / plans 01, 02, 07 (+05, 09, 10) (untrusted_fields labelling, wrappers, structuredContent, rec-log source) | [x] | 0b4489a |
 | 8 | OBJ-04/05 / plans 07, 10 (Dist.basis, A7, mean default, delta_pwin, E13, n≥30 table, params → Phase 3) | [ ] | — |
 | 9 | OBJ-10/11/16/17/19/22/23 / plans 01, 02, 03, 05, 07, 08 | [ ] | — |
 | 10 | OBJ-12 / docs.yml + plan 04 §4.2 + plan 10 Z3 — PROVE GREEN | [ ] | — |
@@ -35,6 +35,9 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 (none yet)
 
 ### Choices I had to make
+- G7: `meta.untrusted_fields[]` entries become `{ path, source }` objects (were bare path strings) — the minimum that lets the OBJ-15 ruling ('listed … with `source: "store.recommendation_log"`') be true. The defence scoped bare strings to *player names* only; dataset text (nflverse `desc`, depth-chart labels, Sleeper notes) stays wrapped.
+- G7: plan 02 §6.3's verbatim sentence gained 'and the fields listed in `meta.untrusted_fields`' + 'player names, earlier recommendations' so it covers the path-listed classes; plan 09 carries the same wording.
+- G7: the wrappers-on/off eval switch is described as 'a fixture-mode-only switch' (no env-var name invented); `ff_debug_echo` is named G3 in plan 07 §3.G and never appears in the production expected-tools lists.
 - G4: per-turn fixed-cost ceilings (defence said 'with a ceiling', no number): `core` ≤ 40 000 chars, `full` ≤ 70 000, Skills listing ≤ 4 500 — [A-4]/[A-6], calibrated on first measurement.
 - G4: the C10 list-tool set that drops `outputSchema` = the five §5.1 rows with a 12 000–20 000 worst case (`ff_list_players`, `ff_list_transactions`, `ff_list_recommendations`, `ff_get_player_usage`, `ff_get_news`).
 - G4: Skill description cap applied as a rule (≤ 350; the §3 trigger paragraphs are content, trimmed at authoring time with phrases moving to `when_to_use`) rather than rewriting 12 descriptions now.
