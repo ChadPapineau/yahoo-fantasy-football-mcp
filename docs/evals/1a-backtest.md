@@ -76,6 +76,14 @@ Spearman ρ between a ranking and realised league points, over the subjects that
 week's points, and baseline (b) the implied total (DEF: facing the lowest opponent implied total;
 K: the highest own implied total).
 
+**Universe: backtest vs the served tool.** The served `ff_analyze_waivers` ranks the 32 defences plus
+every kicker on nflverse's `roster_weekly` for the season (`kdefUniverse` in
+`src/mcp/tools/analytics.ts`). With the full upstream file that is every rostered kicker — the same
+population as this backtest's "32 kickers who recorded a 2026 line", up to kickers cut or signed
+mid-season. The committed `roster_weekly` **excerpt** holds only the fixture league's players, so in
+fixture mode the served tool returns **3** K candidates (A8's hard "≥ 3" with no margin), while the
+numbers below describe the 32-kicker universe. The DEF rows are the same universe in both.
+
 <!-- generated:kdef:begin -->
 | position | week | n (played) | candidates | implied_total populated | ρ model | ρ last week's points | ρ implied total |
 |---|---|---|---|---|---|---|---|
@@ -107,7 +115,12 @@ Measured by `tests/domain/analytics/perf.test.ts` on the fixture data (warm, thi
 
 | call | size | measured | budget |
 |---|---|---|---|
-| `projectPlayers` (E1) | 32 subjects (28 players + 4 DEF) × 1 week × `n_sims` 4000 = 128,000 scored lines | ≈ 1.1 s | < 3 s (asserted) |
-| `analyzeKdef` (E5) | 64 subjects, look-ahead 2: pass 1 at 150 samples, pass 2 (12 per position + mine) at 400 + 2 × 150 | ≈ 0.22 s | < 0.5 s (A15 P0) |
+| `projectPlayers` (E1) | 32 subjects (28 players + 4 DEF) × 1 week × `n_sims` 4000 = 128,000 scored lines | ≈ 0.5 s (≈ 1.1 s before the Stage B round 2 fix) | < 3 s (asserted) |
+| `analyzeKdef` (E5) | 64 subjects, look-ahead 2: pass 1 at 150 samples, pass 2 (12 per position + mine) at 400 + 2 × 150 | ≈ 0.14 s | < 0.5 s (A15 P0) |
+
+Over real stdio on the built server (`tests/process/latency.test.ts`, this Mac, 2026-09-30),
+`ff_project_players` for Team A's whole roster (16 players) at `n_sims` 4000 answers in a ≈ 0.29 s
+median — inside A15's literal "every P0 tool < 500 ms" (it took ≈ 0.73–0.83 s before: 43 % of the
+call was storing 4,000 JSON sample lines per player-week; see HANDOFF "Log").
 
 The scoring engine costs about 7.5 µs per sampled line, which is what sets both numbers.

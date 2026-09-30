@@ -138,6 +138,9 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 2026-09-30 | **Secret defences in depth**: gitleaks CI + GitHub push protection (existing), plus a local zero-dependency scanner (`scripts/dev/scan-secrets.mjs`) run by `.githooks/pre-commit` and by `scripts/dev/commit-paths.sh`; a local-only identifier deny-list at `~/.config/fantasy-football-mcp-dev/scan-denylist.txt` (never in the repo) | Chad's "absolutely rigorous" security requirement |
 | 2026-09-30 | **Build branch `build/phase-1a`**; merged to `main` only when the full gate (lint, typecheck, tests + coverage, build, process, smoke, supply-chain, pack, docs, secrets) is green and the QA/pentest loop is dry. Node 24.21 via fnm (`.nvmrc` = 24); global default untouched | plan 04 §5; OBJ-09 |
 | 2026-09-30 | **No development or testing until Chad has reviewed the completed research + planning package** (refined plan, adversarial log + changelog, README/docs, executive summary) and approves | Chad's explicit instruction; the orchestrator reports completion and stops |
+| 2026-09-30 | **Projection storage (Stage B fixer round 2):** samples stored in a compact column form (header + little-endian Float64 matrix, base64; exact; JSON fallback; legacy rows still read) and only a `SIMS.stored` = 1,000-sample prefix of each run's iid draws (plan 08 §5 says `StatLine[n_sims]`) | the only reader (E13) scores ≤ 500; full JSON storage was 43 % of an E1 call and ~25 MB per roster call into a never-pruned table (A15) |
+| 2026-09-30 | **E12 checks `week` against its `source_calls`** (Stage B fixer round 2): a per-server ledger of the last 1,024 successful calls (request_id → tool, week); a cited call answered by another tool or about another week is `VALIDATION`; an id this session never answered is warned, not refused | the gate logged a week-3 lineup rec as week 4 and E13 would have scored it against the wrong week; plan 07 E12 is silent |
+| 2026-09-30 | **Fixture mode's default seasons come from the fixture manifest** (`default_seasons`), not the clock | a bare `ff refresh all` in fixture mode asked for 2025 stats the excerpts do not hold and exited 1 |
 | 2026-09-30 | **Read-only is acceptable as the product** (Chad): thorough reads of free agents, roster, adds/drops, league activity, stats + intelligent move recommendations are sufficient. Write access is a bonus if Yahoo ever grants it, not a requirement | Yahoo's "write access is not available at this time"; the plan's Phase 1–3 are read-only by design, Phase W stays conditional and low priority |
 
 ## Stack facts checked by the orchestrator (2026-09-29)
@@ -260,13 +263,23 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
    budgets halve)? Run the server in fixture mode in each client, call `ff_debug_echo`, ask the
    model whether it can see the nonce; record each answer under "Stack facts" here. Plan 07 §5.1
    is then re-based on measured tokens per client (its measured chars are already recorded there).
-10. **A15 reading to confirm.** Plan 10 says "every P0 tool < 500 ms". `ff_project_players` for
-    the 16-player fixture roster at the default 4000 sims takes ~830 ms warm (gate measurement); the tests hold it to a
-    pro-rata share of the separate "32 players × 4000 < 3 s" clause (measured 1.4–1.5 s). Literally
-    read, A15 fails for that one tool; under the implementers' reading it passes. Options: accept
-    the reading (amend A15's wording), or default `n_sims` lower for a single-roster call.
+10. ~~**A15 reading to confirm.**~~ **Resolved 2026-09-30 (Stage B fixer round 2) — no decision
+    needed.** `ff_project_players` for the whole 16-player roster at the default 4000 sims now
+    answers in a ≈ 293 ms median over real stdio (was 729–830 ms), so A15 is met as literally
+    written; the latency test holds it to 500 ms (the pro-rata allowance is gone). 32 × 4000:
+    693 ms. Root cause and fix in the Log below; `n_sims` defaults are unchanged.
 11. `tools/list` under `core` is 19,483 of its 20,000-char, downward-only ceiling (2.6 % headroom):
     the next tool added to `core` must shrink a schema or go to `full`.
+12. **E5 under the manual league ignores what `league.yaml` does know (product call).** Plan 07 E5
+    (round 2) says every K/DEF candidate carries `availability: "unknown"` under
+    `ManualLeagueProvider`, and the tool does exactly that — so a kicker `league.yaml` lists on
+    another team's roster (fixture: Brandon Aubrey, Team B) is still offered as a streaming
+    candidate, and one listed under `waivers` shows `unknown`, not `W`. Option: mark players the
+    YAML rosters as `T` (and drop them from streaming), YAML `waivers` as `W`, everyone else
+    `unknown` — a change to plan 07 E5's text, so it waits for you. The warning stays either way.
+13. **Stored projections keep a 1,000-sample prefix, not all `n_sims` (deviation from plan 08 §5
+    wording, recorded as a decision).** Only the retrospective reads them, and it scores at most
+    500; storing all 4,000 wrote ~25 MB per roster call into a never-pruned table.
 
 ## Open items
 
@@ -311,3 +324,15 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   reaches the CI job summary and plan 07 §5.1; `ff refresh` prints its schema warnings.
   `test:coverage` + `check:coverage` green 3/3 in sequence locally at load ≤ 38. A17's manual
   half and the A15 reading are Chad's (items 9–10 above).
+- 2026-09-30 — **Stage B fixer round 2** (gate RED on A15 literal; A17 manual). **A15 met as
+  written** (`bb345d7`): profiling the served E1 call showed 43 % of it storing samples
+  (`JSON.stringify` of 4,000 full `StatLine`s per player-week, ~1.6 MB each) and most of the rest
+  in `scoreSamples` building per-sample contributions and a string round trip per term in
+  `denoise`. Fixed: compact exact sample storage + a 1,000-sample stored prefix; the sample path
+  skips contributions/ignored; `denoise` has a string-free fast path proved (and fast-check-tested
+  over every bit pattern and the ulp neighbours of decimal ties) equal to
+  `Number(x.toPrecision(15))`. Roster call 729–830 → ≈ 293 ms; 32 × 4000 1.3–1.4 s → 693 ms;
+  the latency test now holds E1 to the literal 500 ms. Also fixed: bare `ff refresh all` in fixture
+  mode (`b42f2e6`), E12's unchecked week (`06372c7`); `docs/evals/1a-backtest.md` now says the
+  served K universe (roster_weekly kickers: 3 on the fixture excerpt) differs from the backtest's
+  32. A17's manual half stays with Chad (item 9); item 12 (E5 availability) is a product call.
