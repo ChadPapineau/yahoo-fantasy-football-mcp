@@ -220,7 +220,7 @@ sequenceDiagram
 
     C->>S: ff_prepare_lineup(team, week, moves)
     S->>Y: GET roster week=N (cache-first)
-    S->>S: diff = plan(moves, roster); pre = hash(roster slots + is_editable)
+    S->>S: diff = plan(moves, roster), pre = hash(roster slots + is_editable)
     S->>J: insert PreparedWrite(id, diff, pre, expires_at = now + 10 min, status = prepared)
     S-->>C: { prepared_id, diff (human + structured), expires_at, how_to_confirm }
     Note over C,S: Human channel (one of three, §4.2) produces confirmation evidence
@@ -234,10 +234,10 @@ sequenceDiagram
         S->>J: status = applied, receipt
         S-->>C: receipt { applied: true, diff, yahoo_status: 200 }
     else 401/403
-        S->>J: status = rejected_not_provisioned; unregister write tools
+        S->>J: status = rejected_not_provisioned, unregister write tools
         S-->>C: WRITE_NOT_AVAILABLE
     else timeout / 999 / reset
-        S->>J: status = sent_unknown (reconcile later; never auto-retry)
+        S->>J: status = sent_unknown (reconcile later, never auto-retry)
         S-->>C: { applied: "unknown", hint: "ff status shows reconciliation" }
     end
 ```
