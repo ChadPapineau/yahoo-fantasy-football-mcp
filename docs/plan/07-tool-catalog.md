@@ -369,7 +369,7 @@ Templates use RFC 6570 with argument completion over known `log_id`s and weeks. 
 
 ### 4.2 Prompts (`ff.<workflow>`, user-invoked; string arguments; bodies generated from `SKILL.md`)
 
-One per user-invocable Skill in plan 09: `ff.onboard`, `ff.weekly [week]`, `ff.start_sit [week]`, `ff.stream <K|DEF>`, `ff.retro [week]`, `ff.apply <what>` (P0); `ff.waivers`, `ff.trade <offer>`, `ff.injury <player>`, `ff.schedule`, `ff.roster_audit`, `ff.check <claim>`, `ff.live` (P1). Each `prompts/get` returns: the Skill body as the user message, the embedded `ff://league/settings` resource, and the plan 02 §6.3 untrusted-text sentence (plan 01 §4.1 requires prompts to state it). Prompts hold no logic and never call tools (06 §A.3). D/W/A/C: generated, not authored · one source cannot drift · hand-written prompt bodies · Skills-over-MCP (06 U-5).
+One per user-invocable Skill in plan 09 — **12** *(revised round 1: `live` is a branch of `start-sit`, OBJ-18)*: `ff.onboard`, `ff.weekly [week]`, `ff.start_sit [week]`, `ff.stream <K|DEF>`, `ff.retro [week]`, `ff.apply <what>` (P0); `ff.waivers`, `ff.trade <offer>`, `ff.injury <player>`, `ff.schedule`, `ff.roster_audit`, `ff.check <claim>` (P1). Each `prompts/get` returns: the Skill body as the user message, the embedded `ff://league/settings` resource, and the plan 02 §6.3 untrusted-text sentence (plan 01 §4.1 requires prompts to state it). Prompts hold no logic and never call tools (06 §A.3). D/W/A/C: generated, not authored · one source cannot drift · hand-written prompt bodies · Skills-over-MCP (06 U-5).
 
 ---
 
@@ -401,8 +401,8 @@ Claude Code warns at 10 000 tokens and truncates at 25 000 by default (06 §A.1)
 |---|---|---|
 | `ff_get_status` | once per session; again only after an error mentions auth/provisioning | plan 01 §7 |
 | `ff_get_league` / `ff://league/settings` | once per session (TTL 24 h; `settings_hash` unchanged ⇒ nothing changed) | plan 01 §5.2 |
-| `ff_get_roster` | once per hour per team; again after any `ff_commit_*`, after a `PRECONDITION_CHANGED`, or in the `live` Skill (60 s class) | plan 01 §5.2 rosters 60 s TTL is the *server's* cache; the model's rule is coarser |
-| `ff_get_scoreboard` | once per hour pre-week; every call in `live` (the server's 60 s cache absorbs stampedes) | plan 01 §5.3 coalescing |
+| `ff_get_roster` | once per hour per team; again after any `ff_commit_*`, after a `PRECONDITION_CHANGED`, or in `start-sit`'s game-day branch (60 s class; plan 09 §3.3) | plan 01 §5.2 rosters 60 s TTL is the *server's* cache; the model's rule is coarser |
+| `ff_get_scoreboard` | once per hour pre-week; every call in `start-sit`'s game-day branch (the server's 60 s cache absorbs stampedes) | plan 01 §5.3 coalescing |
 | `ff_project_players` | once per (player set, horizon, week) per session; results are deterministic for a `seed` and a `settings_hash` | 05 §19.1 |
 | `ff_get_schedule`, `ff_get_injuries` | once per session unless `meta.freshness` was `stale` | plan 01 §5.4 |
 | `ff_analyze_*` | re-run only when an input changed (a new roster, a new injury) — the result's `data.inputs[]` says which inputs it used and how old they were | plan 01 §5.4 stale-data rule |
