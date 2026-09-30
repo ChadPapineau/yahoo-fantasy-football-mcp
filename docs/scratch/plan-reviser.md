@@ -48,7 +48,7 @@ Spec: `docs/plan/adversarial-log.md` § "Round 2 — defence" (§D.0 verified fa
 | OBJ-30 | plan 04 §2 pin-time rule verbatim addition: "…and the pinned line has had a release in the last 6 months or is the maintainer's declared LTS; otherwise pin the current line and accept its tree, recording the count." | [x] | 9e265fe |
 | R2-D2 | plan 05 §0 rule: every latency/size bound names the fixture/dataset size it is measured on and the test that measures it; the post-OBJ-24/25 re-audit of plan 02 | [x] | 2a03b87 (item 1), c61a284 (item 3) |
 | R2-L | changelog: fix round-1 summary counts (18 concede + 4 concede-modified + 1 justified); add `## Round 2` | [x] | f7906db |
-| R2-C | consistency sweep + final docs/secrets proof after the last push | [ ] | — |
+| R2-C | consistency sweep + final docs/secrets proof after the last push | [~] | sweep clean after this commit; proof pending |
 | R2-F | reply: SHAs per ruling, run URLs, objection → file § table, forced choices | [ ] | — |
 
 ### Round 2 — could not apply
