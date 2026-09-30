@@ -183,7 +183,9 @@ Phase 1 is one product — `v0.1.0` is tagged when **both** halves are green —
 
 **Trigger.** Yahoo grants read/write for the client id (HANDOFF item 4; 03 §F.18). Until then nothing in this phase is scheduled; the seam is designed (plan 02 §4) and `FF_WRITE_ENABLED` is documented as inert.
 
-**Scope.** `fspt-w` in `ff auth`; plan 02 §4 gate (`PreparedWrite`, ticket, precondition hash, three channels, journal states); plan 07 §3.F tools; `journal reconcile` job (plan 06 §1.3); `apply` write mode (plan 09 §3.6); Desktop and Code elicitation smoke; `fixtures/yahoo/writes/` recorded from the **first real writes** (plan 05 §3.1 has no write fixtures today — they can only be recorded once writes exist).
+**Prerequisites (before `FF_WRITE_ENABLED=1` is supported anywhere)** *(added round 1, OBJ-01)*: (a) the refresh token moves to the Keychain `SecretSource` (plan 01 §11; plan 02 §3.3) with an access prompt; (b) the README states that writes are **unsupported in a Claude Code session with unrestricted `Bash`** and prints the offered `permissions.deny` set (plan 02 §3.4); (c) `ff doctor` #13's Claude Code warning is in place (plan 03 §5).
+
+**Scope.** `fspt-w` in `ff auth`; plan 02 §4 gate (`PreparedWrite`, ticket, precondition hash, three channels — channel 2 without a pending file, channel 3 TTY-only; journal states); plan 07 §3.F tools; `journal reconcile` job (plan 06 §1.3); `apply` write mode (plan 09 §3.6); Desktop and Code elicitation smoke; `fixtures/yahoo/writes/` recorded from the **first real writes** (plan 05 §3.1 has no write fixtures today — they can only be recorded once writes exist).
 
 **Acceptance.**
 - W1 Plan 05 §4.3 gate tests green: accept → one write; decline → zero; cancel-within-2 s → OOB path; wrong code ×3 → voided; tampered/expired ticket rejected; replay → original receipt; precondition change → `PRECONDITION_CHANGED`, zero writes; legacy-era client path; the property "upstream writes ≤ distinct `prepared_id`s with valid evidence".
@@ -195,8 +197,9 @@ Phase 1 is one product — `v0.1.0` is tagged when **both** halves are green —
 - W7 Skills Lane 2 AP-1 and AP-3 pass; every non-`apply` Skill still has zero `ff_commit_*` calls under the injection cases (NC-1, AP-4, SS-4).
 - W8 03 §F items 5, 11, 12 (read-only app's response to PUT/POST, roster PUT partial vs full, the FAAB drop-key typo) are closed with fixtures and their `todo` tests un-skipped.
 - W9 `ff_get_status.capabilities.write` reflects the observed state after the first write; `ff doctor` #13 message updated.
+- W10 *(added round 1, OBJ-01)* Plan 05 §4.3's round-1 rows green: no file written under `<config>/` during channel 2 (`fs` spy); `ff confirm`/`ff auth` on a pipe → exit 2, zero writes; `doctor` #13 warns under `CLAUDECODE=1` + `FF_WRITE_ENABLED=1`; the refresh token is read from the Keychain `SecretSource` and `tokens.json` no longer contains it (grep test).
 
-**Exit gate.** W1–W4, W7–W9 in CI; W5–W6 with evidence. Tag a minor.
+**Exit gate.** W1–W4, W7–W10 in CI; W5–W6 with evidence. Tag a minor.
 
 ### 3.5 Phase 4 — Later (M each; unordered until pulled)
 
