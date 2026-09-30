@@ -422,3 +422,270 @@ and "start by §1 mean" baselines across ≥ 2 seasons of replayed leagues (§12
 logging). "Working" = lower regret than the consensus baseline and `P(win)` calibrated within
 ±5 points across bins.
 
+---
+
+## 4. Waiver wire and FAAB
+
+### Inputs
+
+Weekly usage and its week-over-week deltas (snap share, route participation, target share,
+TPRR, air-yards share, carry share, red-zone/goal-line shares); depth-chart changes; injury
+news with expected duration (§6); the league's free-agent pool and each player's
+`percent_owned {value, delta}` (03 §B.4 — the crowd's attention, hence the competition);
+my roster and §2 baselines; league waiver settings (`uses_faab`, `waiver_type`,
+`waiver_rule`, `waiver_time`, per-team `faab_balance`, `waiver_priority` — 03 §B.2);
+this league's transaction history including `faab_bid` on completed claims (03 §B.2);
+schedule (byes, playoff weeks); acquisition limits if the league has them (03: tolerate
+absence).
+
+### Method
+
+**4.1 Detect opportunity before it shows in points.** Signals, ordered by lead time:
+
+1. **Injury / depth-chart change** on the player's team (immediate; §6 sizes it).
+2. **Snap share / route participation jump** — a rise of ≥ 15 points held for two straight
+   games is the community threshold for "the role changed" [S; F — heuristic, not evidenced;
+   tune it in evaluation]. Snap increases tend to precede production by 1–2 weeks [S].
+3. **Target share / TPRR jump** — target share is the stickiest receiving metric (r ≈ 0.70
+   YoY [V Sumer]); a rising share is the strongest single leading indicator.
+4. **Under-produced opportunity** — WOPR = 1.5 × target share + 0.7 × air-yards share
+   [V Hermsmeyer, via Action Network]; high WOPR with low points is the classic buy signal.
+   Generalise it: compute **expected fantasy points from usage** (`xFP`, §1 steps 3–5 and 9,
+   under this league's `S`) and the gap `xFP − actual`. Positive gap = opportunity that has
+   not paid yet (target); negative gap = TD- or efficiency-inflated production (avoid, or
+   sell).
+5. **Red-zone / goal-line share shifts** and **committee shifts in carry share**.
+
+Every signal is filtered by `P(role holds)`: a jump caused by a teammate's one-week absence
+is not a role change. Yahoo's `percent_owned.delta` is *not* a detection signal — by the
+time it moves, the crowd has moved — but it is the best available **competition** signal
+for 4.3.
+
+**4.2 Value a pickup in weeks of usable value on *my* roster, not by season rank.**
+```
+value(p) = Σ_{w ∈ horizon} P(role holds at w) × max(0, proj(p, w) − opportunity_cost(w))
+```
+where the horizon is the weeks that matter (ROS, weighted toward playoff weeks by
+`P(I reach w)`), and `opportunity_cost(w)` is what the slot would otherwise produce for me
+that week: the §3 assignment run with and without `p`, so a WR4 who never starts on my
+roster is worth only his bye-coverage weeks plus trade value, while the same WR4 is a
+starter for a WR-thin roster. This is the "roster fit" term, computed rather than felt.
+The marginal value is `value(p) − value(drop candidate)` (4.5).
+
+**4.3 FAAB bid sizing.** FAAB is a first-price sealed-bid auction, in which bidding one's full
+value is dominated and **shading** is rational [V Wikipedia FPSB]. Three quantities:
+
+- **Price of a point in this league** — regress historical winning `faab_bid`s (from the
+  transaction history) on the acquired player's then-current value (xFP, `percent_owned`
+  delta, position); this gives `$/point` and its spread. Cold start: a league-wide prior
+  from public leagues, then update.
+- **Competition** — for each rival: `P(rival bids)` from whether `p` improves *their*
+  lineup (run 4.2 on their roster), their remaining `faab_balance`, and their history;
+  their bid distribution from the price-of-a-point model plus shading. Combine into
+  `P(win | my bid b)`.
+- **The marginal value of a FAAB dollar**, `λ(t, budget)` — rising as budget shrinks and as
+  the remaining season shortens the chance of a better target, falling to ≈ 0 by the last
+  waiver run before the playoffs (unspent FAAB is worthless).
+
+Bid: `b* = argmax_b P(win | b) × (value(p) − λ × b)`, reported with the whole curve
+(`P(win)` at 25/50/75 %). Heuristics the community uses, which the model should reproduce
+rather than hard-code [F]: spend early on genuine role changes (more weeks of value); bid
+just above round numbers; keep a reserve only if the team is playoff-bound. The Yahoo
+`percent_owned.delta` and the number of teams for whom `p` is a lineup upgrade are the
+inputs the heuristics are proxies for.
+
+**4.4 Waiver priority instead of FAAB.** Priority is a one-shot resource. Rolling priority
+(you drop to last after a claim): claim if `value(p) ≥ E[best claimable value over the
+horizon you would otherwise hold priority] × P(you would win that future claim)`. Weekly
+reset by standings: the cost is a week, so claim more freely. Free agents after the
+waiver period clear first-come, so `waiver_time` and the clearing time are part of the
+recommendation. All of this is decision logic, not evidence [F].
+
+**4.5 Drop candidates.** Lowest `value_ROS` on my roster after roster fit, **excluding**
+handcuffs and stashes justified in §9, and excluding players whose `xFP − actual` is
+strongly positive (about to regress upward). Show the re-add risk: `percent_owned` and how
+many rivals would claim the dropped player.
+
+### Format sensitivity
+
+Full-PPR raises the value of receiving-role pickups and pass-down backs; standard raises
+goal-line backs. TE premium makes TE role changes claim-worthy. Superflex makes any starting
+QB change a top claim. 10-team: the FA pool is deeper, so the stream baseline is higher and
+fewer pickups clear it — and FAAB prices per point should be lower. Deep benches lower the
+drop cost, raising the value of speculative adds.
+
+### Pitfalls
+
+Chasing last week's points (a TD is one draw); valuing by season rank rather than roster
+fit; ignoring `P(role holds)` (the starter returns in two weeks); forgetting byes and
+playoff weeks in the horizon; bidding without modelling remaining budget (λ); treating
+`percent_owned.delta` as a signal to buy rather than a signal of competition; counting an
+injury both in the beneficiary's role and again as "upside"; dropping the player whose
+opportunity just rose because his points have not.
+
+### Output shape
+
+Ranked candidates: `{player, signal(s) fired, weeks_of_value, P(role_holds)[], marginal_value
+vs drop candidate, xFP_gap, competition {rivals for whom it is an upgrade, expected bids},
+bid {b*, P(win) curve, λ}, drop {who, re-add risk}, invalidators[]}` plus the common
+contract. In priority leagues: `claim | wait` with the option-value comparison shown.
+
+### Evaluation
+
+Detection backtest: for each week `t` and signal, precision/recall of "signal fires → player
+finishes top-24 (RB/WR) / top-12 (TE/QB) at position over `t+1..t+4`" versus a points-only
+detector (top scorer among FAs last week). FAAB: realised value per FAAB dollar; calibration
+of `P(win | b)` against actual claim outcomes (Brier); regret against the best FA available
+that week. Drops: the dropped player's subsequent value versus the added player's.
+"Working" = the usage detector beats the points detector on precision at equal recall in ≥ 2
+seasons, and `P(win | b)` is calibrated within ±10 points.
+
+---
+
+## 5. Trade evaluation
+
+### Inputs
+
+Both rosters (mine and the partner's; all rosters are readable — 03 §B.3), §1 ROS
+projections with distributions, §2 baselines for this league, schedule (byes, playoff
+weeks, games remaining), injury risk priors (expected games missed by position/age/injury
+history), the league's trade rules (`trade_end_date`, `trade_ratify_type`,
+`trade_reject_time` — 03 §B.2), standings (mine and theirs), the league's trade history.
+
+### Method
+
+**5.1 Value is the change in expected lineup points over the horizon, for each side.**
+```
+Δ_side = Σ_{w ∈ horizon} weight(w) × [ lineup_pts(roster_after, w) − lineup_pts(roster_before, w) ]
+weight(w) = P(side is alive at w) × importance(w)     // playoff weeks weighted higher
+```
+`lineup_pts` is the §3 assignment on the actual roster, so a WR3 arriving on a WR-rich
+roster adds little and the same WR3 on a WR-poor roster adds a lot. A trade is proposable
+when `Δ_me > 0` and **`Δ_partner > 0` under their roster** — positive-sum trades exist
+precisely because value is roster-contextual, which is the whole argument against static
+charts.
+
+**5.2 Roster spots are priced, not hand-waved.** In a 2-for-1 the side receiving two must
+drop a player; its `Δ` includes losing that player's value (≈ the stream baseline if the
+drop is marginal, more if not). Public charts apply a 5–20 % haircut to the multi-player
+side and disagree on the number [V FantasyPros chart; S others] — the method computes it
+from the actual drop.
+
+**5.3 Schedule terms.** Byes: two acquired players sharing a bye with my starters cost a
+week each; playoff weeks: use §7's (weak) matchup signal only as a tie-breaker; games
+remaining after the trade deadline.
+
+**5.4 Injury risk.** `proj(p, w) × P(active, w)` with `P(active)` from a simple
+position/age/injury-history prior (RBs carry more risk than WRs; no strong published
+per-player model is assumed). Reported separately so the user can see how much of `Δ` is
+"health-adjusted".
+
+**5.5 Uncertainty and risk appetite.** Simulate `Δ` (both sides). A team that is 1–3 should
+prefer a positive-mean, high-variance trade; a 4–0 team the reverse — the §3.2 logic
+applied to the season (standings → `P(playoffs)` as the objective, §11).
+
+**5.6 Why static trade charts fail** — stated so the product never falls back to them: one
+number per player; a format baked in (usually PPR); no roster context; no roster-spot
+cost; no schedule; a "public sentiment" component that is not value in *this* league; and
+additive arithmetic on 2-for-1s [V FantasyPros describes charts as ROS value plus public
+sentiment, 1-for-1 oriented].
+
+**5.7 Negotiation framing.** Compute the partner's weakest starting slot (largest gap to the
+§2 starter baseline) and propose the package that maximises `Δ_me` subject to `Δ_partner ≥
+ε`; show the partner's `Δ` in *their* terms. Offers with `Δ_partner < 0` are not proposed
+[F — the acceptance model in Evaluation will test whether `Δ_partner` predicts acceptance].
+
+### Format sensitivity
+
+Entirely via §1/§2: superflex makes QBs the currency; TE premium makes elite TEs trade
+targets; full-PPR shifts RB-for-WR balances. The only trade-specific format term is the
+roster-spot price, which depends on bench size and IR slots.
+
+### Pitfalls
+
+Consensus charts; season totals as ROS; ignoring byes/playoffs/deadline; ignoring the drop
+implied by uneven trades; ignoring the partner's roster (unacceptable offers); double
+counting a "best player" premium (it is already in `Δ` through lineup points); treating
+injury risk as a vibe instead of a multiplier; ignoring veto/ratification rules.
+
+### Output shape
+
+`{Δ_me, Δ_partner (each: mean, p10, p90), weekly_impact[], playoff_weeks_impact,
+implied_drop, health_adjustment, bye_conflicts, why_they_accept, counter_offers[]}` plus the
+common contract.
+
+### Evaluation
+
+Replay historical trades from this and other leagues (transactions expose trades, 03 §B.2):
+predicted `Δ` for each side versus realised lineup-point change over the rest of that
+season; rank correlation and sign accuracy; compare against a chart-based evaluator on the
+same trades. Acceptance model: whether `Δ_partner > 0` predicts acceptance of proposed
+trades. "Working" = sign accuracy above a chart evaluator and `Δ` intervals covering
+realised outcomes at nominal rates.
+
+---
+
+## 6. Injury-cascade analysis
+
+### Inputs
+
+Depth charts (kind), injury reports with expected duration (kind: injury database with
+return timelines), the team's own historical usage in games the starter missed (this and
+last season), league-wide redistribution priors by position built from play-by-play, the
+backups' recent snap/route/carry data, the market's reaction (implied total change).
+
+### Method
+
+**6.1 Beneficiaries by role affinity, not by depth-chart line.** Vacated opportunity is the
+community method [S ESPN, Yahoo "vacated targets"]: sum the injured player's targets,
+air yards, carries and red-zone touches, then redistribute by **role similarity**: the
+outside WR's targets go mostly to the other outside receivers and the TE, not the slot; a
+RB1's carries go to the RB2 but his targets go to the pass-down back. Represent each player
+as a usage vector (alignment share, depth of target, formation) and allocate vacated volume
+proportionally to similarity × availability.
+
+**6.2 Historical redistribution.** Prefer the team's own evidence (games without the
+starter) when ≥ 2 games exist; otherwise a league-wide prior table by position pair,
+estimated from play-by-play history ("when a RB1 misses, the RB2's carry share rises by X
+and target share by Y, on average, with spread") — **no rigorous published redistribution
+study was found in this pass; the plan should build this table** rather than assume 1:1
+inheritance. Illustrative community evidence: DeVonta Smith's TPRR 20 % → 30 % without A.J.
+Brown [S ESPN]. Remember the offence usually gets worse without the star — total volume and
+the implied total fall — so the beneficiary's absolute gain is less than the vacated share
+suggests.
+
+**6.3 Timing.** `P(role holds at w)` = P(starter still out at w) from the injury-duration
+prior × P(no committee forms) — the latter from the team's history. After the starter
+returns, a backup who performed sometimes keeps a share [F]; represent as a small residual.
+
+**6.4 Confidence sizing.** Report: number of games of team-specific evidence; whether the
+beneficiary already shows the role (§4 signals fired); whether the market moved; the
+spread of the prior. A cascade with no team evidence, no usage confirmation and no market
+move is a hypothesis, and the recommendation must say so.
+
+### Format sensitivity
+
+Full-PPR elevates the pass-down back and slot receivers among beneficiaries; standard
+elevates the goal-line back; TE premium the TE; superflex a backup QB (whose value is
+otherwise near zero in 1-QB).
+
+### Pitfalls
+
+1:1 inheritance; ignoring the team's efficiency drop; ignoring committees; counting the
+injury twice (market already moved and the role already includes it); trusting the listed
+depth chart over snaps; assuming the timeline in the first report (durations are
+revised); ignoring that the returning starter's own projection needs a ramp.
+
+### Output shape
+
+`{injured, expected_weeks (p25/p50/p75), beneficiaries[]: {player, Δopportunity {targets,
+carries, rz}, Δproj by week, P(role), evidence: {team_games, usage_confirmed, market_move}},
+returning-starter ramp}` plus the common contract.
+
+### Evaluation
+
+For every starter absence of ≥ 2 games in history: predicted beneficiary opportunity shares
+versus realised over the next 1–4 weeks (MAE), hit rate of the top predicted beneficiary
+being the top realised, and calibration of `P(role holds)`. "Working" = MAE below the naive
+depth-chart-next-man-up rule and top-beneficiary hit rate above it.
+
