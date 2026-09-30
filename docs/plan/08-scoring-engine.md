@@ -110,7 +110,7 @@ export interface ScoreResult {
 }
 ```
 
-`score(line, settings): ScoreResult`, `scoreSamples(lines: StatLine[], settings): { dist: Dist; mean_of_exact: number; bonus_probability: Record<Canonical, number>; bracket_probability: Record<string, number[]> }`, `explain = score` with `contributions` rendered (it is the same call; named for the tools).
+`score(line, settings): ScoreResult`, `scoreSamples(lines: StatLine[], settings, basis: "position_cv" | "player_sim"): { dist: Dist; mean_of_exact: number; bonus_probability: Record<Canonical, number>; bracket_probability: Record<string, number[]> }`, `explain = score` with `contributions` rendered (it is the same call; named for the tools). `basis` is supplied by the caller — `position_cv` for v1's parametric samples drawn from a position CV table, `player_sim` for v2's simulated stat lines — and is copied onto `Dist.basis` unchanged so every interval downstream says where its width came from (plan 07 legend, round 1 OBJ-04).
 
 ---
 
