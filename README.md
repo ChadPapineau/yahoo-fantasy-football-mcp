@@ -712,7 +712,7 @@ Phase 1a is built on the `build/phase-1a` branch (the manual league: `<config>/l
 
 **Exit codes:** 0 ok · 1 failure · 2 usage or configuration · 5 `serve` forced shutdown.
 
-**Fixture mode:** with `FF_FIXTURE_DIR=<checkout>/fixtures`, `ff refresh` reads the committed fixtures through the production HTTP client's allow-list/size/redirect code (no socket is opened) and `serve` registers the fixture-only `ff_debug_echo`. For example, into a throwaway cache: `FF_FIXTURE_DIR=$PWD/fixtures FF_CACHE_DIR=<tmp> node dist/cli.js refresh nflverse:stats --seasons 2026` (the fixtures hold 2026 stats only).
+**Fixture mode:** with `FF_FIXTURE_DIR=<checkout>/fixtures`, `ff refresh` reads the committed fixtures through the production HTTP client's allow-list/size/redirect code (no socket is opened) and `serve` registers the fixture-only `ff_debug_echo`. Without `--seasons`, fixture mode requests the seasons the fixture tree records (`default_seasons` in `fixtures/nflverse/manifest.json`: 2025–2026 schedules, 2026 for the rest) instead of the clock-derived production defaults, so a bare `refresh all` publishes every source. For example, into a throwaway cache: `FF_FIXTURE_DIR=$PWD/fixtures FF_CACHE_DIR=<tmp> node dist/cli.js refresh all`.
 
 **Scheduled jobs** (`ff install-launchd`, local time; kickoffs are Eastern, so on a non-Eastern Mac they are approximate): `nflverse-schedules` every 30 min Thu/Sun/Mon and every 6 h otherwise · `nflverse-daily` 10:30 daily and 16:30 Wed–Sat · `nflverse-stats` 04:30 daily plus Sun 13:00/17:00/21:00 and 00:30 Fri/Mon/Tue · `weather` hourly at :05 Wed–Mon (dropped when `FF_WEATHER_SOURCE=off`) · `store-prune` Sun 03:00 · `store-backup` Sun 03:10.
 
