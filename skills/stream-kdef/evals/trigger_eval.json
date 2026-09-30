@@ -1,7 +1,7 @@
 [
   { "query": "Which defense should I stream?", "should_trigger": true },
   { "query": "Who's the best kicker to pick up?", "should_trigger": true },
-  { "query": "Should I hold the Steelers DST or stream one?", "should_trigger": true },
+  { "query": "Should I hold the Lions DST or stream one?", "should_trigger": true },
   { "query": "Which K should I use?", "should_trigger": true },
   { "query": "Is it worth streaming a defense against the Browns?", "should_trigger": true },
   { "query": "Rank the kickers for the next two weeks", "should_trigger": true },

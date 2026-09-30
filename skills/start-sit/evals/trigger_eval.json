@@ -3,7 +3,7 @@
   { "query": "X is inactive, who goes in?", "should_trigger": true },
   { "query": "what can I still change?", "should_trigger": true },
   { "query": "what are my odds right now?", "should_trigger": true },
-  { "query": "Should I start Ja'Marr Chase or Deebo Samuel Sr. at flex?", "should_trigger": true },
+  { "query": "Should I start Jaxon Smith-Njigba or Keenan Allen at flex?", "should_trigger": true },
   { "query": "Is my lineup right for this week?", "should_trigger": true },
   {
     "query": "Trey McBride is Questionable, do I play him or Hunter Henry?",

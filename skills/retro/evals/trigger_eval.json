@@ -3,7 +3,7 @@
   { "query": "Were you right about last week's lineup?", "should_trigger": true },
   { "query": "Review last week", "should_trigger": true },
   { "query": "Grade your picks from week 3", "should_trigger": true },
-  { "query": "Was I right to bench Deebo Samuel Sr.?", "should_trigger": true },
+  { "query": "Was I right to bench Keenan Allen?", "should_trigger": true },
   { "query": "Check the calibration of your recommendations", "should_trigger": true },
   {
     "query": "Recap my week: which calls were right for the right reasons?",
