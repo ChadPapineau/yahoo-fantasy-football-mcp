@@ -8,25 +8,21 @@ the repo. My inventory script (`inv.sh`) and OSV script (`osv.mjs`) live in
 
 ## RESUME HERE
 
-- **Done:** all 18 brief items + 4 additions audited (21 repos, 3 skipped by
-  name). `docs/research/01-repo-security-audit.md` written and pushed
-  (verdict table, per-repo findings by category, rejected list, dependency
-  counts, unverifiable list).
-- **Not done:** `docs/research/02-prior-art-lessons.md` (capability matrix +
-  mistakes to avoid; architecture only, no code).
-- **Next concrete step:** write 02 from the "passing" set (#2 asteiger,
-  #3 michaelfromorg [caution], #6 brettadams0, #9 spilchen mcp, #11 whatadewitt,
-  #12 yfpy [caution], #13 spilchen api, #14 yahoo-oauth [caution], #15b nflreadpy,
-  #16 nflreadr, #17 ffscrapr, #18 dtsong, #20 deepak-or1 [caution], #21 kwonye),
-  then commit + push and reply with SHAs.
-- **Gotcha:** `.gitignore:83` (`scratch/`) ignores `docs/scratch/`. This file
-  is force-added by explicit path (`git add -f docs/scratch/repo-security-auditor.md`).
-  `.gitignore` is off-limits to me — orchestrator should decide whether to
-  un-ignore `docs/scratch/` (its own `program.md` and `briefs/` are untracked).
-- **Gotcha:** brief item 11 `edwarddistel/yahoo-fantasy-sports-api` does not
-  exist; audited `whatadewitt/yahoo-fantasy-sports-api` (npm `yahoo-fantasy`).
-- **Gotcha:** macOS has no `timeout`; `npm audit` silently printed nothing
-  under it. Re-ran without.
+- **Status: COMPLETE (2026-09-29).** All three deliverables written and pushed:
+  `docs/research/01-repo-security-audit.md` (21 repos vetted, 3 skipped by name),
+  `docs/research/02-prior-art-lessons.md` (capability matrices, working patterns,
+  15 mistakes with symptoms, design implications), and this note.
+- **Not done / open for the orchestrator:** (a) `.gitignore:83` `scratch/`
+  ignores `docs/scratch/` — this file is force-added; `program.md` and `briefs/`
+  are still untracked. (b) Two repos (carterfawson, derekrbreese) have real
+  Yahoo/Reddit credentials in public git history — whether to notify the owners
+  is Chad's call, not an agent action. (c) The ~15 zero-star search hits were not
+  cloned (budget); revisit only if a specific one becomes relevant.
+- **If resumed for follow-up:** clones are in the session scratchpad
+  (`.../scratchpad/yff-research/vendor/`) and may be gone after a reboot;
+  re-clone with `git clone` (full for small repos, `--depth 1` for nflverse/
+  ffverse). `inv.sh` / `osv.mjs` in `.../scratchpad/yff-research/` are mine.
+- No `.wip.patch` was ever needed — every checkpoint was committed directly.
 
 ## Audit log (facts I would not want to re-derive)
 
