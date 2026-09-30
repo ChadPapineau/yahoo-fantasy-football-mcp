@@ -115,12 +115,43 @@ export function parseSeasons(spec: string): number[] {
   return [...out].sort((a, b) => a - b);
 }
 
+/** Most warning lines printed under one result; the rest are counted. */
+export const MAX_WARNING_LINES = 5;
+/** Longest warning line printed (a warning can list many upstream column names). */
+export const WARNING_LINE_MAX = 200;
+const UNPRINTABLE_RE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}]+/gu;
+
+/**
+ * The schema warnings behind a published result's "(n warnings)", one indented line each (gate
+ * round 1: the count alone was unexplained). The text names upstream columns, so it is made
+ * terminal-safe: control/format characters (ANSI escapes, bidi overrides) become a space, and each
+ * line is capped at WARNING_LINE_MAX UTF-16 units.
+ */
+export function describeWarnings(r: RefreshResult): string[] {
+  if (r.status !== "published") return [];
+  const out = r.warnings.slice(0, MAX_WARNING_LINES).map((w) => {
+    const clean = w.replace(UNPRINTABLE_RE, " ").trim();
+    // capped in UTF-16 units, never splitting a surrogate pair (the text has no lone ones left)
+    const capped =
+      clean.length > WARNING_LINE_MAX
+        ? `${clean.slice(0, WARNING_LINE_MAX - 1).replace(/[\uD800-\uDBFF]$/, "")}…`
+        : clean;
+    return `  warning: ${capped}`;
+  });
+  const more = r.warnings.length - MAX_WARNING_LINES;
+  if (more > 0) out.push(`  warning: … ${String(more)} more`);
+  return out;
+}
+
 /** One line per result for the terminal. */
 export function describeResult(r: RefreshResult): string {
   const id = r.source.padEnd(28);
   switch (r.status) {
-    case "published":
-      return `${id} published  version ${r.file_version}  ${String(r.stats.rows)} rows${r.warnings.length > 0 ? `  (${String(r.warnings.length)} warning(s))` : ""}`;
+    case "published": {
+      const n = r.warnings.length;
+      const w = n === 0 ? "" : `  (${String(n)} warning${n === 1 ? "" : "s"}, below)`;
+      return `${id} published  version ${r.file_version}  ${String(r.stats.rows)} rows${w}`;
+    }
     case "unchanged":
       return `${id} unchanged  version ${r.version.version}`;
     case "skipped":
@@ -248,7 +279,7 @@ export async function refresh(
         },
       );
       results.push(r);
-      lines.push(describeResult(r));
+      lines.push(describeResult(r), ...describeWarnings(r));
       if (signal.aborted) break;
     }
   } finally {
