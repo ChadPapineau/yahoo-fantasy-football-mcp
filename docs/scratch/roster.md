@@ -13,9 +13,10 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | data-source-evaluator | a3b161a00df32916a | 2 | 🟢 running | `docs/research/04-data-sources.md`, `docs/scratch/data-source-evaluator.md` | — | `docs/scratch/data-source-evaluator.md` §RESUME HERE |
 | fantasy-strategy-analyst | a370e42955935355b | 2 | 🟢 running | `docs/research/05-strategy-and-analytics.md`, `docs/scratch/fantasy-strategy-analyst.md` | — | `docs/scratch/fantasy-strategy-analyst.md` §RESUME HERE |
 | skills-mcp-researcher | — | 3 | ⚪ not started | `docs/research/06-skills-and-mcp-design.md`, `docs/scratch/skills-mcp-researcher.md` | — | brief: `docs/scratch/briefs/skills-mcp-researcher.md` |
-| architecture-planner | — | 4 | ⚪ not started | `docs/plan/*` | — | brief not yet written |
-| devils-advocate | — | 5 | ⚪ not started | `docs/plan/adversarial-log.md` | — | brief not yet written |
-| docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md` | — | brief not yet written |
+| architecture-planner-core | — | 3 | ⚪ not started | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | — | brief: `docs/scratch/briefs/architecture-planner-core.md` |
+| product-planner | — | 4 | ⚪ not started | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | — | brief: `docs/scratch/briefs/product-planner.md` |
+| devils-advocate | — | 5 | ⚪ not started | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | brief: `docs/scratch/briefs/devils-advocate.md` |
+| docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md`, `docs/scratch/docs-writer.md` | — | brief: `docs/scratch/briefs/docs-writer.md` |
 
 ## Cutoff procedure
 
