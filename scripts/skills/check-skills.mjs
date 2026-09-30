@@ -890,6 +890,15 @@ export function checkSkills(opts = {}) {
     }
   }
 
+  // plan 07 C13 / plan 02 §6.3: the cheat-sheet (also served as ff://docs/tool-outputs) is a carrier
+  const sheet = path.join(skillsRoot, "_shared", "references", "tool-outputs.md");
+  if (!existsSync(sheet)) errors.push("skills/_shared/references/tool-outputs.md: missing");
+  else if (rule && !readFileSync(sheet, "utf8").includes(rule)) {
+    errors.push(
+      "skills/_shared/references/tool-outputs.md: the untrusted-text rule is not in it verbatim",
+    );
+  }
+
   const listed = listSkillDirs(skillsRoot);
   errors.push(...listed.errors);
   if (manifest) {
