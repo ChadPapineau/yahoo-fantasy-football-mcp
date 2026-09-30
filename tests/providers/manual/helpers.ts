@@ -19,6 +19,7 @@ import {
   ManualLeagueProvider,
   type ManualLeagueProviderOptions,
 } from "../../../src/providers/manual/index.js";
+import { LeagueFileError, type League } from "../../../src/providers/platform.js";
 
 /** The repository root. */
 export const ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
@@ -94,4 +95,31 @@ export function provider(
 export function edit(from: string, to: string, text: string = FIXTURE_TEXT): string {
   if (!text.includes(from)) throw new Error(`fixture edit: ${from} not found`);
   return text.replace(from, to);
+}
+
+/** The fixture league's ref. */
+export const EXAMPLE_LEAGUE = Object.freeze({
+  platform: "manual" as const,
+  league_key: "manual.l.example",
+});
+
+/**
+ * Writes `text`, loads it through the provider and returns its issues as `path: reason` lines (fails
+ * when the file loads, or when `canary` appears anywhere in the error).
+ */
+export async function loadIssues(t: TempLeague, text: string, canary?: string): Promise<string> {
+  t.write(text);
+  const err = await provider(t.file)
+    .getLeague(EXAMPLE_LEAGUE)
+    .catch((e: unknown) => e);
+  if (!(err instanceof LeagueFileError)) throw new Error("expected a LeagueFileError");
+  if (canary !== undefined && JSON.stringify({ m: err.message, i: err.issues }).includes(canary))
+    throw new Error("the league-file error echoed a value from the file");
+  return err.issues.map((i) => `${i.path}: ${i.reason}`).join("\n");
+}
+
+/** Writes `text` and returns the loaded league (throws when the file is invalid). */
+export async function loadLeague(t: TempLeague, text: string): Promise<League> {
+  t.write(text);
+  return (await provider(t.file).getLeague(EXAMPLE_LEAGUE)).value;
 }
