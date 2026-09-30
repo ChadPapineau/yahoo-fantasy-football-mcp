@@ -16,8 +16,8 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | architecture-planner-core | a45fab2bbf0065893 | 3 | ✅ done (SHAs verified; SDK v2 2.2.0 = npm `latest` and `node:sqlite` on Node 22.23 checked live — the latter still prints ExperimentalWarning) | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | `c5ea355` | — |
 | product-planner | a47f1502e3ab64907 | 4 | ✅ done (SHAs verified; identifier scan clean; 13 tensions + 10 open decisions in plan 10 §4–§5) | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | `b830114` | — |
 | ci-bootstrap | afe971bb2e5796cc9 | 4 | ✅ done (orchestrator verified: `docs` + `secrets` green on `f3a0a48`; full-history scan green; 20 files tracked) | `.github/**`, `.gitleaks.toml`, `scripts/**`, `docs/scratch/ci-bootstrap.md` | `f3a0a48` | — |
-| devils-advocate | a2ed55e691cda6d2a | 5 | ⛔ round 1 delivered (`52337a3`, 23 objections); defence pushed (`f2abb64`); **waiting on `plan-reviser`** before round 2 | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | `dfde1b6` | resume the same ID via SendMessage once the round-1 revisions are on `main` |
-| plan-reviser | a4ae16bdc0e7b6482 | 5 | 🟢 running | `docs/plan/01-*`…`10-*`, `docs/plan/changelog.md`, `.github/workflows/docs.yml` (OBJ-12 only), `docs/scratch/plan-reviser.md` | — | `docs/scratch/plan-reviser.md` §RESUME HERE (checklist of 14 groups) |
+| devils-advocate | a2ed55e691cda6d2a | 5 | 🟢 running (round 2, resumed via SendMessage on `8c39191`) | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | `dfde1b6` | `docs/scratch/devils-advocate.md` §RESUME HERE; resume the same ID for round 3+ |
+| plan-reviser | a4ae16bdc0e7b6482 | 5 | ✅ done (orchestrator verified: 16 group SHAs on origin, CI green on `8c39191`, three spot-checks passed, identifiers clean) | `docs/plan/01-*`…`10-*`, `docs/plan/changelog.md`, `.github/workflows/docs.yml` (OBJ-12 only), `docs/scratch/plan-reviser.md` | `8c39191` | resume the same ID via SendMessage for round-2 revisions |
 | docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md`, `docs/scratch/docs-writer.md` | — | brief: `docs/scratch/briefs/docs-writer.md` |
 
 ## Cutoff procedure
@@ -88,3 +88,11 @@ only if the ID is gone.
 - 2026-09-30 — wave 5 (second slot) spawned: `plan-reviser` — applies the
   rulings across plan 01–10 + `docs.yml` (OBJ-12) and starts
   `docs/plan/changelog.md`. Advocate resumes for round 2 when it lands.
+- 2026-09-30 — `plan-reviser` ✅ (`59d0d99`…`8c39191`, 16 commits, one per
+  ruling group + consistency pass + changelog). Nothing it could not
+  apply; its forced choices are listed in its reply and scratch doc.
+  Orchestrator verified SHAs, CI (docs + secrets green on `8c39191`, incl.
+  the edited `docs.yml`), identifiers, and three spot-checks (1a/1b split
+  in plan 10 §1 and §3; client-qualified "cannot"s in plan 02; no stale
+  `live`-Skill references).
+- 2026-09-30 — `devils-advocate` resumed for **round 2** on `8c39191`.
