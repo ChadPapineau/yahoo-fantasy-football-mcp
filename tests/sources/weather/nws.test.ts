@@ -159,6 +159,32 @@ describe("NWS_PROVIDER.forecastAt", () => {
       precip_prob: null,
     });
   });
+  it("[QA-1-082] a hostile quantity string is refused in linear time (no regex backtracking)", () => {
+    // plan 02 §1 T3 / §6.2: upstream text is untrusted and a bounded body parses in linear time.
+    // A digit, a long whitespace run and a non-matching tail cost O(n²) in a regex with adjacent
+    // `\s*` runs: 50 k spaces took ~2 s, a 4 MiB hourly body's worth would block for hours.
+    const hostile = (n: number): string => `1${" ".repeat(n)}x`;
+    for (const n of [50_000, 1_000_000]) {
+      const body = period({
+        temperature: hostile(n),
+        windSpeed: hostile(n),
+        windGust: `${"\t".repeat(n)}9`,
+        probabilityOfPrecipitation: hostile(n),
+      });
+      const t0 = performance.now();
+      const out = NWS_PROVIDER.forecastAt(body, k);
+      const ms = performance.now() - t0;
+      expect(ms, `${String(n)} chars took ${ms.toFixed(0)} ms`).toBeLessThan(100);
+      expect(out).toMatchObject({ temp_f: null, wind_mph: null, gust_mph: null });
+    }
+    // the real shapes still parse (padding, ranges, units, case)
+    expect(
+      NWS_PROVIDER.forecastAt(
+        period({ temperature: 60, windSpeed: "  5 to 12 MPH ", windGust: "20mph" }),
+        k,
+      ),
+    ).toMatchObject({ wind_mph: 12, gust_mph: 20 });
+  });
   it("no periods or no covering period → null", () => {
     expect(NWS_PROVIDER.forecastAt({}, k)).toBeNull();
     expect(NWS_PROVIDER.forecastAt(period({}), k + 3_600_000)).toBeNull();
