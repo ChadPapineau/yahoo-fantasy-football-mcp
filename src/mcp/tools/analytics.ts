@@ -1,0 +1,888 @@
+// analytics.ts — the P0 decision engines as tools (plan 07 §3.E): E1 ff_project_players
+// (v1-trailing, position_cv), E2 ff_analyze_lineup (start/sit as assignment; objective mean by
+// default — C11), E3 ff_analyze_matchup (`pre` only in P0) and E5 ff_analyze_waivers (K/DEF only in
+// P0; availability unknown under the manual league — plan 07 E5). Every result carries data.inputs
+// and data.rec, meta.estimate: true, and the 10 000-char analytics budget (plan 07 C8).
+import { randomInt } from "node:crypto";
+import { z } from "zod/v4";
+import { NFL_TEAMS } from "../../config/schema.js";
+import {
+  analyzeKdef,
+  analyzeLineup,
+  analyzeMatchupPre,
+  projectPlayers,
+  type KdefCandidateInput,
+  type LineupPlayer,
+  type ProjectionOutcome,
+  type ProjectionReaders,
+} from "../../domain/analytics/index.js";
+import type { Projection, Rec } from "../../domain/analytics/types.js";
+import { seededRng, type Rng } from "../../domain/clock.js";
+import { lockAtFor } from "../../domain/league/schedule.js";
+import { manualPlayerKeyFor, type Week } from "../../domain/league/types.js";
+import type { ScoringSettings } from "../../domain/scoring/types.js";
+import { MANUAL_FA_POOL_WARNING } from "../../providers/platform.js";
+import {
+  BOUNDS,
+  analyticsFreshnessShape,
+  detailShape,
+  leagueShape,
+  lookAheadSchema,
+  nSimsSchema,
+  playerKeySchema,
+  playerKeysSchema,
+  projectionSelectorSchema,
+  seedSchema,
+  teamKeySchema,
+  weekSchema,
+  addsRemainingSchema,
+  faabBudgetSchema,
+} from "../bounds.js";
+import { defineTool, type ToolContext } from "../define.js";
+import { bareUntrusted, recSchema, type InputStamp, type UntrustedField } from "../envelope.js";
+import { FfError } from "../errors.js";
+import {
+  bare,
+  inputOf,
+  leagueContext,
+  lockModeOf,
+  optionalDataset,
+  platformInput,
+  requiredDataset,
+  rosterRows,
+  scoringOf,
+  slotsOf,
+  teamOf,
+  weekGames,
+  weekOf,
+  type LeagueContext,
+} from "./common.js";
+import { projectable, rosterTargets, selectTargets, type Target } from "./select.js";
+import {
+  bareName,
+  canonical,
+  dist,
+  gsisId,
+  inputs as inputsSchema,
+  iso,
+  nflTeam,
+  playerKey,
+  position,
+  prob,
+  serverText,
+  slotName,
+  week,
+} from "./schemas.js";
+
+/** The internal simulation size for E2/E3/E5 projections (E1's public floor — A15 latency). */
+export const INTERNAL_SIMS = 1000;
+
+/** A seeded Rng for this call: the argument's seed, else a fresh one. */
+function rngFor(ctx: ToolContext, seed: number | undefined): Rng {
+  return seededRng(seed ?? ctx.services.newSeed?.() ?? randomInt(0, BOUNDS.seed.max));
+}
+
+/** The dataset readers the engines use (weather only when a weather source is configured). */
+function readers(ctx: ToolContext): ProjectionReaders {
+  const d = ctx.services.datasets;
+  return {
+    schedules: d.schedules,
+    injuries: d.injuries,
+    playerWeeks: d.playerWeeks,
+    ...(ctx.options.weatherSource === "off" ? {} : { weather: d.weather }),
+  };
+}
+
+/**
+ * The dataset gate every analytics tool passes first: schedules and stats must have been loaded
+ * (STALE_ONLY + the refresh hint otherwise) and none may be past its hard limit unless allow_stale;
+ * injuries and weather are optional. Returns the envelope inputs.
+ */
+function datasetGate(ctx: ToolContext, lc: LeagueContext, weeks: readonly Week[]): InputStamp[] {
+  const d = ctx.services.datasets;
+  const season = lc.league.season;
+  const out: (InputStamp | null)[] = [
+    requiredDataset(d.schedules.games(season, weeks), ctx.nowMs, lc.allowStale),
+  ];
+  const stats = d.playerWeeks.lines([], season, weeks);
+  if (stats.stamp !== null) out.push(inputOf(stats.stamp, ctx.nowMs, lc.allowStale));
+  const first = weeks[0];
+  if (first !== undefined)
+    out.push(optionalDataset(d.injuries.reports(season, first, []), ctx.nowMs, lc.allowStale));
+  return out.filter((x): x is InputStamp => x !== null);
+}
+
+/** Names of path-listed rows, one declaration per distinct provenance tag. */
+function nameFields(path: string, targets: readonly Target[]): UntrustedField[] {
+  return [...new Set(targets.map((t) => t.name_source))].map((s) => bare(path, s));
+}
+
+function projectionTargets(targets: readonly Target[]) {
+  return targets.map((t) => ({
+    player_key: t.player_key,
+    subject: t.subject,
+    name: t.name,
+    position: t.position,
+    nfl_team: t.nfl_team,
+    platform_status: t.platform?.status ?? null,
+  }));
+}
+
+// --- E1 ff_project_players ------------------------------------------------------------------------------
+
+const projWeek = z.strictObject({
+  week,
+  points: dist,
+  p_active: prob.nullable(),
+  opponent: z
+    .string()
+    .regex(/^[A-Z]{2,3}$/)
+    .nullable(),
+  implied_total: z.number().nullable(),
+  p_active_basis: z
+    .enum(["designation_base_rate", "trend_model", "yahoo_gameday_status", "none"])
+    .optional(),
+});
+const driver = z.strictObject({ name: serverText, contribution: z.number() });
+const assumption = z.strictObject({ text: serverText, revisit_trigger: serverText });
+
+const e1Projection = z.strictObject({
+  player_key: playerKey.nullable(),
+  gsis_id: gsisId.nullable(),
+  name: bareName,
+  position,
+  model_version: z.enum(["v1-trailing", "v2-opportunity"]).optional(),
+  weeks: z.array(projWeek).max(18),
+  ros_total: dist.nullable().optional(),
+  stat_line_expectation: z.record(canonical, z.number()).nullable().optional(),
+  opportunity: z.null().optional(),
+  shrinkage: z
+    .array(z.strictObject({ rate: canonical, n: z.number(), k: z.number() }))
+    .max(80)
+    .optional(),
+  multipliers: z
+    .strictObject({ matchup: z.number().nullable(), weather: z.number().nullable() })
+    .optional(),
+  drivers: z.array(driver).max(20),
+  role_confidence_games: z.number().int().min(0),
+  assumptions: z.array(assumption).max(20).optional(),
+});
+
+const e1Data = z.strictObject({
+  model_version: z.enum(["v1-trailing", "v2-opportunity"]),
+  projections: z.array(e1Projection).max(64),
+  assumptions: z.array(assumption).max(40),
+  inputs: inputsSchema,
+});
+
+/** The ROS/season horizon cap (weeks projected in one call; plan 07 §5.2 compact keeps 3). */
+export const HORIZON_MAX_WEEKS = 6;
+
+function horizonWeeks(lc: LeagueContext, horizon: "week" | "ros" | "season", w: Week): Week[] {
+  if (horizon === "week") return [w];
+  const end = Math.min(lc.league.end_week, w + HORIZON_MAX_WEEKS - 1, 22);
+  const out: Week[] = [];
+  for (let x = w; x <= end; x++) out.push(x);
+  return out.length === 0 ? [w] : out;
+}
+
+/**
+ * One projection row for output: names bare. `compact` (plan 07 §5.2) keeps every identifier, every
+ * Dist, p_active, opponent, implied total, drivers and role games; it drops per-week arrays beyond
+ * three weeks, the per-row model version (it is at the top), multipliers, p_active_basis, null
+ * placeholders, stat-line expectations, shrinkage and the per-row assumptions (hoisted, deduplicated).
+ */
+function projectionRow(p: Projection, full: boolean) {
+  const weeks = (full ? p.weeks : p.weeks.slice(0, 3)).map((w) => ({
+    week: w.week,
+    points: w.points,
+    p_active: w.p_active,
+    opponent: w.opponent,
+    implied_total: w.implied_total,
+    ...(full && w.p_active_basis !== undefined ? { p_active_basis: w.p_active_basis } : {}),
+  }));
+  return {
+    player_key: p.player_key,
+    gsis_id: p.gsis_id,
+    name: bareUntrusted(p.name, "player_name"),
+    position: p.position,
+    ...(full ? { model_version: p.model_version } : {}),
+    weeks,
+    ...(full || p.ros_total !== null ? { ros_total: p.ros_total } : {}),
+    ...(full ? { stat_line_expectation: p.stat_line_expectation } : {}),
+    ...(full ? { opportunity: null } : {}),
+    ...(full ? { shrinkage: p.shrinkage.map((s) => ({ ...s })) } : {}),
+    ...(full
+      ? { multipliers: { matchup: p.multipliers.matchup, weather: p.multipliers.weather } }
+      : {}),
+    drivers: p.drivers.map((d) => ({ name: d.name, contribution: d.contribution })),
+    role_confidence_games: p.role_confidence_games,
+    ...(full ? { assumptions: p.assumptions.map((a) => ({ ...a })) } : {}),
+  };
+}
+
+export const projectPlayersTool = defineTool({
+  name: "ff_project_players",
+  family: "analytics",
+  description:
+    "Per player-week point distributions (Dist with basis) scored for this league, with p_active, implied total, drivers. Seedable.",
+  input: z.strictObject({
+    ...leagueShape,
+    players: projectionSelectorSchema,
+    horizon: z.enum(["week", "ros", "season"]),
+    week: weekSchema.optional(),
+    n_sims: nSimsSchema,
+    seed: seedSchema.optional(),
+    include_stat_line: z.boolean().default(false),
+    ...detailShape,
+    ...analyticsFreshnessShape,
+  }),
+  data: e1Data,
+  budget: "analytics",
+  run: async (args, ctx) => {
+    const lc = await leagueContext(ctx, args);
+    const warnings: string[] = [];
+    const inputs: InputStamp[] = [lc.input];
+    const w = weekOf(lc, args.week);
+    const weeks = horizonWeeks(lc, args.horizon, w);
+    if (args.horizon !== "week")
+      warnings.push(`horizon capped at ${String(HORIZON_MAX_WEEKS)} weeks from week ${String(w)}`);
+    inputs.push(...datasetGate(ctx, lc, weeks));
+    const all = await selectTargets(ctx, lc, args.players, w, inputs, warnings);
+    const targets = all.filter(projectable);
+    if (targets.length === 0) throw new FfError("NOT_FOUND");
+    if (targets.length < all.length)
+      warnings.push(
+        `${String(all.length - targets.length)} players at non-projectable positions omitted`,
+      );
+    const settings = await scoringOf(ctx, lc, inputs);
+    const out = projectPlayers({
+      targets: projectionTargets(targets),
+      season: lc.league.season,
+      weeks,
+      settings,
+      readers: readers(ctx),
+      clock: ctx.services.clock,
+      rng: rngFor(ctx, args.seed),
+      n_sims: args.n_sims,
+      include_stat_line: args.include_stat_line || args.detail === "full",
+      repository: ctx.services.projections,
+    });
+    if (out.stored.busy > 0)
+      warnings.push(`${String(out.stored.busy)} projections were not stored (store busy)`);
+    const full = args.detail === "full";
+    const hoisted = new Map<string, { text: string; revisit_trigger: string }>();
+    if (!full)
+      for (const p of out.result.projections)
+        for (const a of p.assumptions) hoisted.set(`${a.text}\u0000${a.revisit_trigger}`, { ...a });
+    return {
+      data: {
+        model_version: out.result.model_version,
+        projections: out.result.projections.map((p) => projectionRow(p, full)),
+        assumptions: [...hoisted.values()].slice(0, 40),
+        inputs: out.result.inputs.slice(0, 25).map((i) => ({ ...i })),
+      },
+      inputs,
+      warnings,
+      bareFields: nameFields("data.projections[].name", targets),
+      extraSources: ["engine"],
+      estimate: true,
+      listKey: "projections",
+    };
+  },
+});
+
+// --- shared: a team's lineup players ----------------------------------------------------------------------
+
+/** A team's projected lineup players for a week (unmatched / non-projectable players omitted). */
+async function lineupPlayers(
+  ctx: ToolContext,
+  lc: LeagueContext,
+  teamKey: string | undefined,
+  w: Week,
+  settings: ScoringSettings,
+  rng: Rng,
+  inputs: InputStamp[],
+  warnings: string[],
+): Promise<{ players: LineupPlayer[]; targets: Target[]; out: ProjectionOutcome }> {
+  const targets = (await rosterTargets(ctx, lc, teamKey, w, inputs, warnings)).filter(projectable);
+  if (targets.length === 0) throw new FfError("NOT_FOUND");
+  const out = projectPlayers({
+    targets: projectionTargets(targets),
+    season: lc.league.season,
+    weeks: [w],
+    settings,
+    readers: readers(ctx),
+    clock: ctx.services.clock,
+    rng,
+    n_sims: INTERNAL_SIMS,
+  });
+  const games = weekGames(ctx, lc.league.season, w).rows;
+  const mode = lockModeOf(lc.league);
+  const players = targets.map((t, i): LineupPlayer => {
+    const p = out.players[i];
+    const pw = p?.weeks.find((x) => x.week === w);
+    if (p === undefined || pw === undefined) throw new FfError("INTERNAL");
+    return {
+      player_key: t.player_key ?? manualPlayerKeyFor(t.subject),
+      name: t.name,
+      positions: [t.position],
+      status: t.platform?.status ?? null,
+      nfl_team: t.nfl_team,
+      gsis_id: t.subject.kind === "player" ? t.subject.gsis_id : null,
+      slot: t.entry?.slot ?? "BN",
+      lock_at: games.length === 0 ? null : lockAtFor(t.nfl_team, games, mode),
+      points: pw.dist,
+      p_active: pw.p_active,
+      role_games: p.role_games,
+    };
+  });
+  return { players, targets, out };
+}
+
+/** The opponent's team key for `w`, or null when the platform lists no matchup for my team. */
+async function opponentKey(
+  ctx: ToolContext,
+  lc: LeagueContext,
+  mine: string,
+  w: Week,
+  inputs: InputStamp[],
+): Promise<string | null> {
+  const got = await ctx.services.platform.getMatchups(lc.ref, w);
+  inputs.push(platformInput(got.stamp, ctx.nowMs, lc.allowStale));
+  for (const m of got.value) {
+    const [a, b] = m.teams;
+    if (a.team.team_key === mine) return b.team.team_key;
+    if (b.team.team_key === mine) return a.team.team_key;
+  }
+  return null;
+}
+
+/** The opponent's lineup players, or null (no matchup, or an opponent with no roster). */
+async function opponentPlayers(
+  ctx: ToolContext,
+  lc: LeagueContext,
+  mine: string,
+  w: Week,
+  settings: ScoringSettings,
+  rng: Rng,
+  inputs: InputStamp[],
+  warnings: string[],
+): Promise<{ players: LineupPlayer[]; targets: Target[] } | null> {
+  const opp = await opponentKey(ctx, lc, mine, w, inputs);
+  if (opp === null) return null;
+  try {
+    const r = await lineupPlayers(ctx, lc, opp, w, settings, rng, inputs, warnings);
+    return { players: r.players, targets: r.targets };
+  } catch (e) {
+    if (e instanceof FfError && e.code === "NOT_FOUND") return null;
+    throw e;
+  }
+}
+
+// --- E2 ff_analyze_lineup ----------------------------------------------------------------------------------
+
+const assignment = z.strictObject({
+  slot: slotName,
+  player_key: playerKey,
+  name: bareName,
+  points: dist,
+  lock_at: iso.nullable(),
+});
+const interval = z.tuple([z.number(), z.number()]);
+const coarse = z.strictObject({
+  sign: z.enum(["+", "-", "0"]),
+  band: z.enum(["small", "medium", "large"]),
+});
+
+/** compact current_lineup: the seat only (the players' Dists are in recommended_lineup / E1). */
+const currentSeat = z.strictObject({
+  slot: slotName,
+  player_key: playerKey,
+  name: bareName.optional(),
+  points: dist.optional(),
+  lock_at: iso.nullable().optional(),
+});
+
+const e2Data = z.strictObject({
+  objective_used: z.enum(["mean", "pwin", "blend"]),
+  dist_basis: z.enum(["position_cv", "player_sim"]),
+  current_lineup: z.array(currentSeat).max(30),
+  recommended_lineup: z.array(assignment).max(30),
+  mode: z.enum(["protect", "chase", "neutral"]),
+  mode_basis: z.strictObject({
+    mu_m: z.number(),
+    mu_o: z.number(),
+    sigma_m: z.number(),
+    sigma_o: z.number(),
+    rho_lineup: z.number(),
+  }),
+  p_win_before: prob.nullable(),
+  p_win_after: prob.nullable(),
+  p_win_interval: interval.nullable(),
+  swaps: z
+    .array(
+      z.strictObject({
+        out: playerKey,
+        in: playerKey,
+        slot: slotName,
+        delta_e: z.number(),
+        delta_pwin: z.union([z.number(), coarse]),
+        interval,
+        coin_flip: z.boolean(),
+        option_value: z
+          .strictObject({
+            kind: z.enum(["thursday", "monday", "late_game"]),
+            value: z.number(),
+            verdict: serverText,
+          })
+          .nullable(),
+      }),
+    )
+    .max(30),
+  conditionals: z
+    .array(
+      z.strictObject({
+        if: z.strictObject({
+          player_key: playerKey,
+          event: z.literal("inactive"),
+          decided_by: iso,
+        }),
+        then: z.strictObject({ slot: slotName, in: playerKey }),
+      }),
+    )
+    .max(30),
+  stack_flags: z
+    .array(
+      z.strictObject({
+        players: z.array(playerKey).max(10),
+        effect: z.enum(["ceiling+", "floor-"]),
+      }),
+    )
+    .max(30),
+  lock_schedule: z
+    .array(z.strictObject({ lock_at: iso, player_keys: z.array(playerKey).max(60) }))
+    .max(60),
+  latest_execution_time: iso.nullable(),
+  no_move: z.boolean(),
+  rec: recSchema,
+  inputs: inputsSchema,
+});
+
+const assignmentRow = (a: {
+  slot: string;
+  player_key: string;
+  name: string;
+  points: z.infer<typeof dist>;
+  lock_at: string | null;
+}) => ({ ...a, name: bareUntrusted(a.name, "player_name") });
+
+const recRow = (r: Rec): z.infer<typeof recSchema> =>
+  JSON.parse(JSON.stringify({ ...r, log_id: null })) as z.infer<typeof recSchema>;
+
+export const analyzeLineupTool = defineTool({
+  name: "ff_analyze_lineup",
+  family: "analytics",
+  description:
+    "Start/sit as an assignment (objective mean by default): recommended lineup, swaps, coin flips, conditionals, locks, rec.",
+  input: z.strictObject({
+    ...leagueShape,
+    team_key: teamKeySchema.optional(),
+    week: weekSchema.optional(),
+    objective: z.enum(["mean", "pwin", "blend"]).default("mean"),
+    blend_weight: z.number().min(BOUNDS.blendWeight.min).max(BOUNDS.blendWeight.max).optional(),
+    only_unlocked: z.boolean().default(false),
+    exclude: playerKeysSchema.optional(),
+    force_start: playerKeysSchema.optional(),
+    compare: z
+      .array(z.strictObject({ out: playerKeySchema, in: playerKeySchema }))
+      .max(BOUNDS.compareSwaps.max)
+      .optional(),
+    ...detailShape,
+    ...analyticsFreshnessShape,
+  }),
+  data: e2Data,
+  budget: "analytics",
+  run: async (args, ctx) => {
+    const lc = await leagueContext(ctx, args);
+    const warnings: string[] = [];
+    const inputs: InputStamp[] = [lc.input];
+    const w = weekOf(lc, args.week);
+    inputs.push(...datasetGate(ctx, lc, [w]));
+    const settings = await scoringOf(ctx, lc, inputs);
+    const slots = await slotsOf(ctx, lc, inputs);
+    const rng = rngFor(ctx, undefined);
+    const mine = await lineupPlayers(ctx, lc, args.team_key, w, settings, rng, inputs, warnings);
+    const myKey = teamOf(lc, args.team_key).team_key;
+    const opp = await opponentPlayers(ctx, lc, myKey, w, settings, rng, inputs, warnings);
+    const rec = analyzeLineup({
+      slots,
+      players: mine.players,
+      opponent: opp?.players ?? null,
+      objective: args.objective,
+      ...(args.blend_weight === undefined ? {} : { blend_weight: args.blend_weight }),
+      only_unlocked: args.only_unlocked,
+      ...(args.exclude === undefined ? {} : { exclude: args.exclude }),
+      ...(args.force_start === undefined ? {} : { force_start: args.force_start }),
+      ...(args.compare === undefined ? {} : { compare: args.compare }),
+      clock: ctx.services.clock,
+      inputs: mine.out.result.inputs,
+    });
+    const data = {
+      ...rec,
+      current_lineup:
+        args.detail === "full"
+          ? rec.current_lineup.map(assignmentRow)
+          : rec.current_lineup.map((a) => ({ slot: a.slot, player_key: a.player_key })),
+      recommended_lineup: rec.recommended_lineup.map(assignmentRow),
+      swaps: rec.swaps.map((s) => ({
+        ...s,
+        interval: [s.interval[0], s.interval[1]] as [number, number],
+      })),
+      p_win_interval:
+        rec.p_win_interval === null
+          ? null
+          : ([rec.p_win_interval[0], rec.p_win_interval[1]] as [number, number]),
+      rec: recRow(rec.rec),
+      inputs: rec.inputs.slice(0, 25).map((i) => ({ ...i })),
+    };
+    return {
+      data: JSON.parse(JSON.stringify(data)) as z.infer<typeof e2Data>,
+      inputs,
+      warnings,
+      bareFields: [
+        ...(args.detail === "full" ? nameFields("data.current_lineup[].name", mine.targets) : []),
+        ...nameFields("data.recommended_lineup[].name", mine.targets),
+      ],
+      extraSources: ["engine"],
+      estimate: true,
+      listKey: "swaps",
+    };
+  },
+});
+
+// --- E3 ff_analyze_matchup -----------------------------------------------------------------------------------
+
+const e3Data = z.strictObject({
+  p_win: prob,
+  interval,
+  mu_m: z.number(),
+  sigma_m: z.number(),
+  mu_o: z.number(),
+  sigma_o: z.number(),
+  cov: z.number(),
+  method: z.enum(["normal", "mc"]),
+  live: z.null(),
+  yahoo_cross_check: z
+    .strictObject({
+      win_probability: prob.nullable(),
+      team_projected_points: z.strictObject({
+        me: z.number().nullable(),
+        opp: z.number().nullable(),
+      }),
+    })
+    .nullable(),
+  actionable_slots: z.array(z.strictObject({ slot: slotName, lock_at: iso.nullable() })).max(30),
+  season: z.null(),
+  rec: recSchema,
+  inputs: inputsSchema,
+});
+
+export const analyzeMatchupTool = defineTool({
+  name: "ff_analyze_matchup",
+  family: "analytics",
+  description:
+    "Pre-game head-to-head win probability with interval, both teams' means and spreads, unlocked actionable slots, rec.",
+  input: z.strictObject({
+    ...leagueShape,
+    team_key: teamKeySchema.optional(),
+    week: weekSchema.optional(),
+    mode: z.enum(["pre", "live", "season"]).default("pre"),
+    method: z.enum(["normal", "mc"]).default("mc"),
+    n_sims: z.number().int().min(BOUNDS.nSims.min).max(BOUNDS.nSims.max).optional(),
+    ...analyticsFreshnessShape,
+  }),
+  data: e3Data,
+  budget: "analytics",
+  run: async (args, ctx) => {
+    if (args.mode !== "pre")
+      throw new FfError("VALIDATION", { field: "mode", reason: "not_available" });
+    const lc = await leagueContext(ctx, args);
+    const warnings: string[] = [];
+    const inputs: InputStamp[] = [lc.input];
+    const w = weekOf(lc, args.week);
+    inputs.push(...datasetGate(ctx, lc, [w]));
+    const settings = await scoringOf(ctx, lc, inputs);
+    const slots = await slotsOf(ctx, lc, inputs);
+    const rng = rngFor(ctx, undefined);
+    const mine = await lineupPlayers(ctx, lc, args.team_key, w, settings, rng, inputs, warnings);
+    const myKey = teamOf(lc, args.team_key).team_key;
+    const opp = await opponentPlayers(ctx, lc, myKey, w, settings, rng, inputs, warnings);
+    const r = analyzeMatchupPre({
+      slots,
+      players: mine.players,
+      opponent: opp?.players ?? null,
+      method: args.method,
+      ...(args.n_sims === undefined ? {} : { n_sims: args.n_sims }),
+      clock: ctx.services.clock,
+      rng: rng.fork("matchup"),
+      inputs: mine.out.result.inputs,
+      yahoo_cross_check: null,
+    });
+    const data = {
+      ...r,
+      interval: [r.interval[0], r.interval[1]] as [number, number],
+      live: null,
+      season: null,
+      actionable_slots: r.actionable_slots.map((a) => ({ ...a })),
+      rec: recRow(r.rec),
+      inputs: r.inputs.slice(0, 25).map((i) => ({ ...i })),
+    };
+    return {
+      data: JSON.parse(JSON.stringify(data)) as z.infer<typeof e3Data>,
+      inputs,
+      warnings,
+      extraSources: ["engine"],
+      estimate: true,
+      provisional: false,
+    };
+  },
+});
+
+// --- E5 ff_analyze_waivers (K/DEF in P0) ----------------------------------------------------------------------
+
+const subjectOut = z.union([
+  z.strictObject({ kind: z.literal("player"), gsis_id: gsisId }),
+  z.strictObject({ kind: z.literal("defense"), nfl_team: nflTeam }),
+]);
+
+const e5Candidate = z.strictObject({
+  player_key: playerKey,
+  subject: subjectOut.optional(),
+  gsis_id: gsisId.nullable(),
+  nfl_team: nflTeam.nullable(),
+  name: bareName,
+  position,
+  availability: z.enum(["FA", "W", "T", "unknown"]),
+  signals: z
+    .array(
+      z.strictObject({
+        kind: z.enum([
+          "injury_cascade",
+          "snap_jump",
+          "target_share_jump",
+          "xfp_gap",
+          "rz_shift",
+          "depth_chart",
+          "implied_total",
+          "stream",
+        ]),
+        value: z.number(),
+        evidence: z.number().nullable().optional(),
+      }),
+    )
+    .max(20),
+  weeks_of_value: z.number().nullable(),
+  p_role_holds: z
+    .array(z.strictObject({ week, p: prob }))
+    .max(18)
+    .optional(),
+  marginal_value: dist,
+  xfp_gap: z.number().nullable().optional(),
+  competition: z.null().optional(),
+  bid: z.null().optional(),
+  claim_or_wait: z
+    .strictObject({ verdict: z.enum(["claim", "wait"]), option_value: z.number() })
+    .nullable()
+    .optional(),
+  drop: z.null().optional(),
+  invalidators: z
+    .array(z.string().regex(/^[a-z_]{1,48}$/))
+    .max(20)
+    .optional(),
+  kdef: z
+    .strictObject({
+      implied_total: z.number().nullable(),
+      opp_implied_total: z.number().nullable(),
+      brackets_e: z.number().nullable(),
+      sacks_e: z.number().nullable(),
+      takeaways_e: z.number().nullable(),
+      rare_c: z.number().nullable(),
+      next_week: z
+        .strictObject({
+          opponent: z
+            .string()
+            .regex(/^[A-Z]{2,3}$/)
+            .nullable(),
+          implied_total: z.number().nullable(),
+          e: z.number().nullable(),
+        })
+        .nullable(),
+    })
+    .nullable(),
+});
+
+const e5Data = z.strictObject({
+  candidates: z.array(e5Candidate).max(96),
+  /** compact: the candidates' shared invalidators, once (fixed vocabulary). */
+  invalidators: z.array(z.string().regex(/^[a-z_]{1,48}$/)).max(40),
+  hold_vs_stream: z
+    .strictObject({ streamability: z.number(), current_starter_delta: z.number() })
+    .nullable(),
+  waiver_clearing_time: iso.nullable(),
+  rec: recSchema,
+  inputs: inputsSchema,
+});
+
+/** The K/DEF universe: all 32 defences + every kicker on the season's weekly rosters. */
+function kdefUniverse(
+  ctx: ToolContext,
+  lc: LeagueContext,
+  inputs: InputStamp[],
+): KdefCandidateInput[] {
+  const rr = rosterRows(ctx, lc.league.season);
+  const rIn = requiredDataset(rr, ctx.nowMs, lc.allowStale);
+  if (rIn !== null) inputs.push(rIn);
+  const defs: KdefCandidateInput[] = NFL_TEAMS.map((t) => ({
+    player_key: manualPlayerKeyFor({ kind: "defense", nfl_team: t }),
+    subject: { kind: "defense" as const, nfl_team: t },
+    name: t,
+    position: "DEF" as const,
+    nfl_team: t,
+    availability: "unknown" as const,
+  }));
+  const kickers: KdefCandidateInput[] = rr.rows
+    .filter((r) => r.position === "K")
+    .map((r) => ({
+      player_key: manualPlayerKeyFor({ kind: "player", gsis_id: r.gsis_id }),
+      subject: { kind: "player" as const, gsis_id: r.gsis_id },
+      name: r.full_name,
+      position: "K" as const,
+      nfl_team: r.team,
+      availability: "unknown" as const,
+    }));
+  return [...defs, ...kickers];
+}
+
+export const analyzeWaiversTool = defineTool({
+  name: "ff_analyze_waivers",
+  family: "analytics",
+  description:
+    "K/DEF streaming ranking (positions K and DEF only): implied totals, bracket expectations, look-ahead, hold vs stream, rec.",
+  input: z.strictObject({
+    ...leagueShape,
+    team_key: teamKeySchema.optional(),
+    positions: z
+      .array(z.string().regex(/^[A-Z]{1,4}$/))
+      .min(1)
+      .max(8)
+      .default(["K", "DEF"]),
+    candidates: playerKeysSchema.optional(),
+    horizon_weeks: z
+      .number()
+      .int()
+      .min(BOUNDS.horizonWeeks.min)
+      .max(BOUNDS.horizonWeeks.max)
+      .optional(),
+    look_ahead: lookAheadSchema.optional(),
+    adds_remaining: addsRemainingSchema.optional(),
+    faab_budget: faabBudgetSchema.optional(),
+    reserve: z.enum(["none", "playoff_reserve"]).default("none"),
+    include_drop: z.boolean().default(true),
+    ...detailShape,
+    ...analyticsFreshnessShape,
+  }),
+  data: e5Data,
+  budget: "analytics",
+  run: async (args, ctx) => {
+    if (args.positions.some((p) => p !== "K" && p !== "DEF"))
+      throw new FfError("VALIDATION", { field: "positions", reason: "not_available" });
+    const lc = await leagueContext(ctx, args);
+    const warnings: string[] = [];
+    const inputs: InputStamp[] = [lc.input];
+    const w = lc.league.current_week;
+    const lookAhead = args.look_ahead ?? BOUNDS.lookAheadKdefDefault;
+    const weeks = Array.from({ length: lookAhead + 1 }, (_, i) => w + i).filter((x) => x <= 22);
+    inputs.push(...datasetGate(ctx, lc, weeks));
+    const settings = await scoringOf(ctx, lc, inputs);
+    let universe = kdefUniverse(ctx, lc, inputs);
+    if (args.candidates !== undefined) {
+      const want = new Set(args.candidates);
+      universe = universe.filter((c) => want.has(c.player_key));
+      if (universe.length === 0) throw new FfError("NOT_FOUND");
+    }
+    const mineTargets = await rosterTargets(ctx, lc, args.team_key, w, inputs, warnings);
+    const current: KdefCandidateInput[] = mineTargets.flatMap((t) =>
+      (t.position === "K" || t.position === "DEF") && t.nfl_team !== null
+        ? [
+            {
+              player_key: t.player_key ?? manualPlayerKeyFor(t.subject),
+              subject: t.subject,
+              name: t.name,
+              position: t.position === "K" ? ("K" as const) : ("DEF" as const),
+              nfl_team: t.nfl_team,
+              availability: "T" as const,
+            },
+          ]
+        : [],
+    );
+    const caps = await ctx.services.platform.capabilities();
+    const out = analyzeKdef({
+      positions: args.positions,
+      season: lc.league.season,
+      week: w,
+      look_ahead: weeks.length - 1,
+      universe,
+      current,
+      availability_known: caps.read_features.free_agent_pool,
+      settings,
+      readers: readers(ctx),
+      clock: ctx.services.clock,
+      rng: rngFor(ctx, undefined),
+    });
+    if (!out.availability_known) warnings.push(MANUAL_FA_POOL_WARNING);
+    const a = out.analysis;
+    const full = args.detail === "full";
+    const candidates = a.candidates.map((c) => ({
+      player_key: c.player_key,
+      ...(full ? { subject: c.subject } : {}),
+      gsis_id: c.gsis_id,
+      nfl_team: c.nfl_team,
+      name: bareUntrusted(c.name, "player_name"),
+      position: c.position,
+      availability: c.availability,
+      signals: c.signals.map((s) => ({
+        kind: s.kind,
+        value: s.value,
+        ...(full ? { evidence: typeof s.evidence === "number" ? s.evidence : null } : {}),
+      })),
+      weeks_of_value: c.weeks_of_value,
+      ...(full || c.p_role_holds.length > 0
+        ? { p_role_holds: c.p_role_holds.map((p) => ({ ...p })) }
+        : {}),
+      marginal_value: c.marginal_value,
+      ...(full || c.xfp_gap !== null ? { xfp_gap: c.xfp_gap } : {}),
+      ...(full ? { competition: null, bid: null, drop: null } : {}),
+      ...(full || c.claim_or_wait !== null ? { claim_or_wait: c.claim_or_wait } : {}),
+      ...(full ? { invalidators: [...c.invalidators] } : {}),
+      kdef: c.kdef,
+    }));
+    const data = {
+      candidates,
+      invalidators: [...new Set(a.candidates.flatMap((c) => c.invalidators))].slice(0, 40),
+      hold_vs_stream: a.hold_vs_stream,
+      waiver_clearing_time: a.waiver_clearing_time,
+      rec: recRow(a.rec),
+      inputs: a.inputs.slice(0, 25).map((i) => ({ ...i })),
+    };
+    return {
+      data: JSON.parse(JSON.stringify(data)) as z.infer<typeof e5Data>,
+      inputs,
+      warnings,
+      bareFields: [bare("data.candidates[].name", "nflverse.roster_weekly.name")],
+      extraSources: ["engine"],
+      estimate: true,
+      listKey: "candidates",
+    };
+  },
+});

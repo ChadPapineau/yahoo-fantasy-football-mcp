@@ -125,6 +125,8 @@ export const UNTRUSTED_SOURCES = [
   "manual.player.status_full",
   "manual.player.injury_note",
   "manual.stat.name",
+  // additive (MCP build): league.yaml `transactions[].note` (A5 `note: UT` under the manual league)
+  "manual.transaction.note",
   // nflverse datasets
   "nflverse.roster_weekly.name",
   "nflverse.injuries.primary_injury",
