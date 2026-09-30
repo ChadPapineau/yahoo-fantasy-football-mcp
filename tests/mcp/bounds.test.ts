@@ -6,8 +6,30 @@ import fc from "fast-check";
 import { z } from "zod/v4";
 import { describe, expect, it } from "vitest";
 import {
+  MANUAL_KEY_RE as CONFIG_MANUAL_KEY_RE,
+  NFL_TEAMS as CONFIG_NFL_TEAMS,
+} from "../../src/config/schema.js";
+import type { Rec } from "../../src/domain/analytics/types.js";
+import {
   BOUNDS,
   GSIS_ID_RE,
+  KEY_MAX_CHARS,
+  RECORD_LIMITS,
+  STAT_ID_RE,
+  addsRemainingSchema,
+  analyticsFreshnessShape,
+  detailShape,
+  faabBudgetSchema,
+  leagueShape,
+  logIdSchema,
+  lookAheadSchema,
+  platformFreshnessShape,
+  poolSelectorSchema,
+  projectionSelectorSchema,
+  recordRecommendationInputSchema,
+  requestIdSchema,
+  seedSchema,
+  statIdSchema,
   INVALID_KEY_MESSAGE,
   MANUAL_KEY_RE,
   NFL_TEAMS,
@@ -366,5 +388,268 @@ describe("shared input shapes (plan 07 §2)", () => {
     expect(ok(schema, { unknown: 1 })).toBe(false);
     expect(ok(schema, { league_key: "461.l.1000;" })).toBe(false);
     expect(ok(schema, { force_refresh: "true" })).toBe(false);
+  });
+});
+
+// --- contract revision (critics C-06, C-11, C-17, C-18, C-19b, C-21, C-08/E12) ------------------------
+
+describe("key schema lengths come from the grammar (critic C-11)", () => {
+  it("a 41-char manual league key (32-char slug) passes leagueKeySchema", () => {
+    const k = `manual.l.${"a".repeat(32)}`;
+    expect(k).toHaveLength(41);
+    expect(isLeagueKey(k)).toBe(true);
+    expect(ok(leagueKeySchema, k)).toBe(true);
+    expect(ok(teamKeySchema, `${k}.t.999`)).toBe(true);
+    expect(ok(playerKeySchema, `manual.p.${"B".repeat(32)}`)).toBe(true);
+  });
+  it("an over-long key is INVALID_KEY (not VALIDATION too_big)", () => {
+    const r = leagueKeySchema.safeParse(`manual.l.${"a".repeat(200)}`);
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.every((i) => i.message === INVALID_KEY_MESSAGE)).toBe(true);
+  });
+  it("property: every string matching a key grammar passes the matching zod schema", () => {
+    const slug = fc.stringMatching(/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/);
+    const pid = fc.stringMatching(/^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/);
+    const n = (d: number) => fc.integer({ min: 0, max: 10 ** d - 1 }).map(String);
+    fc.assert(
+      fc.property(slug, pid, n(3), n(4), n(8), (sl, p, t, g, l) => {
+        const ml = `manual.l.${sl}`;
+        const cases: [z.ZodType, string][] = [
+          [leagueKeySchema, ml],
+          [teamKeySchema, `${ml}.t.${t}`],
+          [playerKeySchema, `manual.p.${p}`],
+          [leagueKeySchema, `${g}.l.${l}`],
+          [teamKeySchema, `${g}.l.${l}.t.${t}`],
+          [playerKeySchema, `${g}.p.${l}`],
+        ];
+        return cases.every(([schema, key]) => ok(schema, key));
+      }),
+      { numRuns: 500 },
+    );
+    expect(KEY_MAX_CHARS).toEqual({ league: 41, team: 47, player: 41 });
+  });
+});
+
+describe("nflverse ids are re-exported from the leaf layer (critic C-19b)", () => {
+  it("bounds and config expose the same objects (no drift possible)", () => {
+    expect(NFL_TEAMS).toBe(CONFIG_NFL_TEAMS);
+    expect(MANUAL_KEY_RE).toBe(CONFIG_MANUAL_KEY_RE);
+  });
+});
+
+describe("E1 pool selector (critic C-06; plan 07 E1)", () => {
+  it("accepts a pool of 1..50 by status and position", () => {
+    expect(ok(poolSelectorSchema, { pool: { status: "FA", position: "K", top: 50 } })).toBe(true);
+    expect(ok(poolSelectorSchema, { pool: { status: "A", position: "W/R/T", top: 1 } })).toBe(true);
+    for (const bad of [
+      { pool: { status: "FA", position: "K", top: 51 } },
+      { pool: { status: "FA", position: "K", top: 0 } },
+      { pool: { status: "W", position: "K", top: 5 } },
+      { pool: { status: "FA", position: "kicker; drop", top: 5 } },
+      { pool: { status: "FA", position: "K", top: 5, extra: 1 } },
+      { pool: { status: "FA", position: "K", top: 5 }, player_keys: ["461.p.1"] },
+    ])
+      expect(ok(poolSelectorSchema, bad)).toBe(false);
+  });
+  it("projectionSelectorSchema = every PlayerSelector form + pool, exactly one", () => {
+    expect(ok(projectionSelectorSchema, { player_keys: ["461.p.1"] })).toBe(true);
+    expect(ok(projectionSelectorSchema, { nfl_team: "KC" })).toBe(true);
+    expect(ok(projectionSelectorSchema, { pool: { status: "FA", position: "DEF", top: 10 } })).toBe(
+      true,
+    );
+    expect(
+      ok(projectionSelectorSchema, {
+        nfl_team: "KC",
+        pool: { status: "FA", position: "DEF", top: 10 },
+      }),
+    ).toBe(false);
+    expect(ok(projectionSelectorSchema, {})).toBe(false);
+  });
+});
+
+describe("new numeric bounds (critic C-18)", () => {
+  it("E5/E1/C2 bounds", () => {
+    expect(BOUNDS.lookAheadKdefDefault).toBe(2);
+    expect(ok(lookAheadSchema, 2) && !ok(lookAheadSchema, 3) && !ok(lookAheadSchema, -1)).toBe(
+      true,
+    );
+    expect(
+      ok(faabBudgetSchema, null) && ok(faabBudgetSchema, 10_000) && !ok(faabBudgetSchema, 10_001),
+    ).toBe(true);
+    expect(
+      ok(addsRemainingSchema, 0) && ok(addsRemainingSchema, null) && !ok(addsRemainingSchema, 101),
+    ).toBe(true);
+    expect(
+      ok(seedSchema, 0) &&
+        ok(seedSchema, 2 ** 31 - 1) &&
+        !ok(seedSchema, 2 ** 31) &&
+        !ok(seedSchema, 1.5),
+    ).toBe(true);
+    for (const good of ["0", "4", "1234"]) expect(ok(statIdSchema, good)).toBe(true);
+    for (const bad of ["", "12345", "4a", "-1", " 4", "４"]) {
+      expect(STAT_ID_RE.test(bad)).toBe(false);
+      expect(ok(statIdSchema, bad)).toBe(false);
+    }
+  });
+  it("log ids and request ids have grammars (critic C-21, C-03)", () => {
+    expect(ok(logIdSchema, "rec-01ARZ3NDEKTSV4RRFFQ69G5FAV")).toBe(true);
+    for (const bad of [
+      "rec-01arz3ndektsv4rrffq69g5fav",
+      "rec-01ARZ3NDEKTSV4RRFFQ69G5FA",
+      "rec-01ARZ3NDEKTSV4RRFFQ69G5FAVI",
+      "rec-ILOU3NDEKTSV4RRFFQ69G5FAVX",
+      "../rec-01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "rec-01ARZ3NDEKTSV4RRFFQ69G5FAV\n",
+    ]) {
+      const r = logIdSchema.safeParse(bad);
+      expect(r.success).toBe(false);
+      expect(r.error?.issues[0]?.message).toBe(INVALID_KEY_MESSAGE);
+    }
+    expect(ok(requestIdSchema, "r-0123456789ab")).toBe(true);
+    expect(ok(requestIdSchema, "r-unknown")).toBe(false);
+  });
+});
+
+describe("split common-input shapes (critic C-17)", () => {
+  it("each family spreads only what it takes", () => {
+    expect(Object.keys(leagueShape)).toEqual(["league_key"]);
+    expect(Object.keys(platformFreshnessShape).sort()).toEqual(["allow_stale", "force_refresh"]);
+    expect(Object.keys(analyticsFreshnessShape)).toEqual(["allow_stale"]);
+    expect(Object.keys(detailShape)).toEqual(["detail"]);
+    const analytics = z.strictObject({
+      ...leagueShape,
+      ...analyticsFreshnessShape,
+      ...detailShape,
+    });
+    expect(ok(analytics, { force_refresh: true })).toBe(false);
+    const g1 = z.strictObject({ include_checks: z.boolean().optional() });
+    expect(ok(g1, { league_key: "manual.l.example" })).toBe(false);
+  });
+});
+
+describe("E12 record input schema (plan 07 E12; critics C-08, C-09, C-01b)", () => {
+  const dist = {
+    mean: 9,
+    p10: 3,
+    p25: 6,
+    p50: 9,
+    p75: 12,
+    p90: 15,
+    p_zero: 0.05,
+    basis: "position_cv" as const,
+  };
+  const rec: Rec = {
+    action: "Start Player A",
+    subjects: [
+      {
+        player_key: "manual.p.00-0012345",
+        gsis_id: null,
+        nfl_team: null,
+        role: "start",
+        slot: "WR",
+      },
+    ],
+    lineup: null,
+    point_estimate: 9,
+    distribution: dist,
+    delta_vs_next: { value: 1, p10: -2, p90: 4 },
+    decision_metric: "expected_points",
+    drivers: [],
+    assumptions: [],
+    confidence: { role_games: 3, inputs: [] },
+    as_of: "2026-09-30T10:00:00.000Z",
+    latest_execution_time: null,
+    no_move: false,
+    log_id: null,
+  };
+  const input = {
+    kind: "lineup",
+    week: 5,
+    rec,
+    source_calls: [{ tool: "ff_analyze_lineup", request_id: "r-0123456789ab" }],
+  };
+
+  it("accepts a minimal record and applies defaults; season is not an input", () => {
+    const r = recordRecommendationInputSchema.safeParse(input);
+    expect(r.error?.issues).toBeUndefined();
+    expect(r.data?.alternatives).toEqual([]);
+    expect(r.data?.followed_hint).toBe("unknown");
+    expect(ok(recordRecommendationInputSchema, { ...input, season: 2026 })).toBe(false);
+  });
+  it("source_calls: registered tool grammar and a real request id", () => {
+    for (const bad of [
+      [{ tool: "rm -rf", request_id: "r-0123456789ab" }],
+      [{ tool: "ff_analyze_lineup", request_id: "made-up" }],
+      [{ tool: "FF_X", request_id: "r-0123456789ab" }],
+      Array.from({ length: RECORD_LIMITS.sourceCalls + 1 }, () => ({
+        tool: "ff_x",
+        request_id: "r-0123456789ab",
+      })),
+    ])
+      expect(ok(recordRecommendationInputSchema, { ...input, source_calls: bad })).toBe(false);
+  });
+  it("rec.log_id must be null, the note is capped/printable, alternatives bounded", () => {
+    expect(
+      ok(recordRecommendationInputSchema, { ...input, rec: { ...rec, log_id: "rec-x" } }),
+    ).toBe(false);
+    expect(ok(recordRecommendationInputSchema, { ...input, note: "n".repeat(201) })).toBe(false);
+    expect(ok(recordRecommendationInputSchema, { ...input, note: "ok\u200b" })).toBe(false);
+    const alt = {
+      action: "Start B",
+      subjects: [],
+      point_estimate: 1,
+      distribution: dist,
+      decision_metric_value: 1,
+    };
+    expect(
+      ok(recordRecommendationInputSchema, {
+        ...input,
+        alternatives: Array(RECORD_LIMITS.alternatives).fill(alt),
+      }),
+    ).toBe(true);
+    expect(
+      ok(recordRecommendationInputSchema, {
+        ...input,
+        alternatives: Array(RECORD_LIMITS.alternatives + 1).fill(alt),
+      }),
+    ).toBe(false);
+  });
+  it("the whole input is capped at 20 000 serialised chars", () => {
+    const fat = {
+      ...rec,
+      drivers: Array.from({ length: 20 }, () => ({ name: "d".repeat(200), contribution: 1 })),
+      assumptions: Array.from({ length: 20 }, () => ({
+        text: "t".repeat(200),
+        revisit_trigger: "r".repeat(200),
+      })),
+      subjects: Array.from({ length: 20 }, () => ({
+        player_key: `manual.p.${"p".repeat(32)}`,
+        gsis_id: "00-0012345",
+        nfl_team: "KC",
+        role: "start",
+        slot: "W/R/T",
+      })),
+      lineup: Array.from({ length: 30 }, () => ({
+        slot: "W/R/T",
+        player_key: `manual.p.${"q".repeat(32)}`,
+      })),
+    };
+    const alts = Array.from({ length: 10 }, () => ({
+      action: "a".repeat(200),
+      subjects: [],
+      point_estimate: 1,
+      distribution: dist,
+      decision_metric_value: 1,
+    }));
+    const r = recordRecommendationInputSchema.safeParse({ ...input, rec: fat, alternatives: alts });
+    expect(JSON.stringify({ ...input, rec: fat, alternatives: alts }).length).toBeGreaterThan(
+      BOUNDS.recordInputChars,
+    );
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.some((i) => i.message === "input_too_large")).toBe(true);
+  });
+  it("unknown kinds and hostile top-level keys are refused", () => {
+    expect(ok(recordRecommendationInputSchema, { ...input, kind: "yolo" })).toBe(false);
+    expect(ok(recordRecommendationInputSchema, { ...input, __proto__x: 1 })).toBe(false);
   });
 });

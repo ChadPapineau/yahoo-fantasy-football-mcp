@@ -1,6 +1,8 @@
 // freshness.ts — the plan 01 §5.2/§5.4 TTL and hard-limit table as data, the per-source registry
 // (license + attribution, plan 01 §8 / §4.2 / research 04 §G.3), and the pure classifiers the
-// envelope reads (plan 01 §4.2 `meta.freshness`, §5.5 `STALE_ONLY`; plan 05 §2 `config/freshness`).
+// envelope reads (plan 01 §4.2 `meta.freshness`, §5.5 `STALE_ONLY`; plan 05 §2 `config/freshness`),
+// including `stampState` — the ONE place a class's AgeBasis picks which instant an input is judged
+// from (release → last successful check, age → fetch, file → mtime; critics C-12/C-08).
 // Every number here is an assumption (plan 01 A-4..A-9): tests assert the SHAPE (fresh < hard),
 // never the values.
 
@@ -379,6 +381,64 @@ export function classifyAge(cls: FreshnessClass, ageSeconds: number): FreshnessS
   if (cls.ttlSeconds === null || ageSeconds <= cls.ttlSeconds) return "fresh";
   if (cls.hardLimitSeconds === null || ageSeconds <= cls.hardLimitSeconds) return "stale";
   return "expired";
+}
+
+/**
+ * The instants an input stamp carries (a DatasetStamp or a PlatformStamp, flattened): `as_of` is the
+ * content time (release `updated_at`; league.yaml mtime for the manual league), `fetched_at` the
+ * download/read time, `checked_at` the last successful release check (release basis only; null →
+ * `fetched_at`).
+ */
+export interface StampInstants {
+  readonly as_of: string;
+  readonly fetched_at: string;
+  readonly checked_at: string | null;
+}
+
+/** An input's state judged by its class's basis, with the instant it was judged from. */
+export interface StampState {
+  readonly state: FreshnessState;
+  /** The instant the age was measured from (ISO-8601 UTC) — what a stale warning must quote. */
+  readonly basis_at: string;
+  /** Whole seconds from `basis_at` to now, ≥ 0 (a future instant — clock skew — reads 0). */
+  readonly age_s: number;
+}
+
+function isoMs(s: string): number {
+  const ms = Date.parse(s);
+  if (!Number.isFinite(ms)) throw new RangeError("freshness: invalid ISO instant in stamp");
+  return ms;
+}
+
+/**
+ * Judges one input against its class (plan 01 §5.4) from the instant its AgeBasis names:
+ * `age` → `fetched_at`; `release` → the later of `checked_at` and `fetched_at` (an unchanged release
+ * checked an hour ago is fresh, however old the download); `file` → `as_of` (the file's mtime);
+ * `immutable` → always fresh, measured from `fetched_at`. Every tool uses this, so a quiet week can
+ * never turn an unchanged nflverse release STALE_ONLY and a stale warning names the right age.
+ */
+export function stampState(cls: FreshnessClass, t: StampInstants, nowMs: number): StampState {
+  if (!Number.isFinite(nowMs)) throw new RangeError("freshness: now must be finite");
+  const fetched = isoMs(t.fetched_at);
+  let basis: number;
+  switch (cls.basis) {
+    case "release":
+      basis = t.checked_at === null ? fetched : Math.max(isoMs(t.checked_at), fetched);
+      break;
+    case "file":
+      basis = isoMs(t.as_of);
+      break;
+    case "age":
+    case "immutable":
+      basis = fetched;
+      break;
+  }
+  const age = Math.max(0, Math.floor((nowMs - basis) / 1000));
+  return {
+    state: cls.basis === "immutable" ? "fresh" : classifyAge(cls, age),
+    basis_at: new Date(basis).toISOString(),
+    age_s: age,
+  };
 }
 
 /** The worse of two envelope labels: stale > provisional > fresh. */

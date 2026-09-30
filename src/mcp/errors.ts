@@ -2,8 +2,15 @@
 // from any thrown value to a tool error result (`isError: true`). Messages and hints are fixed
 // strings from the table: never an upstream body, never a stack, never a thrown object's message,
 // never a secret (plan 01 §4.3 rules; plan 05 §2 `mcp/errors`).
+// Contract revision (critic C-02): SDK 2.2.0 validates a tool's inputSchema BEFORE the handler and
+// answers a failure with its own free-text error, and returns a handler's raw `error.message` on a
+// throw — so every tool registers `deferValidation(schema)` (tools/list still shows the real JSON
+// Schema) with `wrapHandler(schema, fn)`, which parses, catches everything and maps it here.
 import { randomBytes } from "node:crypto";
-import { INVALID_KEY_MESSAGE } from "./bounds.js";
+import type { StandardSchemaWithJSON } from "@modelcontextprotocol/server";
+import type { z } from "zod/v4";
+import { SERVER_HINTS } from "../providers/platform.js";
+import { INVALID_KEY_MESSAGE, REQUEST_ID_RE, type ToolSuccessResult } from "./envelope.js";
 
 /** Every tool error code (plan 01 §4.3). */
 export const ERROR_CODES = [
@@ -181,10 +188,10 @@ export interface ToolErrorBody {
 export interface ToolErrorResult {
   /** Always true: a tool execution error the model can self-correct from (spec "Error Handling"). */
   readonly isError: true;
-  /** The serialised `ToolErrorBody`. */
-  readonly content: readonly [{ readonly type: "text"; readonly text: string }];
-  /** The same body, structured. */
-  readonly structuredContent: ToolErrorBody;
+  /** The serialised `ToolErrorBody` (a mutable tuple: the SDK's CallToolResult type requires it). */
+  readonly content: [{ type: "text"; text: string }];
+  /** The same body, structured (indexable, as the SDK's CallToolResult requires). */
+  readonly structuredContent: ToolErrorBody & Readonly<Record<string, unknown>>;
   /** Index signature the SDK's result type requires. */
   readonly [key: string]: unknown;
 }
@@ -194,7 +201,13 @@ export function newRequestId(): string {
   return `r-${randomBytes(6).toString("hex")}`;
 }
 
-const REQUEST_ID_RE = /^r-[0-9a-f]{12}$/;
+/**
+ * The STALE_ONLY hint when a dataset was never loaded (DatasetResult `stamp: null`) — the table
+ * hint ("older than its hard limit… allow_stale") would be wrong: there is nothing stale to allow
+ * (critic C-14 (c)).
+ */
+export const DATASET_NEVER_LOADED_HINT = "Run `ff refresh nflverse` in a terminal, then retry.";
+
 const SAFE_SEGMENT = /^[A-Za-z0-9_]{1,40}$/;
 const SAFE_REASON = /^[a-z_]{1,40}$/;
 const SAFE_HINT = /^[\x20-\x7e]{1,300}$/;
@@ -290,7 +303,14 @@ function classifyUnsafe(e: unknown): { code: ErrorCode; details: FfErrorDetails 
   }
   if (e instanceof Error) {
     const ff = ownProp(e, "ffCode");
-    if (isErrorCode(ff)) return { code: ff, details: {} };
+    if (isErrorCode(ff)) {
+      // A cross-layer hint is honoured only when it is one of the fixed server hints (never text
+      // that could have come from a file or upstream).
+      const hint = ownProp(e, "ffHint");
+      return typeof hint === "string" && SERVER_HINTS.has(hint)
+        ? { code: ff, details: { hint } }
+        : { code: ff, details: {} };
+    }
     if (isNetworkError(e)) return { code: "UPSTREAM_UNAVAILABLE", details: {} };
   }
   return { code: "INTERNAL", details: {} };
@@ -330,7 +350,7 @@ export function toToolError(e: unknown, requestId: string): ToolErrorResult {
   ) {
     error.upstream_status = details.upstream_status;
   }
-  const body = { error } as unknown as ToolErrorBody;
+  const body = { error } as unknown as ToolErrorBody & Readonly<Record<string, unknown>>;
   return {
     isError: true,
     content: [{ type: "text", text: JSON.stringify(body) }],
@@ -358,4 +378,65 @@ export function describeForLog(e: unknown): Record<string, unknown> {
   } catch {
     return { thrown: "unreadable" };
   }
+}
+
+// --- SDK integration: deferred validation + the handler wrapper (critic C-02) ------------------------
+
+/**
+ * A Standard Schema for `registerTool({ inputSchema })` that ADVERTISES `schema`'s JSON Schema in
+ * tools/list but passes every argument through unvalidated, so validation happens in `wrapHandler`
+ * and its failures become the coded VALIDATION / INVALID_KEY results of plan 01 §4.3 instead of the
+ * SDK's free-text "Input validation error: …" (which echoes attacker-chosen paths and messages).
+ */
+export function deferValidation(schema: z.ZodType): StandardSchemaWithJSON<unknown, unknown> {
+  const std = schema["~standard"] as unknown as StandardSchemaWithJSON["~standard"];
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "ff-deferred",
+      validate: (value: unknown) => ({ value }),
+      jsonSchema: std.jsonSchema,
+    },
+  };
+}
+
+/** What `wrapHandler` gives a tool implementation besides its parsed arguments. */
+export interface HandlerContext {
+  /** This call's request id: put it in the envelope (`meta.request_id`) and every log line. */
+  readonly requestId: string;
+}
+
+/** Options for `wrapHandler`. */
+export interface WrapOptions {
+  /** Called with every thrown value (log it with `describeForLog` under the same request id). */
+  readonly onError?: (e: unknown, requestId: string) => void;
+  /** Request-id source (tests); default `newRequestId`. */
+  readonly newId?: () => string;
+}
+
+/**
+ * Wraps a tool implementation so no code path can skip the error contract: mints the request id,
+ * parses the raw arguments with `schema` (a failure → VALIDATION / INVALID_KEY), runs `fn`, and maps
+ * ANY throw (or rejected promise) through `toToolError`. Register with `deferValidation(schema)`.
+ */
+export function wrapHandler<S extends z.ZodType>(
+  schema: S,
+  fn: (args: z.output<S>, ctx: HandlerContext) => Promise<ToolSuccessResult> | ToolSuccessResult,
+  opts: WrapOptions = {},
+): (raw: unknown) => Promise<ToolSuccessResult | ToolErrorResult> {
+  return async (raw: unknown) => {
+    const requestId = (opts.newId ?? newRequestId)();
+    try {
+      const parsed = schema.safeParse(raw ?? {});
+      if (!parsed.success) return toToolError(parsed.error, requestId);
+      return await fn(parsed.data, { requestId });
+    } catch (e) {
+      try {
+        opts.onError?.(e, requestId);
+      } catch {
+        // a failing logger must not change the result
+      }
+      return toToolError(e, requestId);
+    }
+  };
 }

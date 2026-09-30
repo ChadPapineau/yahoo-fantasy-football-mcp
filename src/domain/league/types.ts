@@ -4,9 +4,15 @@
 // platform stat lines, matchups, standings, transactions, paging; plan 07 A1–A5/B1 shapes; plan
 // 05 §14.2 lock schedule). Wire-free: no XML element, JSON key or nflverse column name appears here.
 // Text fields hold RAW third-party strings; src/mcp wraps or path-lists them on output (plan 02 §6).
-import type { PlatformId } from "../scoring/types.js";
+// Also: the platform provenance stamp every seam read returns (plan 01 §4.2/§5.4; critic C-01), the
+// short-code grammars every provider must enforce so no prose rides in a code field (plan 02 §6.2;
+// critic C-15), the manual player-key rule (critic C-13) and the league-side repository ports tools
+// read (moved out of src/store so src/mcp may type against them; critic C-10).
+import { isNflTeam, GSIS_ID_RE } from "../../config/schema.js";
+import type { FreshnessClassId } from "../../config/freshness.js";
+import type { PlatformId, ProjectionSubject, ScoringSettings } from "../scoring/types.js";
 
-export type { PlatformId } from "../scoring/types.js";
+export type { PlatformId, ProjectionSubject } from "../scoring/types.js";
 
 /** An NFL week number, 1..22 (plan 02 §5 bound). */
 export type Week = number;
@@ -34,6 +40,54 @@ export interface TeamRef {
 export interface PlayerRef {
   readonly platform: PlatformId;
   readonly id: string;
+}
+
+/**
+ * A platform player key (`461.p.30123`, `manual.p.00-0012345`, `manual.p.def-kc`). Documented as a
+ * key, never a name: every field typed PlayerKey must hold a string matching the key grammar
+ * (src/config/schema.ts), and tool schemas validate it (critic C-22 — a brand was rejected: see
+ * decisions; the walker test + the grammar checks enforce it instead).
+ */
+export type PlayerKey = string;
+
+// --- provenance of platform facts (plan 01 §4.2 meta, §5.3 force_refresh, §5.4 allow_stale) ---------
+
+/** Which platform produced a fact (the `meta.source[]` tag of a platform input). */
+export type PlatformSourceTag = "manual" | "yahoo" | "sleeper" | "espn";
+
+/**
+ * Provenance of one platform read (critic C-01): enough for a tool to build its envelope InputStamp
+ * without knowing which provider served it. ManualLeagueProvider stamps `as_of` = league.yaml mtime,
+ * `fetched_at` = when it read the file, class `manual_league` (basis `file`); YahooProvider (1b)
+ * stamps the cache entry's fetch time and its class (`platform_roster`, …).
+ */
+export interface PlatformStamp {
+  readonly source: PlatformSourceTag;
+  /** Newest content timestamp (Yahoo response time; the league file's mtime). */
+  readonly as_of: IsoInstant;
+  /** When the provider fetched/read it. */
+  readonly fetched_at: IsoInstant;
+  /** The freshness class the value is judged by. */
+  readonly freshness: FreshnessClassId;
+  /** Platform scoring for the week is not final yet. */
+  readonly provisional: boolean;
+}
+
+/** A platform value with its provenance: what every seam read returns. */
+export interface Stamped<T> {
+  readonly value: T;
+  readonly stamp: PlatformStamp;
+}
+
+/**
+ * Per-read options every seam read accepts (plan 07 §2 common inputs): `force_refresh` (bypass the
+ * provider cache; platform-fact tools only, once per 60 s per key — plan 01 §5.3) and `allow_stale`
+ * (serve beyond the hard limit instead of STALE_ONLY — plan 01 §5.4). The manual provider ignores
+ * both (it re-reads the file every time).
+ */
+export interface ReadOptions {
+  readonly force_refresh?: boolean;
+  readonly allow_stale?: boolean;
 }
 
 /** A page request (plan 01 §4.2: `limit` 1..100, `offset` 0..10 000). */
@@ -153,6 +207,78 @@ export type SlotClass = "starter" | "flex" | "bench" | "ir" | "other";
 /** Positions a slot accepts (platform position strings, e.g. `WR`, `RB`, `TE`). */
 export type PositionSet = readonly string[];
 
+// --- short-code grammars (plan 02 §6.2 invariant; critic C-15) --------------------------------------
+//
+// These fields are CODES, emitted bare and unlisted, so they must never carry prose. A provider's
+// normaliser validates each against its grammar: ManualLeagueProvider REJECTS a league.yaml whose
+// code field fails (the file is hand/model-written), YahooProvider maps a failing value to null (or
+// drops the entry). Free text lives only in the wrapped/path-listed fields (names, status_full,
+// injury_note, notes).
+
+/** Injury/status codes: `Q`, `O`, `IR`, `PUP`, `NFI-R`, `SUSP`, `NA`. */
+export const STATUS_CODE_RE = /^[A-Z]{1,4}(?:-[A-Z]{1,2})?$/;
+/** Display positions: `QB`, `WR`, `K`, `DEF`, IDP `DB`/`LB`/`DL`. */
+export const POSITION_RE = /^[A-Z]{1,4}$/;
+/** Slot names and eligible positions: `WR`, `W/R/T`, `Q/W/R/T`, `BN`, `IR`, `DEF`. */
+export const SLOT_NAME_RE = /^[A-Z][A-Z/+]{0,9}$/;
+/** A platform's own team abbreviation (Yahoo spells some differently from nflverse — `Jax`, `WSH`). */
+export const TEAM_ABBR_RE = /^[A-Za-z]{2,4}$/;
+/** Lowercase platform enums: matchup/transaction status, source/destination types, raw types. */
+export const PLATFORM_CODE_RE = /^[a-z][a-z0-9_/]{0,23}$/;
+
+/** Field name → the grammar its value must match (the walker test's allow-list of bare code fields). */
+export const CODE_FIELD_GRAMMARS: Readonly<Record<string, RegExp>> = Object.freeze({
+  status: STATUS_CODE_RE,
+  position: POSITION_RE,
+  eligible_positions: SLOT_NAME_RE,
+  eligible: SLOT_NAME_RE,
+  slot: SLOT_NAME_RE,
+  team_abbr: TEAM_ABBR_RE,
+  matchup_status: PLATFORM_CODE_RE,
+  transaction_status: PLATFORM_CODE_RE,
+  transaction_type: PLATFORM_CODE_RE,
+  source_type: PLATFORM_CODE_RE,
+  destination_type: PLATFORM_CODE_RE,
+});
+
+/** A code value if it matches `re`, else null — the Yahoo-side normaliser's mapping. */
+export function codeOrNull(value: string | null | undefined, re: RegExp): string | null {
+  return typeof value === "string" && value.length <= 32 && re.test(value) ? value : null;
+}
+
+/**
+ * Statuses that make a player eligible for an IR slot (research 03 §C.1, Yahoo help SLN28136): IR,
+ * NFI-R, NFI-A, O, PUP. Everything else (D, NA, P, Q, CEL, SUSP) is ineligible — B1
+ * `ir_ineligible_in_ir`, D2 `ir_eligible` (plan 07; critic C-19).
+ */
+export const IR_ELIGIBLE_STATUSES: readonly string[] = Object.freeze([
+  "IR",
+  "NFI-R",
+  "NFI-A",
+  "O",
+  "PUP",
+]);
+
+// --- manual player keys (plan 01 §8 X1; critic C-13) -------------------------------------------------
+
+/**
+ * The ManualLeagueProvider player key for a subject — the ONE rule the provider, E5, C1 and E12/E13
+ * all use, so their joins agree: `manual.p.<gsis_id>` for a player, `manual.p.def-<team lowercase>`
+ * for a team defence. Throws RangeError on an invalid gsis id or team; every key it returns matches
+ * MANUAL_KEY_RE.player (a test pins that for every NFL team).
+ */
+export function manualPlayerKeyFor(subject: ProjectionSubject): PlayerKey {
+  let key: string;
+  if (subject.kind === "player") {
+    if (!GSIS_ID_RE.test(subject.gsis_id)) throw new RangeError("league: invalid gsis id");
+    key = `manual.p.${subject.gsis_id}`;
+  } else {
+    if (!isNflTeam(subject.nfl_team)) throw new RangeError("league: invalid nfl team");
+    key = `manual.p.def-${subject.nfl_team.toLowerCase()}`;
+  }
+  return key;
+}
+
 /** One slot type: the platform's literal name (`W/R/T`, `BN`, `IR`), class, count, eligibility. */
 export interface RosterSlot {
   readonly name: string;
@@ -188,14 +314,14 @@ export interface PlatformPlayer {
   readonly ref: PlayerRef;
   /** Raw full name (bare, path-listed on output). */
   readonly name: string;
-  /** Team abbreviation as the platform spells it (the crosswalk maps it). */
+  /** Team abbreviation as the platform spells it (TEAM_ABBR_RE; the crosswalk maps it). */
   readonly team_abbr: string | null;
-  /** Display position, e.g. `WR`, `K`, `DEF`. */
+  /** Display position, e.g. `WR`, `K`, `DEF` (POSITION_RE). */
   readonly position: string;
-  /** Positions this player is eligible for in this league. */
+  /** Positions/slots this player is eligible for in this league (SLOT_NAME_RE each). */
   readonly eligible_positions: readonly string[];
   readonly uniform_number: number | null;
-  /** Short status code (`Q`, `O`, `IR`, …) or null. */
+  /** Short status code (`Q`, `O`, `IR`, …; STATUS_CODE_RE) or null. */
   readonly status: string | null;
   /** Raw long status text (editor-authored; wrapped). */
   readonly status_full: string | null;
@@ -212,7 +338,7 @@ export interface PlatformPlayer {
 /** One player on a roster in one week. */
 export interface RosterEntry {
   readonly player: PlatformPlayer;
-  /** The slot's literal name (`WR`, `W/R/T`, `BN`, `IR`). */
+  /** The slot's literal name (`WR`, `W/R/T`, `BN`, `IR`; SLOT_NAME_RE). */
   readonly slot: string;
   readonly slot_class: SlotClass;
   readonly is_flex: boolean;
@@ -235,7 +361,7 @@ export interface Roster {
 /** One lock instant and the players that lock at it (plan 07 B1 `lock_schedule[]`, 05 §14.2). */
 export interface LockScheduleEntry {
   readonly lock_at: IsoInstant;
-  readonly player_keys: readonly string[];
+  readonly player_keys: readonly PlayerKey[];
 }
 
 /** A player's platform stat line: platform stat ids → values (plan 01 §8 `getPlayerWeekStats`). */
@@ -267,7 +393,7 @@ export interface MatchupTeam {
 /** A head-to-head matchup (plan 07 A4). */
 export interface Matchup {
   readonly week: Week;
-  /** `preevent` | `midevent` | `postevent` or a platform string. */
+  /** `preevent` | `midevent` | `postevent` or another PLATFORM_CODE_RE code. */
   readonly status: string;
   readonly is_playoffs: boolean;
   readonly is_consolation: boolean;
@@ -331,4 +457,92 @@ export interface Transaction {
   readonly tradee_team_key: string | null;
   /** Raw trade note (manager-authored; wrapped). */
   readonly note: string | null;
+}
+
+// --- league-side repository ports (implemented by src/store; critic C-10) ---------------------------
+//
+// Moved here from src/store/types.ts so src/mcp (which may not import src/store, not even types)
+// can type G1/A2/A5 and the settings-changed flag against the real contract. Required writes return
+// a Promise: the store yields between 100 ms busy_timeout attempts for up to 1 s, then throws
+// StoreBusyError, so the stdio event loop is never blocked for the whole budget (critic C-04;
+// plan 03 §1.2). Reads stay synchronous (one SQLite statement).
+
+/** A normalised league-settings snapshot (plan 01 §5.2; referenced by the log, never pruned). */
+export interface LeagueSettingsRow {
+  readonly league_key: string;
+  readonly settings_hash: string;
+  readonly scoring: ScoringSettings;
+  readonly slots: RosterSlots;
+  readonly rules: LeagueRules;
+  readonly fetched_at: IsoInstant;
+}
+
+/** A settings health flag (plan 03 §5 rows 19–20; plan 08 §6.3). */
+export interface SettingsFlag {
+  readonly league_key: string;
+  readonly kind: "scoring_mismatch" | "scoring_mismatch_league" | "settings_changed";
+  /** Fixed-vocabulary detail codes (never platform text). */
+  readonly detail: readonly string[];
+  readonly raised_at: IsoInstant;
+  readonly acknowledged: boolean;
+}
+
+/** league_settings (required). */
+export interface LeagueSettingsRepository {
+  put(row: LeagueSettingsRow): Promise<void>;
+  byHash(settingsHash: string): LeagueSettingsRow | null;
+  latest(leagueKey: string): LeagueSettingsRow | null;
+  raiseFlag(flag: SettingsFlag): Promise<void>;
+  openFlags(leagueKey: string): readonly SettingsFlag[];
+}
+
+/** A roster snapshot (plan 06 §1.3; `ff://roster/snapshot`). */
+export interface RosterSnapshot {
+  readonly team_key: string;
+  readonly week: Week;
+  readonly taken_at: IsoInstant;
+  readonly roster: Roster;
+}
+
+/** roster_snapshot (required). */
+export interface RosterSnapshotRepository {
+  put(s: RosterSnapshot): Promise<void>;
+  /** The newest two snapshots (newest first) for diffs. */
+  latestTwo(teamKey: string): readonly RosterSnapshot[];
+}
+
+/** A scoreboard snapshot (pre-week platform win probability, for later calibration — tension T11). */
+export interface ScoreboardSnapshot {
+  readonly league_key: string;
+  readonly week: Week;
+  readonly taken_at: IsoInstant;
+  /** The serialised matchups. */
+  readonly matchups_json: string;
+}
+
+/** scoreboard_snapshot (required). */
+export interface ScoreboardSnapshotRepository {
+  put(s: ScoreboardSnapshot): Promise<void>;
+  forWeek(leagueKey: string, week: Week): readonly ScoreboardSnapshot[];
+}
+
+/** A free-agent pool snapshot (plan 06 §1.3). */
+export interface FaPoolSnapshot {
+  readonly league_key: string;
+  readonly taken_at: IsoInstant;
+  readonly players: readonly PlatformPlayer[];
+}
+
+/** fa_pool_snapshot (required). */
+export interface FaPoolSnapshotRepository {
+  put(s: FaPoolSnapshot): Promise<void>;
+  latestTwo(leagueKey: string): readonly FaPoolSnapshot[];
+}
+
+/** transactions_seen (required, append-only): history beyond the platform's "most recent N". */
+export interface TransactionsSeenRepository {
+  /** Appends unseen transactions (dedup by key); resolves to how many were new. */
+  appendNew(leagueKey: string, txns: readonly Transaction[], seenAt: IsoInstant): Promise<number>;
+  list(leagueKey: string, since: IsoInstant | null, limit: number): readonly Transaction[];
+  oldestSeen(leagueKey: string): IsoInstant | null;
 }
