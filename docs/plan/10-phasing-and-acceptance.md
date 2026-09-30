@@ -129,8 +129,9 @@ Phase 1 is one product — `v0.1.0` is tagged when **both** halves are green —
 - A11b **Skills Lane 2 (manual, tokens):** ON-1..3, WK-1..3, AP-2 and AP-4 pass the plan 09 §5.2 bar; trigger evals as in A11a.
 - A12 **Model-driven evals (plan 05 §6):** ≥ 8/10 on the 10 read-only fixture questions.
 - A16 **Usefulness check (manual, named evidence):** Chad runs `/onboard` then `/weekly` on the live league and confirms in HANDOFF that the briefing contained a lineup with intervals and `P(win)`, a K/DEF verdict with implied totals, every deadline, the attribution line, and a `log_id` per section.
+- A18 **XML safety (round 1, OBJ-14):** `xml.ts` sets `processEntities: false` and `htmlEntities: false`; the internal-`DOCTYPE` entity fixture is not expanded and the billion-laughs fixture is inert in < 1 s; the mutation check (plan 05 §2 `providers/yahoo/xml`) shows the fixture test red with `processEntities: true`; the `supply-chain` job's full-tree diff (`npm ls --omit=dev --all`) matches plan 04 §2's count for the chosen `fast-xml-parser` pin.
 
-**Exit gate (1b).** A1b, A3b, A4b, A5b green in CI on the tagged SHA; A2, A11b, A12, A16 done by Chad with evidence in `docs/evals/`. Tag `v0.1.0` (pre-1.0 semver, plan 04 §4.4) once **both** 1a and 1b gates are green.
+**Exit gate (1b).** A1b, A3b, A4b, A5b, A18 green in CI on the tagged SHA; A2, A11b, A12, A16 done by Chad with evidence in `docs/evals/`. Tag `v0.1.0` (pre-1.0 semver, plan 04 §4.4) once **both** 1a and 1b gates are green.
 
 **Explicitly deferred to Phase 2.** Usage (`ff_get_player_usage`), skill-position waivers, trades, cascades, schedule planning, roster audit, news, live/season matchup modes, the odds driver, Sleeper/DynastyProcess seeds, the plugin manifest. **Deferred to `later`** (round 1, OBJ-21): `ff_get_playbook`, `ff_analyze_scoring`. (No longer deferred: `stats_player_week` and weather are in 1a.)
 
