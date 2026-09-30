@@ -152,7 +152,8 @@ export const toPosix = (p) => p.split(path.sep).join("/");
 // --- frontmatter: a strict subset of YAML, enough for SKILL.md --------------------------------------
 
 /**
- * @typedef {string | number | boolean | null | FmValue[] | { [k: string]: FmValue }} FmValue
+ * @typedef {string | number | boolean | null} FmScalar
+ * @typedef {FmScalar | FmScalar[] | Record<string, FmScalar>} FmValue
  * @typedef {{ data: Record<string, FmValue>, start: number, end: number, bodyStart: number }} Frontmatter
  */
 
@@ -182,7 +183,7 @@ export function parseFrontmatter(text) {
       continue;
     }
     if (line.includes("\t")) throw new Error(`frontmatter line ${n}: tabs are not allowed`);
-    const m = /^([A-Za-z][A-Za-z0-9_-]*):(?:\s+(.*))?$/.exec(line);
+    const m = /^([A-Za-z][A-Za-z0-9_-]*):(?:\s+(.*))?$/s.exec(line);
     if (!m) throw new Error(`frontmatter line ${n}: expected \`key: value\` at column 0`);
     const key = m[1] ?? "";
     if (Object.hasOwn(data, key))
@@ -205,10 +206,10 @@ export function parseFrontmatter(text) {
     if (block.every((b) => /^ {2}- /.test(b))) {
       data[key] = block.map((b, k) => parseScalar(b.slice(4).trim(), n + 1 + k));
     } else if (block.every((b) => /^ {2}[A-Za-z][A-Za-z0-9_-]*:\s+\S/.test(b))) {
-      /** @type {Record<string, FmValue>} */
+      /** @type {Record<string, FmScalar>} */
       const map = {};
       for (const [k, b] of block.entries()) {
-        const mm = /^ {2}([A-Za-z][A-Za-z0-9_-]*):\s+(.*)$/.exec(b);
+        const mm = /^ {2}([A-Za-z][A-Za-z0-9_-]*):\s+(.*)$/s.exec(b);
         const sub = mm?.[1] ?? "";
         if (Object.hasOwn(map, sub)) {
           throw new Error(`frontmatter line ${n + 1 + k}: duplicate key \`${key}.${sub}\``);
@@ -229,7 +230,7 @@ export function parseFrontmatter(text) {
 /**
  * @param {string} s
  * @param {number} n line number for errors
- * @returns {FmValue}
+ * @returns {FmScalar | FmScalar[]}
  */
 function parseScalarOrFlow(s, n) {
   if (s.startsWith("[")) {
@@ -279,12 +280,12 @@ function splitFlow(s, n) {
 /**
  * @param {string} s
  * @param {number} n
- * @returns {FmValue}
+ * @returns {FmScalar}
  */
 function parseScalar(s, n) {
   if (s === "") throw new Error(`frontmatter line ${n}: empty value`);
   if (s.startsWith('"')) {
-    if (!/^"(?:[^"\\]|\\.)*"$/.test(s))
+    if (!/^"(?:[^"\\]|\\.)*"$/s.test(s))
       throw new Error(`frontmatter line ${n}: bad double-quoted string`);
     try {
       return /** @type {string} */ (JSON.parse(s));
