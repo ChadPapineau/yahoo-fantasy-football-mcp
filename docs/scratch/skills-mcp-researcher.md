@@ -6,7 +6,8 @@ Working notes for the Skills + MCP-design research (brief:
 
 ## RESUME HERE
 
-- **Status:** RESEARCH COMPLETE 2026-09-29 (evidence log below); WRITING docs/research/06 next — sections A→E in order, push after each.
+- **Status:** COMPLETE 2026-09-29. `docs/research/06-skills-and-mcp-design.md` sections A–G written and pushed (A+B `3002963`, C+D `07dd3a1`, E+F+G in the final commit). No `.wip.patch` was ever needed (each section was pushed as it landed). Nothing left in flight.
+- **If resumed:** only follow-ups remain — the 15 unverified items in 06 §F (U-1…U-15), each a one-test question for the build phase; and the product planner may rename tools/Skills in `docs/plan/07`/`09`.
 - **Owned paths:** `docs/research/06-skills-and-mcp-design.md`,
   `docs/scratch/skills-mcp-researcher.md` (+ `.wip.patch` while in flight).
 - **Do not touch:** README.md, .gitignore, .env.example, docs/research/00–05,
@@ -21,10 +22,7 @@ Working notes for the Skills + MCP-design research (brief:
   - D. Candidate Skills catalog (purpose, triggers + non-triggers, tools in
     order, inputs, outputs, guardrails, evals, gaps).
   - E. Repo layout + lifecycle (versioning, install paths, evals in CI).
-- **Next step:** load `anthropic-skills:mcp-builder`; read skill-creator
-  SKILL.md + siblings; read docs/research/00, 02, 03, 05 (§19, §16, output
-  shapes), 04 if present; then fetch the MCP spec (current revision) and
-  Claude Code Skills/plugins docs. Write A first, push; then B; then C/D; then E.
+- **Next step:** none for this agent. Hand-off: orchestrator reads 06 §"The answer in one paragraph", §B.1 criteria, §D catalog, §F unverified.
 - **Constraint to design around:** Yahoo API is read-only by default and write
   access is "not available at this time" — confirmation mechanism applies to a
   conditional write capability; every Skill must be fully useful read-only.
@@ -76,3 +74,6 @@ Working notes for the Skills + MCP-design research (brief:
 - FantasyPros MCP (commercial, remote HTTP + OAuth): free rankings/projections/research/league tools; premium start_sit_assistant, trade_analyzer, trade_finder, waiver_finder, waiver_analyzer.
 - jasonbhorne/claude-code-skills fantasy-football (4 modes, 5 parallel WebSearch agents, .docx output; MIT). michaelfromyeg/fantasy-sports-toolkit (Weft-compiled multi-harness skills + Sleeper/Yahoo MCPs; Reddit sentiment). jbaros/sleeper-ffb-worker (read-only Sleeper, 10 workflow tools, Workers). ruchirpipalia-spec/fantasy-football-agent (Sleeper MCP + skill; nflverse + Sleeper + ESPN RSS + optional FantasyPros; MIT). machina-sports/sports-skills (30+ data skills, no fantasy-football; ESPN undocumented endpoints; record/replay env var). mcpmarket fantasy-football-analytics-ml (zazu-22; ML projection guidance; references + template). skills.sh search: not searchable via fetch (homepage only). curtisawe-cmd/FF-Site: 404.
 - Exemplary non-sports (local, official marketplace): skill-creator (evals/evals.json + grader/analyzer agents + eval-viewer), math-olympiad (evals/trigger_eval.json should_trigger true/false ×20; references/ by concern; scripts/), mcp-server-dev/build-mcp-server (references/ per topic incl. elicitation.md canonical capability-check + fallback, tool-design.md Directory hard requirements: readOnlyHint/destructiveHint/title mandatory, read/write in separate tools, descriptions must not instruct behaviour).
+
+- 2026-09-29: evidence log pushed (`2a34e8d`); A+B pushed (`3002963`); C+D pushed (`07dd3a1`); E+F+G + this status in the final commit.
+- Note for the orchestrator: one classifier denial occurred (reading a persisted tool-result file under `~/.claude/projects/…`); the source `SKILL.md` was read directly instead. Two WebFetch pages (Claude Code `skills.md`, `plugin-evals.md`) exceeded the summariser and were pulled with `curl` + `grep` into the session scratchpad instead — same content, no workaround of any denial.
