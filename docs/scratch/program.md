@@ -27,9 +27,14 @@ rule, 2026-09-24). Waves start when a slot frees.
 | 2 | `data-source-evaluator` | `docs/research/04-data-sources.md`, `docs/scratch/data-source-evaluator.md` | wave-1 verdicts (which wrappers passed) |
 | 2 | `fantasy-strategy-analyst` | `docs/research/05-strategy-and-analytics.md`, `docs/scratch/fantasy-strategy-analyst.md` | — |
 | 3 | `skills-mcp-researcher` | `docs/research/06-skills-and-mcp-design.md`, `docs/scratch/skills-mcp-researcher.md` | waves 1–2 |
-| 4 | orchestrator + `architecture-planner` | `docs/plan/*` | all research |
-| 5 | `devils-advocate` (multi-round) | `docs/plan/adversarial-log.md` | the plan |
-| 6 | `docs-writer` | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md` | refined plan |
+| 3 | `architecture-planner-core` | `docs/plan/01-system-architecture.md`, `02-security-architecture.md`, `03-lifecycle-and-operations.md`, `04-repo-structure-and-ci.md`, `05-testing-strategy.md`, `06-automation-inventory.md`, `docs/scratch/architecture-planner-core.md` | docs 01–04 (not 05/06) |
+| 4 | `product-planner` | `docs/plan/07-tool-catalog.md`, `08-scoring-engine.md`, `09-skills-bundle.md`, `10-phasing-and-acceptance.md`, `docs/scratch/product-planner.md` | plan 01–06, docs 04–06 |
+| 5 | `devils-advocate` (multi-round, orchestrator defends) | `docs/plan/adversarial-log.md` | the whole plan |
+| 6 | `docs-writer` | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` | refined plan |
+
+The plan is split by file ownership so the core planner can run alongside
+the wave-3 researcher (it does not need doc 05/06), and the product planner
+runs once 05/06 and the core plan exist.
 
 Orchestrator-owned: `docs/scratch/roster.md`, `docs/scratch/program.md`,
 `docs/scratch/briefs/*`, the handoff document (pending Chad's answer).
