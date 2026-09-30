@@ -6,6 +6,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IsoInstant } from "../../domain/league/types.js";
+import { isTransientNetworkError } from "../../http/errors.js";
 import type { HttpGet, ReleaseVersion, SourceContext, TempFile } from "../source.js";
 
 /** Where every nflverse release asset lives. */
@@ -150,7 +151,9 @@ async function httpGetOrNull(
     if (res.status !== 200 || res.body.length > TIMESTAMP_MAX_BYTES) return null;
     return res.body;
   } catch (err) {
-    if (signal.aborted) throw err;
+    // a transient failure (DNS, reset, timeout, 5xx, 429) is re-thrown so the runner retries it
+    // (plan 01 §6, max 3 attempts); anything else reads as "unreachable" (null)
+    if (signal.aborted || isTransientNetworkError(err)) throw err;
     return null;
   }
 }

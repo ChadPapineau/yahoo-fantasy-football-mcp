@@ -18,6 +18,7 @@ import {
   PRESET_REC,
 } from "../../../src/providers/manual/index.js";
 import { canonicalJson, positionTypeOf } from "../../../src/providers/manual/scoring.js";
+import { computeSettingsHash, normalizeSettings } from "../../../src/domain/scoring/settings.js";
 import { formatPath } from "../../../src/providers/manual/schema.js";
 import { edit, FIXTURE_TEXT, provider, tempLeague, type TempLeague } from "./helpers.js";
 
@@ -93,9 +94,26 @@ describe("scoring presets", () => {
     const a = buildScoringSettings({ preset: "ppr", overrides: { pass_td: 6, rush_td: 7 } });
     const b = buildScoringSettings({ preset: "ppr", overrides: { rush_td: 7, pass_td: 6 } });
     expect(a.settings_hash).toBe(b.settings_hash);
+    // the scoring engine's one definition: an undefined property is absent (JSON semantics)
     expect(canonicalJson({ b: 1, a: [2, { d: null, c: undefined }] })).toBe(
-      '{"a":[2,{"c":null,"d":null}],"b":1}',
+      '{"a":[2,{"d":null}],"b":1}',
     );
+  });
+
+  it("negative_points: false floors the player-week total (plan 08 §4.4, P9); true does not", () => {
+    const off = buildScoringSettings({ preset: "ppr", negative_points: false });
+    const on = buildScoringSettings({ preset: "ppr", negative_points: true });
+    const dflt = buildScoringSettings({ preset: "ppr" });
+    expect(off.negative_floor).toEqual({ scope: "player_week_total", verified: false });
+    expect(on.negative_floor).toEqual({ scope: "none", verified: false });
+    expect(dflt.negative_floor).toEqual({ scope: "none", verified: false });
+    expect(off.settings_hash).not.toBe(on.settings_hash);
+  });
+
+  it("the hash is the scoring engine's (normalizeSettings is idempotent on the result)", () => {
+    const s = buildScoringSettings({ preset: "half_ppr", overrides: { pass_td: 6 } });
+    expect(normalizeSettings(s).settings_hash).toBe(s.settings_hash);
+    expect(computeSettingsHash(s)).toBe(s.settings_hash);
   });
 });
 
