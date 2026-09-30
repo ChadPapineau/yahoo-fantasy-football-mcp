@@ -84,7 +84,13 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
    the notes). Does Chad already hold an approved Yahoo client id with the
    Fantasy permission from an earlier project? If so, live testing can start
    sooner. If not, the application should go in early — review latency is
-   unknown (`03-yahoo-api.md` §F.18).
+   unknown (`03-yahoo-api.md` §F.18). Orchestrator-verified 2026-09-29: the
+   403 "not authorized" wave on previously working apps began 2026-07-22
+   (user reports in `uberfastman/yfpy#84`), the create-app form no longer
+   offers the Fantasy permission, and **no one in that thread reports
+   having been approved through the new form yet**. Approval for a
+   personal, single-league tool is therefore an open risk, not a formality.
+   A legacy app that still works would be valuable — check before applying.
 5. **Two public repos contain real Yahoo credentials/tokens in their git
    history** (`carterfawson/fantasy-football-mcp` and
    `derekrbreese/fantasy-football-mcp-public`; verified by the orchestrator
