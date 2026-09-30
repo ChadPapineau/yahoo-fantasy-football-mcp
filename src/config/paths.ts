@@ -177,14 +177,17 @@ export function isInside(child: string, parent: string): boolean {
 
 /**
  * Resolves symlinks in the longest existing prefix of `p` and re-appends the rest, so a path whose
- * parent is a symlink into the repo is still caught. Never throws for a missing path.
+ * parent is a symlink into the repo is still caught. Never throws for a missing path. Uses the
+ * native realpath(3), which on macOS also returns the ON-DISK spelling (case and Unicode form) of
+ * every existing component: `~/documents` on case-insensitive APFS resolves to `~/Documents`
+ * (QA-1-086; the JS implementation keeps the caller's casing).
  */
 export function realpathOfExistingPrefix(p: string): string {
   let head = path.resolve(p);
   const tail: string[] = [];
   for (;;) {
     try {
-      return path.join(realpathSync(head), ...tail.reverse());
+      return path.join(realpathSync.native(head), ...tail.reverse());
     } catch {
       const parent = path.dirname(head);
       if (parent === head) return path.resolve(p);
@@ -194,11 +197,34 @@ export function realpathOfExistingPrefix(p: string): string {
   }
 }
 
+/**
+ * The comparison key of a path on `platform`'s default filesystem: macOS volumes (APFS, HFS+) are
+ * case-insensitive and normalisation-insensitive by default, so `~/DOCUMENTS` and an NFD spelling
+ * name the same directory as `~/Documents`; elsewhere a path is compared byte for byte. Folding on
+ * a case-sensitive macOS volume can only over-refuse, never let a synced/repo path through.
+ */
+export function pathKey(p: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === "darwin" ? p.normalize("NFC").toLowerCase() : p;
+}
+
+/** `isInside` under the filesystem's own notion of "the same name" (see `pathKey`). */
+export function isInsideOnFs(
+  child: string,
+  parent: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return isInside(pathKey(child, platform), pathKey(parent, platform));
+}
+
+/** Every spelling a location guard must check `p` under: as given, and its resolved real path. */
+function spellings(p: string): string[] {
+  return [path.resolve(p), realpathOfExistingPrefix(p)];
+}
+
 /** Throws `inside_repo` when `p` (or what its existing prefix resolves to) is inside `repoRoot`. */
 export function assertOutsideRepo(p: string, repoRoot: string, what = "path"): void {
-  const real = realpathOfExistingPrefix(p);
-  const roots = [path.resolve(repoRoot), realpathOfExistingPrefix(repoRoot)];
-  if (roots.some((r) => isInside(path.resolve(p), r) || isInside(real, r))) {
+  const roots = spellings(repoRoot);
+  if (spellings(p).some((c) => roots.some((r) => isInsideOnFs(c, r)))) {
     throw new PathSecurityError("inside_repo", p, what);
   }
 }
@@ -215,9 +241,8 @@ export function syncedFolders(home: string): readonly string[] {
 
 /** Throws `synced_folder` when `p` lies in a cloud-synced folder (secrets and league data would upload). */
 export function assertNotSynced(p: string, home: string, what = "path"): void {
-  const real = realpathOfExistingPrefix(p);
-  const bases = syncedFolders(home).flatMap((b) => [b, realpathOfExistingPrefix(b)]);
-  if (bases.some((b) => isInside(path.resolve(p), b) || isInside(real, b))) {
+  const bases = syncedFolders(home).flatMap(spellings);
+  if (spellings(p).some((c) => bases.some((b) => isInsideOnFs(c, b)))) {
     throw new PathSecurityError("synced_folder", p, what);
   }
 }
@@ -308,23 +333,38 @@ function checkOwnerAndMode(st: Stats, p: string, what: string): void {
  * Every existing ancestor of `dir` (nearest first, `dir` itself excluded) that is writable by group
  * or other WITHOUT the sticky bit — a directory in which someone else could rename our directory
  * away and plant their own (ssh StrictModes). `/tmp` (mode 1777) passes: the sticky bit stops that.
+ * Both chains are walked: the path as spelled (a symlink sitting in a shared directory could itself
+ * be swapped) and its resolved real path (a symlinked component leads to a target whose own
+ * parents are what actually hold the directory — QA-1-091).
  */
 export function insecureAncestors(dir: string): string[] {
   const out: string[] = [];
-  let cur = path.dirname(path.resolve(dir));
-  for (;;) {
-    let st: Stats | null = null;
-    try {
-      st = statSync(cur);
-    } catch {
-      st = null;
+  const walk = (start: string): void => {
+    let cur = path.dirname(start);
+    for (;;) {
+      let st: Stats | null = null;
+      try {
+        st = statSync(cur);
+      } catch {
+        st = null;
+      }
+      if (
+        st?.isDirectory() === true &&
+        (st.mode & 0o022) !== 0 &&
+        (st.mode & 0o1000) === 0 &&
+        !out.includes(cur)
+      )
+        out.push(cur);
+      const parent = path.dirname(cur);
+      if (parent === cur) return;
+      cur = parent;
     }
-    if (st?.isDirectory() === true && (st.mode & 0o022) !== 0 && (st.mode & 0o1000) === 0)
-      out.push(cur);
-    const parent = path.dirname(cur);
-    if (parent === cur) return out;
-    cur = parent;
-  }
+  };
+  const abs = path.resolve(dir);
+  walk(abs);
+  const real = realpathOfExistingPrefix(abs);
+  if (real !== abs) walk(real);
+  return out;
 }
 
 /**
@@ -339,6 +379,9 @@ export function ensureSecureDir(dir: string, opts: { create: boolean; what?: str
   let st = lstatOrNull(dir);
   if (st === null) {
     if (!opts.create) throw new PathSecurityError("missing", dir, what);
+    // Refuse before creating anything: nothing is left behind under an insecure parent (QA-1-091).
+    if (insecureAncestors(dir).length > 0)
+      throw new PathSecurityError("insecure_ancestor", dir, what);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     st = lstatSync(dir);
   }

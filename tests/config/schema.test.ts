@@ -192,6 +192,26 @@ describe("locations (plan 02 §3.3)", () => {
     ]);
     for (const i of issues) expect(i.reason).toMatch(/cloud-synced/);
   });
+  it.runIf(process.platform === "darwin")(
+    "refuses every casing of a synced folder or the checkout for all three path keys [QA-1-086]",
+    () => {
+      mkdirSync(path.join(home, "Documents"), { mode: 0o700 });
+      const issues = issuesOf(() =>
+        loadConfig(
+          input({
+            FF_CONFIG_DIR: "~/documents/ff-config",
+            FF_CACHE_DIR: path.join(ROOT.toUpperCase(), "probe"),
+            FF_LEAGUE_FILE: "~/DESKTOP/league.yaml",
+          }),
+        ),
+      );
+      expect(issues).toEqual([
+        { key: "FF_CONFIG_DIR", reason: expect.stringMatching(/cloud-synced/) as unknown },
+        { key: "FF_CACHE_DIR", reason: expect.stringMatching(/inside the repository/) as unknown },
+        { key: "FF_LEAGUE_FILE", reason: expect.stringMatching(/cloud-synced/) as unknown },
+      ]);
+    },
+  );
   it("allows a league file inside FF_FIXTURE_DIR even when that is in the repo (fixture mode)", () => {
     const fixtures = path.join(ROOT, "fixtures");
     const c = loadConfig(
