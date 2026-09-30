@@ -99,6 +99,26 @@ export class StoreVersionError extends Error {
   }
 }
 
+/**
+ * The store file is older than the binary but the caller opened it with `migrate: false` (e.g. a
+ * read-only diagnostic): nothing is changed; run the server (or `ff doctor --fix`) to migrate.
+ * Added by the store build (additive).
+ */
+export class StoreMigrationPendingError extends Error {
+  readonly ffCode = "INTERNAL" as const;
+  readonly exitCode = 1 as const;
+  readonly storeVersion: number;
+  readonly binaryVersion: number;
+  constructor(storeVersion: number, binaryVersion: number) {
+    super(
+      `store schema version ${String(storeVersion)} is older than this binary (${String(binaryVersion)}) and migrations were not requested`,
+    );
+    this.name = "StoreMigrationPendingError";
+    this.storeVersion = storeVersion;
+    this.binaryVersion = binaryVersion;
+  }
+}
+
 // --- tables (plan 01 §8.2) -----------------------------------------------------------------------------
 
 /**
@@ -348,6 +368,16 @@ export interface StoreOpenOptions {
   readonly clock: Clock;
   /** Run pending migrations (under an exclusive transaction, after a consistent backup). */
   readonly migrate: boolean;
+  /**
+   * Which weather dataset `WeatherReader.forGames` consults first (FF_WEATHER_SOURCE; the other
+   * fills game ids the first lacks). Default `weather:open_meteo`. Added by the store build.
+   */
+  readonly weatherSource?: "weather:open_meteo" | "weather:nws";
+  /**
+   * Receives fixed-vocabulary warning codes (`dataset_row_skipped_team`, `dataset_unreadable`, …)
+   * so the caller can log them; the store itself never logs. Added by the store build.
+   */
+  readonly onWarning?: (code: string) => void;
 }
 
 /** A consistent backup (plan 03 L7: `sqlite.backup()` or `VACUUM INTO`, never a file copy). */
