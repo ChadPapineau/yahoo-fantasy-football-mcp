@@ -689,3 +689,227 @@ versus realised over the next 1–4 weeks (MAE), hit rate of the top predicted b
 being the top realised, and calibration of `P(role holds)`. "Working" = MAE below the naive
 depth-chart-next-man-up rule and top-beneficiary hit rate above it.
 
+---
+
+## 7. Bye-week and playoff-schedule planning
+
+### Inputs
+
+`bye_weeks` per player (Yahoo carries it on the player — 03 §B.4), the league's playoff
+settings (`playoff_start_week`, `num_playoff_teams`, `has_multiweek_championship`,
+reseeding — 03 §B.2), the NFL schedule (kind), my roster and §1 weekly projections, §2
+stream baselines by week, opponent defences' aFPA (for the weak matchup term), standings
+and §11 `P(playoffs)`.
+
+### Method
+
+**7.1 Stress-test the roster week by week.** For each remaining week run the §3 assignment
+with byes and known absences applied; record `lineup_pts(w)`, the slots filled from the
+stream baseline (holes), and the drop from the roster's no-bye lineup. A **bye cluster** is a
+week where ≥ 2 starters are out; its cost is `Σ (starter proj − replacement proj)`, not a
+count of players. Weight each week by whether it matters: `weight(w) = P(alive at w) ×
+importance(w)` — a bye cluster in week 14 (playoffs) costs more than one in week 6, but only
+if `P(playoffs)` is material.
+
+**7.2 Strength of schedule — what predicts and what does not.** The evidence says
+**preseason and early-season SOS by fantasy points allowed is close to noise**: YoY
+correlation of points allowed by position QB 0.27, RB 0.22, WR ≈ 0.15, TE 0.16 over
+2015–2025, with top-5 defences repeating only 20–30 % of the time [V 4for4/Eakins 2026, who
+concludes SOS "shows weak predictive power across most positions" and recommends aFPA over
+raw]. In-season aFPA on a rolling ~10-week window carries modest signal [V 4for4]. So:
+
+- Do **not** rank players for the playoff weeks by "playoff schedule" in August or
+  September; the product should say so.
+- From roughly week 8–10, apply the §1 step-6 matchup multiplier with its shrinkage, as a
+  tie-breaker between otherwise similar players, not as a driver.
+- What *does* carry into December: the player's own role and health, the team's implied
+  totals (the market re-prices weekly), weather for outdoor cold-weather venues (small, §1
+  step 7 — cold favours RBs slightly), and known rest/eliminated-team dynamics (late-season
+  benching of starters on eliminated teams is a real but unquantified risk [F]).
+
+**7.3 Decision rules that follow.** Trade-target and waiver horizons (§4, §5) use
+`weight(w)`; a bye-week hole in a week with `P(alive) ≈ 1` is worth solving only if the
+cheapest fix (a one-week streamer) leaves a gap larger than the FAAB/priority cost; a roster
+that has two starters on the same bye during the playoffs (possible only when the playoffs
+overlap late byes; Yahoo `playoff_start_week` says whether they do) is the one case where
+"schedule" should change a trade decision by itself.
+
+### Format sensitivity
+
+Bench size and IR slots set how many bye holes can be covered internally; 10-team leagues
+make the stream baseline higher, so holes are cheaper; superflex makes QB byes expensive
+(two QB slots to fill from a shallow pool); playoff format (weeks, reseeding, multi-week
+championship) changes `importance(w)`.
+
+### Pitfalls
+
+Counting byes instead of costing them; treating SOS as a signal before the data supports it;
+optimising for playoff weeks when `P(playoffs)` is low; forgetting that Yahoo's weekly
+deadlines/lock rules define what "covering a bye" requires (a Thursday bye hole cannot be
+fixed after Thursday); assuming defensive rankings from last year carry over.
+
+### Output shape
+
+`{weeks[]: {lineup_pts, holes[], bye_cluster_cost, weight}, worst_weeks[], fixes[]:
+{action, cost, Δ}, playoff_weeks: {matchup_multipliers (with shrinkage shown), note on
+evidence strength}}` plus the common contract.
+
+### Evaluation
+
+Backtest the SOS claim in the product's own data every season: correlation of the
+week-`t` matchup multiplier with realised points over `t..t+4`, by position and by week of
+season; the multiplier's tuned `β_pos` and `w(weeks)` should be re-fit yearly. Bye planning:
+regret of the chosen fix versus the best fix in hindsight.
+
+---
+
+## 8. K and DEF streaming
+
+### Inputs
+
+Implied team totals and spreads; roof/dome and weather (wind); team red-zone trips and
+third-down conversion; kicker FG attempt volume and long-FG history; opponent's sack rate
+allowed, turnover rate, pressure rate; the DEF's own sack and takeaway rates; the league's
+K and DEF scoring tiers from `S` (FG distance stat ids 19–23, PAT 29; DST points-allowed
+brackets stat ids 50–56, sacks 32, INT 33, fumble recovery 34, TDs 35/49, safety 36, block
+37 — 03 §B.5); the FA pool at K and DEF.
+
+### Method
+
+**8.1 Kickers.** What predicts: the **team's implied total** — kickers scored 10+ points more
+than twice as often when the implied total was ≥ 27 than when ≤ 26 [V 4for4 2023]; **field-goal
+volume and long-FG history** are the predictive components; **extra points** are highly
+predictable; **missed kicks and "bad in the red zone" have little or no forward value**
+[V Subvertadown]. So the kicker model is
+`E[K pts] = E[FGA] × Σ_dist P(dist) × (S_dist × make_rate_dist) + E[XPA] × make_rate × S_PAT`,
+with `E[FGA]` and `E[XPA]` driven by implied total, red-zone trips and third-down
+efficiency (4for4 targets offences with 44 %+ third-down conversion [V]), and the distance
+mix from the team's history. Dome/wind enter through `make_rate_dist` and the offence's
+implied total; a separately quoted dome-vs-wind average was only in a search summary and is
+not used [S, unverified]. The league's distance tiers in `S` decide whether long-FG kickers
+are worth more (5 points at 50+ in the validation league).
+
+**8.2 Team defence.** The most predictable component is **points allowed**, which is a
+function of the *opponent's* implied total; sacks are moderately predictable from the DEF's
+own sack rate and the opponent's sack rate allowed; fumble recoveries are the least
+predictable; **return and defensive TDs are effectively random week to week** and should be
+modelled as a small league-average constant [S community DST models: points-allowed bracket
+from opponent implied total + 1 per expected sack + 2 per expected takeaway + ≈ 0.6 for
+TDs/safeties/blocks; the shape is standard, the constants must be re-fit to this league's
+`S`]. So:
+```
+E[DEF pts] = Σ_bracket P(opp points in bracket | opp implied total) × S_bracket
+           + E[sacks] × S_sack + E[INT] × S_INT + E[FR] × S_FR + c_rare
+```
+where `P(opp points in bracket)` comes from a distribution around the implied total (fit on
+history — a negative binomial around the implied total is adequate), and `c_rare` is the
+league-average expected value of TDs/safeties/blocks under `S`.
+
+**8.3 How far ahead, and hold vs stream.** Because both positions are dominated by the
+opponent's implied total, planning further than the current week means forecasting lines —
+use the closing line's persistence (team strength changes slowly) for a 2-week look-ahead
+and treat anything longer as noise. Hold rather than stream only when `streamability` (§2)
+is well below 1: an elite DEF whose own sack/takeaway rates put it above the FA pool in most
+matchups, or a kicker on a top offence in a league with generous long-FG tiers. In drafts
+the evidence for holding is weak: the top-drafted kicker averaged < 5 VBD and the DEF
+value-by-ADP curve is nearly flat [V Stuart/Footballguys]; redraft leagues should stream
+[V 4for4 2023].
+
+### Format sensitivity
+
+Distance tiers (e.g. 5 for 50+) raise the value of strong-legged kickers and of `E[FGA]`
+from long range; DST brackets with steep negatives (−4 at 35+) increase the penalty of
+streaming into a bad implied total; leagues that score DST yards allowed (stat ids exist
+for it in Yahoo's universe) add a second implied-total-driven component; IDP leagues are out
+of scope here.
+
+### Pitfalls
+
+Ranking DEFs by last week's sacks or a return TD; using the DEF's own points-allowed
+history instead of the opponent's implied total; using kicker accuracy or "red-zone
+struggles" as a predictor; streaming three weeks ahead on schedule; forgetting `S` tiers
+when comparing kickers across leagues.
+
+### Output shape
+
+`{candidates[]: {player, E, p10, p90, drivers: {implied_total, brackets, sacks, takeaways,
+rare}, next_week_look_ahead}, hold_vs_stream: streamability, current starter's Δ}` plus the
+common contract.
+
+### Evaluation
+
+Weekly rank correlation and MAE against (a) "start whoever scored most last week" and (b)
+"start the DEF facing the lowest implied total" — the product must beat (a) clearly and at
+least match (b), or the extra features are not earning their complexity. Report the share
+of DEF variance explained by the rare-event constant to keep expectations honest.
+
+---
+
+## 9. Rest-of-season roster construction
+
+### Inputs
+
+`R` (bench and IR counts), §2 baselines and streamability by position, §1 ROS projections
+with distributions, injury priors, the FA pool depth by position, standings and §11
+`P(playoffs)`, the league's acquisition limits and trade deadline.
+
+### Method
+
+**9.1 Bench allocation by marginal expected lineup points.** Each bench slot's value is the
+expected lineup points it adds over the horizon through (a) bye coverage, (b) injury
+coverage, (c) upside (a player who might become a starter — `xVBD`, §2), (d) blocking (a
+handcuff that keeps a rival from the beneficiary — usually small). Allocate slots greedily by
+marginal value: streamable positions (K, DEF; often QB and TE in 12-team 1-QB) get **zero**
+bench slots; RB and WR compete for the rest based on the drop-off curve (§2) and the FA
+pool. Two IR slots change the calculus: injured stashes are free, so the IR eligibility
+rules (03 §D) should be surfaced with every stash recommendation.
+
+**9.2 Handcuffs.** Value = `P(starter misses ≥ 1 week) × Σ_w P(out at w) × max(0,
+proj(handcuff | starter out, w) − opportunity_cost(w))` minus the slot's alternative use.
+This is positive when the starter carries high injury risk and the handcuff would be a
+clear standalone starter when promoted (§6 redistribution), and negative for committee
+backfields or when the bench slot could hold a player with standalone value. **No rigorous
+published study on handcuffing was found; the community is divided** [S; F] — the product
+should compute the number and never apply "always/never handcuff" as a rule.
+
+**9.3 Stashing.** A stash is a bet on `P(role change) × weeks_of_value`; it beats a bye-cover
+bench player only when the roster already covers byes internally. IR slots make stashes of
+injured players nearly free.
+
+**9.4 When to consolidate (2-for-1 trades that improve the starting lineup).** Consolidation
+is right when the roster's marginal bench value is below the stream baseline (bench players
+never start) — then two such players for one starter raises lineup points and frees a slot
+(§5.2). It is wrong when byes/injuries make bench depth the binding constraint.
+
+**9.5 Season-phase rules that fall out of the weights.** Early: upside and role bets (long
+horizon). Mid: bye coverage. Late (post-deadline): the horizon is only the playoff weeks,
+`weight(w)` for eliminated futures is 0, so `P(playoffs)` decides whether to hold stashes
+(alive: hold high-ceiling players for the bracket; eliminated: nothing matters — the
+product should say so rather than manufacture advice).
+
+### Format sensitivity
+
+Superflex: at least one QB on the bench is close to mandatory (QB baseline is deep); TE
+premium: a second TE can have flex value; 10-team: shallower rosters relative to the pool
+→ fewer stashes pay; deep benches (8+) lower the cost of handcuffs and stashes; 0 IR → IR
+stashes compete with depth.
+
+### Pitfalls
+
+Rostering a backup K/DEF/QB in a 1-QB league; handcuffing as a rule; holding stashes when
+eliminated or dropping them when alive; ignoring IR eligibility; consolidating while
+byes/injuries make depth binding; benching the FA pool's depth from the calculation.
+
+### Output shape
+
+`{bench_plan: [{slot, role: bye_cover|injury_cover|upside|handcuff|stash, player, marginal
+value}], handcuff_values[], stash_values[], consolidation_candidates[], phase_note}` plus the
+common contract.
+
+### Evaluation
+
+Replayed seasons: realised lineup points of the recommended bench plan versus (a) the
+manager's actual bench and (b) a "best available by ROS rank" bench; handcuff hit rate and
+realised value versus computed value; the share of stashes that ever started. "Working" =
+higher realised lineup points than (b) and handcuff value calibrated within its interval.
+
