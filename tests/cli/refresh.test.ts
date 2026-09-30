@@ -10,6 +10,9 @@ import {
   currentSeason,
   defaultSeasons,
   describeResult,
+  describeWarnings,
+  MAX_WARNING_LINES,
+  WARNING_LINE_MAX,
   jobNameFor,
   parseSeasons,
   REFRESH_TARGETS,
@@ -55,7 +58,11 @@ afterAll(() => {
 describe("ff refresh all (fixture mode)", () => {
   it("publishes every 1a source, schedules first and weather last, and exits 0", () => {
     expect(full?.code).toBe(EXIT.OK);
-    const lines = (full?.out ?? "").trim().split("\n");
+    // result lines; the indented lines under them are that result's schema warnings
+    const lines = (full?.out ?? "")
+      .trim()
+      .split("\n")
+      .filter((l) => !l.startsWith("  "));
     expect(lines.map((l) => l.split(/\s+/)[0])).toEqual([
       "nflverse:schedules",
       "nflverse:injuries",
@@ -257,6 +264,74 @@ describe("refresh helpers", () => {
     expect(ids("nflverse:schedules")).toEqual(["nflverse:schedules"]);
     expect(jobNameFor("nflverse:daily")).toBe("refresh-nflverse-daily");
     expect(jobNameFor("all")).toBe("refresh-all");
+  });
+
+  it("a result's '(n warnings)' is explained by the lines under it (gate round 1: the count was unexplained)", () => {
+    const out = full?.out ?? "";
+    const all = out.trim().split("\n");
+    for (const [i, l] of all.entries()) {
+      const m = /\((\d+) warnings?, below\)$/.exec(l);
+      if (m === null) continue;
+      const n = Number(m[1]);
+      const under = all.slice(i + 1, i + 1 + Math.min(n, MAX_WARNING_LINES));
+      expect(under, l).toHaveLength(Math.min(n, MAX_WARNING_LINES));
+      for (const u of under) expect(u).toMatch(/^ {2}warning: \S/);
+    }
+    // the fixture parquet carries upstream columns SOTARA does not read: named, and tolerated
+    expect(out).toMatch(/^ {2}warning: nflverse:injuries: \d+ extra column\(s\) tolerated: /m);
+    expect(out).not.toMatch(/warning\(s\)/);
+  });
+
+  it("describeWarnings is terminal-safe: escapes and bidi controls removed, lines capped, the rest counted", () => {
+    const pub = (warnings: string[]): RefreshResult => ({
+      status: "published",
+      source: "nflverse:injuries",
+      version: { version: "v1", released_at: null },
+      file: "/f",
+      file_version: "v1",
+      stats: { rows: 1, tables: [], seasons: [2026], columns_hash: "h" },
+      attempts: 1,
+      warnings,
+    });
+    expect(describeWarnings(pub([]))).toEqual([]);
+    expect(describeResult(pub([]))).not.toMatch(/warning/);
+    expect(describeResult(pub(["a"]))).toMatch(/\(1 warning, below\)$/);
+    expect(describeResult(pub(["a", "b"]))).toMatch(/\(2 warnings, below\)$/);
+    const [ansi] = describeWarnings(
+      pub(["col \u001b[31mred\u001b[0m \u202eevil\u202c \u0007bell\r\nx"]),
+    );
+    expect(ansi).toBe("  warning: col  [31mred [0m  evil   bell x");
+    expect(ansi).not.toMatch(/[\p{Cc}\p{Cf}]/u);
+    const [lone] = describeWarnings(pub(["a\ud800b"]));
+    expect(lone).toBe("  warning: a b");
+    const [long] = describeWarnings(pub(["é".repeat(10_000)]));
+    expect(long?.length).toBe("  warning: ".length + WARNING_LINE_MAX);
+    expect(long?.endsWith("…")).toBe(true);
+    // an astral character straddling the cap is dropped whole, never left as a lone surrogate
+    for (const pad of [WARNING_LINE_MAX - 3, WARNING_LINE_MAX - 2, WARNING_LINE_MAX - 1]) {
+      const [cut] = describeWarnings(pub([`${"x".repeat(pad)}${"🏈".repeat(10)}`]));
+      expect(cut, String(pad)).not.toMatch(/\p{Cs}/u);
+      expect(cut?.endsWith("…")).toBe(true);
+      expect(cut?.length).toBeLessThanOrEqual("  warning: ".length + WARNING_LINE_MAX);
+    }
+    const [exact] = describeWarnings(pub(["x".repeat(WARNING_LINE_MAX)]));
+    expect(exact).toBe(`  warning: ${"x".repeat(WARNING_LINE_MAX)}`);
+    const many = describeWarnings(pub(Array.from({ length: 12 }, (_, i) => `w${String(i)}`)));
+    expect(many).toHaveLength(MAX_WARNING_LINES + 1);
+    expect(many.at(-1)).toBe(`  warning: … ${String(12 - MAX_WARNING_LINES)} more`);
+    expect(
+      describeWarnings(pub(Array.from({ length: MAX_WARNING_LINES }, () => "w"))),
+    ).toHaveLength(MAX_WARNING_LINES);
+    for (const r of [
+      {
+        status: "unchanged",
+        source: "nflverse:injuries",
+        version: { version: "v", released_at: null },
+        attempts: 1,
+      },
+      { status: "skipped", source: "weather:nws", reason: "off_season" },
+    ] as RefreshResult[])
+      expect(describeWarnings(r)).toEqual([]);
   });
 
   it("describeResult / resultJson cover every status with fixed fields only", () => {
