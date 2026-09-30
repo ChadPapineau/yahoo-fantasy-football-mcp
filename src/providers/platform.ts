@@ -58,6 +58,12 @@ export interface ReadFeatures {
   readonly other_rosters: boolean;
   /** Matchups/standings are available. */
   readonly matchups: boolean;
+  /**
+   * Standings are available (additive, optional): when present it overrides `matchups` for
+   * `getStandings` — the manual league can know this week's opponent (matchups) without holding
+   * standings. Absent → follows `matchups`.
+   */
+  readonly standings?: boolean;
 }
 
 /** What a platform can do right now (plan 01 §8 `capabilities()`). */

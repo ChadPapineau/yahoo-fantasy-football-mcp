@@ -1,0 +1,123 @@
+# fixtures/manual/league.yaml — the placeholder validation league for ManualLeagueProvider
+# (plan 01 §8 X1, plan 10 §3.1a). PLACEHOLDER NAMES ONLY: "Example League", "Team A".."Team L",
+# "Manager A".."Manager L". The players are real 2026 NFL players (public nflverse data, CC-BY 4.0),
+# taken from fixtures/players/fixture-roster.json plus a few well-known starters for the opponent.
+# A real league.yaml lives at <config>/league.yaml (0600), never in this repository.
+version: 1
+
+league:
+  key: example                # league key manual.l.example
+  name: Example League
+  season: 2026
+  num_teams: 12
+  scoring_type: head
+  start_week: 1
+  end_week: 17
+  lineup_lock: per_game       # each player locks at his own kickoff
+  playoffs:
+    start_week: 15
+    num_teams: 6
+
+scoring:
+  preset: half_ppr
+  overrides:                  # the validation league's values, stated explicitly
+    pass_td: 4
+    rush_td: 6
+    rec_td: 6
+    fum_lost: -2
+    pass_int: -1
+  # no TE premium, no yardage bonuses
+
+roster_slots:
+  - { name: QB, count: 1 }
+  - { name: WR, count: 2 }
+  - { name: RB, count: 2 }
+  - { name: TE, count: 1 }
+  - { name: W/R/T, count: 1 }
+  - { name: K, count: 1 }
+  - { name: DEF, count: 1 }
+  - { name: BN, count: 6 }
+  - { name: IR, count: 2 }
+
+rules:
+  waiver_type: faab
+  waiver_time_days: 2
+  faab_budget: 100
+  trade_review: commissioner
+
+my_team:
+  id: 1
+  name: Team A
+  manager: Manager A
+  players:
+    - { name: Josh Allen, team: BUF, position: QB, gsis_id: "00-0034857", slot: QB }
+    - { name: Ja'Marr Chase, team: CIN, position: WR, gsis_id: "00-0036900", slot: WR }
+    - { name: Amon-Ra St. Brown, team: DET, position: WR, gsis_id: "00-0036963", slot: WR }
+    - { name: Jahmyr Gibbs, team: DET, position: RB, gsis_id: "00-0039139", slot: RB }
+    - { name: Derrick Henry, team: BAL, position: RB, gsis_id: "00-0032764", slot: RB }
+    - { name: Trey McBride, team: ARI, position: TE, gsis_id: "00-0037744", slot: TE }
+    - { name: Jaxon Smith-Njigba, team: SEA, position: WR, gsis_id: "00-0038543", slot: W/R/T }
+    - { name: Chris Boswell, team: PIT, position: K, gsis_id: "00-0031136", slot: K }
+    - { defense: DET, slot: DEF }
+    - { name: Jordan Love, team: GB, position: QB, gsis_id: "00-0036264", slot: BN }
+    - { name: Kenneth Walker III, team: KC, position: RB, gsis_id: "00-0038134", slot: BN }
+    - { name: Keenan Allen, team: IND, position: WR, gsis_id: "00-0030279", slot: BN }
+    - { name: Hunter Henry, team: NE, position: TE, gsis_id: "00-0033090", slot: BN }
+    # rookies without a gsis id here: they resolve through the crosswalk by name + team + position
+    - { name: Ashton Jeanty, team: LV, position: RB, slot: BN }
+    - { name: Denzel Boston, team: CLE, position: WR, slot: BN }
+    # Out (hamstring) on the week 2 and 3 injury reports: IR-eligible
+    - { name: Nico Collins, team: HOU, position: WR, gsis_id: "00-0036554", slot: IR, status: O }
+    # the second IR slot is left empty
+
+other_teams:
+  - id: 2
+    name: Team B
+    manager: Manager B
+    players:
+      - { name: Lamar Jackson, team: BAL, position: QB, gsis_id: "00-0034796", slot: QB }
+      - { name: CeeDee Lamb, team: DAL, position: WR, gsis_id: "00-0036358", slot: WR }
+      - { name: Justin Jefferson, team: MIN, position: WR, gsis_id: "00-0036322", slot: WR }
+      - { name: Bijan Robinson, team: ATL, position: RB, gsis_id: "00-0038542", slot: RB }
+      - { name: Saquon Barkley, team: PHI, position: RB, gsis_id: "00-0034844", slot: RB }
+      - { name: George Kittle, team: SF, position: TE, gsis_id: "00-0033288", slot: TE }
+      - { name: Drake London, team: ATL, position: WR, gsis_id: "00-0037238", slot: W/R/T }
+      - { name: Brandon Aubrey, team: DAL, position: K, gsis_id: "00-0037692", slot: K }
+      - { defense: HOU, slot: DEF }
+      - { name: Jalen Hurts, team: PHI, position: QB, gsis_id: "00-0036389", slot: BN }
+      - { name: James Cook, team: BUF, position: RB, gsis_id: "00-0037248", slot: BN }
+      - { name: Garrett Wilson, team: NYJ, position: WR, gsis_id: "00-0037740", slot: BN }
+      - { name: Puka Nacua, team: LA, position: WR, gsis_id: "00-0039075", slot: BN, status: D }
+      - { name: Brock Bowers, team: LV, position: TE, gsis_id: "00-0039338", slot: BN }
+      - { name: Deebo Samuel Sr., team: SF, position: WR, slot: BN }
+  - { id: 3, name: Team C, manager: Manager C }
+  - { id: 4, name: Team D, manager: Manager D }
+  - { id: 5, name: Team E, manager: Manager E }
+  - { id: 6, name: Team F, manager: Manager F }
+  - { id: 7, name: Team G, manager: Manager G }
+  - { id: 8, name: Team H, manager: Manager H }
+  - { id: 9, name: Team I, manager: Manager I }
+  - { id: 10, name: Team J, manager: Manager J }
+  - { id: 11, name: Team K, manager: Manager K }
+  - { id: 12, name: Team L, manager: Manager L }
+
+opponents:
+  - { week: 1, team: 2 }
+  - { week: 2, team: 2 }
+  - { week: 3, team: 2 }
+
+free_agents:
+  - { name: Jeremiyah Love, team: ARI, position: RB }
+  - { name: Harold Fannin Jr., team: CLE, position: TE, gsis_id: "00-0040663" }
+
+waivers:
+  - { name: Ka'imi Fairbairn, team: HOU, position: K, gsis_id: "00-0032726" }
+
+transactions:
+  - type: waiver
+    timestamp: "2026-09-16T10:00:00Z"
+    team: 1
+    faab_bid: 7
+    players:
+      - { player: { name: Denzel Boston, team: CLE, position: WR }, action: add }
+      - { player: { name: Nick Folk, team: ATL, position: K, gsis_id: "00-0025565" }, action: drop }
