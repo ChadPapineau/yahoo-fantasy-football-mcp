@@ -6,10 +6,11 @@ Does not touch anything else.
 
 ## RESUME HERE
 
-**Status:** plans 07 and 08 written and committed. Writing plan 09 (Skills bundle) next.
+**Status:** plans 07, 08, 09 written and committed. Writing plan 10 (phasing) next — the last file.
 
-**Next step:** write `docs/plan/09-skills-bundle.md` → commit+push → 10, updating this
-section after each push. If resuming cold: the decisions in "Settled decisions" are binding for
+**Next step:** write `docs/plan/10-phasing-and-acceptance.md` (phases, testable acceptance,
+tensions T1–T12, open decisions D1–D10) → commit+push → final scratch update → reply with SHAs.
+An untracked `scripts/` dir appeared in the tree (not mine) — never stage it. If resuming cold: the decisions in "Settled decisions" are binding for
 all four files; do not re-derive them. Plan 07's tool names (§3) and `Rec`/`Dist`/`PlayerSelector`
 types (legend) are the vocabulary 08–10 must use.
 
