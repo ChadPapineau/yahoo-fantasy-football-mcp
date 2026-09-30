@@ -11,7 +11,7 @@ same tree in parallel.
 
 ## RESUME HERE
 
-**Status:** RESEARCH DONE 2026-09-29 — source log below is complete for all 13 decision types; writing `05-strategy-and-analytics.md` in groups (none landed yet).
+**Status:** WRITING 2026-09-29 — `05-strategy-and-analytics.md` has preamble + §1–§6 landed and pushed (Groups 1–2). Remaining: Group 3 (§7 bye/playoff, §8 K/DEF, §9 ROS), Group 4 (§10 news-vs-stats, §11 H2H WP, §12 calibration, §13 draft), Group 5 (§14 added decisions, §15 scoring engine, §16 data-needs order, §17 what goes wrong, §18 negatives).
 
 **Constraints inherited from the orchestrator (do not re-derive):**
 1. `docs/research/03-yahoo-api.md` §B.5: Yahoo exposes `stat_categories` +
