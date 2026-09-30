@@ -288,6 +288,7 @@ export const projectPlayersTool = defineTool({
       extraSources: ["engine"],
       estimate: true,
       listKey: "projections",
+      week: w,
     };
   },
 });
@@ -563,6 +564,7 @@ export const analyzeLineupTool = defineTool({
       extraSources: ["engine"],
       estimate: true,
       listKey: "swaps",
+      week: w,
     };
   },
 });
@@ -651,6 +653,7 @@ export const analyzeMatchupTool = defineTool({
       extraSources: ["engine"],
       estimate: true,
       provisional: false,
+      week: w,
     };
   },
 });
@@ -889,6 +892,7 @@ export const analyzeWaiversTool = defineTool({
       extraSources: ["engine"],
       estimate: true,
       listKey: "candidates",
+      week: w,
     };
   },
 });
