@@ -15,7 +15,7 @@ import {
 } from "../../../src/sources/nflverse/index.js";
 import type { DataSource, TempFile } from "../../../src/sources/source.js";
 import { GAME_VENUE_OVERRIDES } from "../../../src/sources/venues.js";
-import { DATASET_TABLES } from "../../../src/store/datasets/tables.js";
+import { DATASET_TABLES, READER_QUERIES, bindSchema } from "../../../src/store/datasets/tables.js";
 import { REL, SqliteWriter, makeCtx, type Ctx } from "./helpers/harness.js";
 
 const roster = JSON.parse(
@@ -266,5 +266,60 @@ describe("fetch failures", () => {
     const files = await rosterWeeklySource.fetch({ version: "v", released_at: null }, c.ctx);
     expect(files).toEqual([]);
     expect(c.calls).toEqual([]);
+  });
+});
+
+describe("the published files satisfy the store's reader SQL (tables.ts READER_QUERIES)", () => {
+  const bind = (sql: string): string => bindSchema(sql, "main");
+
+  it("ScheduleReader.games / firstKickoff over the schedules file", async () => {
+    const { w } = await run(schedulesSource, [2026]);
+    const [games] = READER_QUERIES["ScheduleReader.games"].statements;
+    const rows = w.db
+      .prepare(bind(games?.sql ?? ""))
+      .all({ season: 2026, weeks: JSON.stringify([8]) }) as Record<string, unknown>[];
+    expect(rows).toHaveLength(14); // Thursday + Sunday + Monday of week 8
+    expect(rows.every((r) => typeof r.venue_tz === "string")).toBe(true);
+    const [first] = READER_QUERIES["ScheduleReader.firstKickoff"].statements;
+    const fk = w.db.prepare(bind(first?.sql ?? "")).get({ season: 2026, week: 8 }) as {
+      first_kickoff: string;
+    };
+    expect(fk.first_kickoff).toBe(rows[0]?.kickoff_utc);
+  });
+
+  it("InjuryReader.reports, PlayerWeekReader.lines/defenseLines, RosterWeeklyReader over their files", async () => {
+    const ids = JSON.stringify(roster.players.map((p) => p.gsis_id));
+    const inj = await run(injuriesSource, [2026]);
+    const [ir] = READER_QUERIES["InjuryReader.reports"].statements;
+    const all = inj.w.db
+      .prepare(bind(ir?.sql ?? ""))
+      .all({ season: 2026, week: 1, gsis_ids: null });
+    expect(all.length).toBeGreaterThan(100);
+
+    const st = await run(statsPlayerWeekSource, [2026]);
+    const [pl] = READER_QUERIES["PlayerWeekReader.lines"].statements;
+    const lines = st.w.db
+      .prepare(bind(pl?.sql ?? ""))
+      .all({ season: 2026, weeks: "[1,2,3]", gsis_ids: ids });
+    expect(lines).toHaveLength(roster.players.length * 3);
+    const [dl] = READER_QUERIES["PlayerWeekReader.defenseLines"].statements;
+    const d = st.w.db
+      .prepare(bind(dl?.sql ?? ""))
+      .all({ season: 2026, weeks: "[1,2,3]", teams: JSON.stringify(["DET", "HOU", "PIT", "SEA"]) });
+    expect(d).toHaveLength(12);
+
+    const ro = await run(rosterWeeklySource, [2026]);
+    const [latest] = READER_QUERIES["RosterWeeklyReader.latest"].statements;
+    const players = ro.w.db.prepare(bind(latest?.sql ?? "")).all({ season: 2026 }) as {
+      gsis_id: string;
+    }[];
+    for (const p of roster.players) expect(players.map((x) => x.gsis_id)).toContain(p.gsis_id);
+    const allen = roster.players.find((p) => p.name === "Josh Allen");
+    const byYahoo = READER_QUERIES["RosterWeeklyReader.byPlatformId"].statements[0];
+    const hit = ro.w.db.prepare(bind(byYahoo?.sql ?? "")).all({ id: allen?.yahoo_id ?? "" }) as {
+      gsis_id: string;
+    }[];
+    expect(hit.map((h) => h.gsis_id)).toEqual([allen?.gsis_id]);
+    expect(ro.w.db.prepare(bind(byYahoo?.sql ?? "")).all({ id: "" })).toEqual([]);
   });
 });
