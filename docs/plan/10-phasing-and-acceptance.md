@@ -88,7 +88,7 @@ Consequence for the P0 Skills: `retro` leads with the top four rows, names the r
 **Acceptance (all hard).**
 - Z1 `docs.yml` and `secrets` jobs green on `main`; a PR that introduces a string matching `\d{3}\.l\.\d{4,8}` outside the placeholder range fails `secrets` (a deliberate test commit on a branch, then deleted).
 - Z2 Every Mermaid block in `docs/plan/*.md` (including 07–10) renders under the pinned `mermaid-cli`.
-- Z3 `npm ci && npm run lint && npm run typecheck` pass on an empty `src/` with the boundary rules configured (a test file in `src/domain/` importing `src/store/` fails lint — plan 04 A-5).
+- Z3 `npm ci && npm run lint && npm run typecheck` pass on an empty `src/` with the boundary rules configured (a test file in `src/domain/` importing `src/store/` fails lint — plan 04 A-5); **and `docs.yml`'s `mermaid` job is green on a commit where `.npmrc` (`ignore-scripts=true`) is present** — `.npmrc` lands in its own commit *before* `package.json` so the run is unambiguous (round 1, OBJ-12: the explicit Chrome install and `--ignore-scripts=false` make the job independent of the project `.npmrc`; plan 04 §4.2).
 - Z4 The access application (D0) is submitted and its date recorded in HANDOFF — that date starts the Ph8 clock; the legacy-app check ("does Chad hold a still-working client id?") is answered (**resolved 2026-09-30: no existing app**, HANDOFF item 4).
 
 **Exit gate.** Z1–Z4. **Deferred:** everything else.

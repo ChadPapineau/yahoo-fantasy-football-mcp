@@ -10,9 +10,19 @@
 #   supply-chain item wrapping the same npm package. Pinned to the 11.x line (mermaid 11): 12.0.0
 #   shipped 2026-09-24 with breaking theme/layout changes, and GitHub's renderer is on mermaid 11
 #   (assumption A-D1, scripts/README.md). npx pins are not Dependabot-managed — bump deliberately.
-# - Chromium: mermaid-cli's puppeteer downloads its own Chrome for Testing at install and runs with
-#   --no-sandbox (scripts/puppeteer-config.json) because Ubuntu 24.04 restricts unprivileged user
-#   namespaces. All of this happens on the runner only; nothing is installed on a developer machine.
+# - Chromium: mermaid-cli declares puppeteer as a PEER dependency (^23 || ^24 || ^25; npm >= 7 installs
+#   peers), and puppeteer's `postinstall` (`node install.mjs`) is what downloads Chrome for Testing.
+#   That postinstall is exactly what the project `.npmrc` (`ignore-scripts=true`, plan 02 S10 / plan 04
+#   §1, landing in Phase 0) tells npm to skip — and `npx` run from the repo root reads that `.npmrc`.
+#   Without countermeasures the Mermaid gate turns red the day `.npmrc` lands (adversarial log OBJ-12).
+#   So this workflow (a) pins puppeteer EXACTLY beside mermaid-cli (same `-p` list, so the peer that
+#   mmdc loads is the version whose Chrome we install), (b) installs Chrome for Testing EXPLICITLY with
+#   `npx puppeteer browsers install chrome` — a step that does not depend on any postinstall — and
+#   (c) passes `--ignore-scripts=false` on every `npx` invocation so a project `.npmrc` cannot switch
+#   the postinstall off underneath us. Chrome runs with --no-sandbox (scripts/puppeteer-config.json)
+#   because Ubuntu 24.04 restricts unprivileged user namespaces. All of this happens on the runner
+#   only; nothing is installed on a developer machine. Plan 10 Z3 exercises this job with `.npmrc`
+#   present before `package.json` exists.
 # - Node: the ubuntu-24.04 image ships Node 22 (>= 22.13 is required by the scripts); a step asserts
 #   the major so an image change fails loudly, not subtly.
 # - actions/checkout is pinned to a full commit SHA (Dependabot keeps the `# vX.Y.Z` comment in
@@ -59,8 +69,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # exact pin; bump deliberately (see header)
+  # exact pins; bump deliberately and TOGETHER (see header — the Chrome we install is the one this
+  # puppeteer version expects; mermaid-cli 11.17.0 accepts puppeteer ^23 || ^24 || ^25)
   MERMAID_CLI: "@mermaid-js/mermaid-cli@11.17.0"
+  PUPPETEER_PIN: "puppeteer@25.12.0"
 
 jobs:
   mermaid:
@@ -78,15 +90,20 @@ jobs:
           node --version
           node -e 'const major = Number(process.versions.node.split(".")[0]); if (major < 22) { console.error("Node >= 22 required, found " + process.version); process.exit(1); }'
 
-      - name: Install the pinned renderer into the npx cache (runner only)
-        run: npx --yes -p "$MERMAID_CLI" mmdc --version
+      - name: Install the pinned renderer + pinned puppeteer into the npx cache (runner only)
+        # --ignore-scripts=false: a project .npmrc with ignore-scripts=true must not skip puppeteer's
+        # postinstall (see header, OBJ-12)
+        run: npx --yes --ignore-scripts=false -p "$MERMAID_CLI" -p "$PUPPETEER_PIN" mmdc --version
+
+      - name: Install Chrome for Testing explicitly (independent of any postinstall)
+        run: npx --yes --ignore-scripts=false "$PUPPETEER_PIN" browsers install chrome
 
       - name: Self-test — the checker must fail on the known-bad fixture block
         run: |
           set +e
           node scripts/check-mermaid.mjs --no-annotate --root scripts/docs-check-selftest \
             --out "$RUNNER_TEMP/mermaid-selftest" \
-            --renderer "npx --yes -p $MERMAID_CLI mmdc -q --puppeteerConfigFile scripts/puppeteer-config.json" \
+            --renderer "npx --yes --ignore-scripts=false -p $MERMAID_CLI -p $PUPPETEER_PIN mmdc -q --puppeteerConfigFile scripts/puppeteer-config.json" \
             | tee "$RUNNER_TEMP/mermaid-selftest.log"
           rc=${PIPESTATUS[0]}
           set -e
@@ -100,7 +117,7 @@ jobs:
         run: >
           node scripts/check-mermaid.mjs
           --out "$RUNNER_TEMP/mermaid-blocks"
-          --renderer "npx --yes -p $MERMAID_CLI mmdc -q --puppeteerConfigFile scripts/puppeteer-config.json"
+          --renderer "npx --yes --ignore-scripts=false -p $MERMAID_CLI -p $PUPPETEER_PIN mmdc -q --puppeteerConfigFile scripts/puppeteer-config.json"
 
   links:
     name: links
