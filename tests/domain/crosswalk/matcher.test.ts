@@ -1094,3 +1094,85 @@ describe("properties", () => {
     );
   });
 });
+
+// --- QA-1-041: the manual kicker universe never demotes a rostered player's own match ----------------
+
+describe("manual pool aliases (QA-1-041)", () => {
+  const boswell = fx("Chris Boswell");
+  /** The rostered kicker as the onboarding guide writes him: name/team/position, no gsis_id. */
+  const rostered = pp("manual", "manual.p.n-5f74985457138a1d", {
+    name: boswell.name,
+    team_abbr: boswell.team,
+    position: "K",
+    eligible_positions: ["K", "BN"],
+  });
+  /** The provider's kicker-universe row for the same NFL player (ManualLeagueProvider.kickers()). */
+  const universe = pp("manual", `manual.p.${boswell.gsis_id}`, {
+    name: boswell.name,
+    team_abbr: boswell.team,
+    position: "K",
+    eligible_positions: ["K", "BN"],
+    uniform_number: boswell.jersey,
+    ownership: { type: "unknown", owner_team_key: null, owner_name: null, waiver_date: null },
+    gsis_hint: boswell.gsis_id,
+  });
+
+  it("a name-entered rostered kicker still resolves when the pool lists him under his gsis key", () => {
+    for (const players of [
+      [rostered, universe],
+      [universe, rostered],
+    ]) {
+      const r = run(players);
+      const byId = new Map(r.resolved.map((x) => [x.player.ref.id, x.resolution]));
+      expect(gsisOf(byId.get(rostered.ref.id)!)).toBe(boswell.gsis_id);
+      expect(gsisOf(byId.get(universe.ref.id)!)).toBe(boswell.gsis_id);
+      expect(r.report.unmatched_rostered).toEqual([]);
+      expect(r.diagnostics).toEqual([]);
+    }
+  });
+
+  it("the universe resolution agrees with a roster-only run over the same key", () => {
+    const alone = gsisOf(only(run([rostered])));
+    const r = run([universe, rostered]);
+    expect(gsisOf(r.resolved[1]!.resolution)).toBe(alone);
+  });
+
+  it("two rostered name matches on one player are still both demoted, alias or not", () => {
+    const other = pp("manual", "manual.p.n-0000000000000002", {
+      name: boswell.name,
+      team_abbr: boswell.team,
+      position: "K",
+      ownership: {
+        type: "team",
+        owner_team_key: "manual.l.x.t.2",
+        owner_name: "Team B",
+        waiver_date: null,
+      },
+    });
+    const r = run([rostered, universe, other]);
+    const statuses = new Map(r.resolved.map((x) => [x.player.ref.id, x.resolution.status]));
+    expect(statuses.get(rostered.ref.id)).toBe("ambiguous");
+    expect(statuses.get(other.ref.id)).toBe("ambiguous");
+    expect(statuses.get(universe.ref.id)).toBe("matched");
+  });
+
+  it("a gsis key that is itself rostered is a real competing claim (the name match is demoted)", () => {
+    const rosteredByKey = { ...universe, ownership: rostered.ownership };
+    const r = run([rostered, rosteredByKey]);
+    expect(r.resolved[0]!.resolution.status).toBe("ambiguous");
+    expect(gsisOf(r.resolved[1]!.resolution)).toBe(boswell.gsis_id);
+  });
+
+  it("the alias rule is manual-only: on Yahoo two keys on one player still demote the name match", () => {
+    const a = yahooPlayer(boswell, { ref: { platform: "yahoo", id: "461.p.95001" } });
+    const b = pp("yahoo", "461.p.95002", {
+      name: boswell.name,
+      team_abbr: "PIT",
+      position: "K",
+      ownership: universe.ownership,
+      gsis_hint: boswell.gsis_id,
+    });
+    const r = run([a, b]);
+    expect(r.resolved[0]!.resolution.status).toBe("ambiguous");
+  });
+});

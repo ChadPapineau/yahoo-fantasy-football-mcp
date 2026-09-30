@@ -562,17 +562,42 @@ function indexOverrides(
 }
 
 /**
+ * Whether a claimant is the manual platform's own pool entry for the NFL player it claims: its key
+ * is `manual.p.<that gsis>` (the key rule of plan 01 §8 X1 — the key IS the NFL player) and no
+ * fantasy team rosters it (the provider's kicker universe, or a listed free agent). Such an entry
+ * names the player, not a competing mapping, so it never demotes another key's match (QA-1-041: a
+ * rostered kicker entered by name was demoted by the universe row for the same kicker).
+ */
+function isPoolAlias(
+  w: Work,
+  gsis: string,
+  platform: PlatformId,
+  isRostered: (p: PlatformPlayer) => boolean,
+): boolean {
+  return (
+    platform === "manual" && gsisFromManualKey(w.player.ref.id) === gsis && !isRostered(w.player)
+  );
+}
+
+/**
  * A new deterministic match may not take a gsis id another player in the same run also holds:
  * it is demoted to ambiguous (never two platform keys silently sharing one NFL player). Any
- * remaining shared claim (two overrides, two persisted pairs) is kept and reported.
+ * remaining shared claim (two overrides, two persisted pairs) is kept and reported. A manual pool
+ * alias (`isPoolAlias`) is not a competing claim: it is kept and counts against no one.
  */
-function enforceUniqueGsis(work: Work[], diag: (d: CrosswalkDiagnostic) => void): void {
+function enforceUniqueGsis(
+  work: Work[],
+  platform: PlatformId,
+  isRostered: (p: PlatformPlayer) => boolean,
+  diag: (d: CrosswalkDiagnostic) => void,
+): void {
   const claims = new Map<string, Work[]>();
   for (const w of work) {
     if (w.result.resolution.status === "matched")
       pushTo(claims, w.result.resolution.pair.gsis_id, w);
   }
-  for (const [gsis, claimants] of claims) {
+  for (const [gsis, all] of claims) {
+    const claimants = all.filter((w) => !isPoolAlias(w, gsis, platform, isRostered));
     if (claimants.length < 2) continue;
     const keep: Work[] = [];
     for (const w of claimants) {
@@ -627,12 +652,12 @@ export function resolveCrosswalk(input: CrosswalkRunInput): CrosswalkRun {
     seen.add(p.ref.id);
     players.push(p);
   }
-  const work: Work[] = players.map((player) => ({ player, result: resolveOne(player, ctx) }));
-  enforceUniqueGsis(work, diag);
-
-  const threshold = input.topOwnedPercent ?? TOP_OWNED_PERCENT;
   const isRostered = (p: PlatformPlayer): boolean =>
     input.rostered !== undefined ? input.rostered.has(p.ref.id) : p.ownership?.type === "team";
+  const work: Work[] = players.map((player) => ({ player, result: resolveOne(player, ctx) }));
+  enforceUniqueGsis(work, input.platform, isRostered, diag);
+
+  const threshold = input.topOwnedPercent ?? TOP_OWNED_PERCENT;
 
   const resolved: ResolvedPlayer[] = [];
   const pairs: CrosswalkPair[] = [];
