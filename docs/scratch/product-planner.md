@@ -6,16 +6,16 @@ Does not touch anything else.
 
 ## RESUME HERE
 
-**Status:** reading complete (HANDOFF, plan 01–06, research 05/06/04/03/02, mcp_best_practices,
-evaluation.md). Decisions below are settled. Writing plan 07 next.
+**Status:** plan 07 (tool catalog) written and committed. Writing plan 08 (scoring engine) next.
 
-**Next step:** write `docs/plan/07-tool-catalog.md` → commit+push → 08 → 09 → 10, updating this
+**Next step:** write `docs/plan/08-scoring-engine.md` → commit+push → 09 → 10, updating this
 section after each push. If resuming cold: the decisions in "Settled decisions" are binding for
-all four files; do not re-derive them.
+all four files; do not re-derive them. Plan 07's tool names (§3) and `Rec`/`Dist`/`PlayerSelector`
+types (legend) are the vocabulary 08–10 must use.
 
-**Done:** scratch doc (2c9b6b0).
+**Done:** scratch doc (2c9b6b0); reading + decisions (6237cf7); plan 07 (this commit).
 
-**Pushed SHAs:** 2c9b6b0 (scratch start).
+**Pushed SHAs:** 2c9b6b0, 6237cf7, + plan 07 commit (see log below).
 
 **Tensions with plan 01–06 noticed so far:** see "Tensions" below (carried into plan 10).
 
