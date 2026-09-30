@@ -62,7 +62,9 @@ flowchart TB
       RL["Recommendation log"]
     end
     subgraph PROVIDERS["Providers (FantasyPlatform interface)"]
-      YP["YahooProvider"]
+      YP["YahooProvider (Phase 1b)"]
+      MP["ManualLeagueProvider (Phase 1a; X1 fallback)"]
+      SP["SleeperProvider (X2 fallback / later)"]
       EP["EspnProvider (later, seam only)"]
       LIM["Global limiter per client id + coalescing"]
       XML["XML parser and one path builder"]
@@ -362,9 +364,17 @@ Serve the last good data with `freshness: "stale"` and a warning; escalate to `S
 ## 8. Provider seam (`FantasyPlatform`) and `DataSource`
 
 ```ts
-// src/providers/platform.ts — the seam. Yahoo implements it now; ESPN later.
+// src/providers/platform.ts — the seam. Four named implementations (revised round 1, OBJ-02):
+//   YahooProvider        — Phase 1b; the live league (needs a provisioned token)
+//   ManualLeagueProvider — Phase 1a; settings + my roster from a hand-filled YAML the `onboard`
+//                          Skill helps write; other rosters / transactions / FA pool optional.
+//                          This is fallback X1 for Chad's league if Yahoo never grants read.
+//   SleeperProvider      — fallback X2 / later; Sleeper's read API is public, keyless and not
+//                          ToS-blocked (04 §B4), so it is the FIRST second platform, not ESPN
+//   EspnProvider         — later, seam only (ToS-blocked today, 04 §B5)
+// Sizes and pull triggers are plan 10's (§1, §3.1, §3.5).
 export interface FantasyPlatform {
-  readonly id: "yahoo" | "espn";
+  readonly id: "yahoo" | "manual" | "sleeper" | "espn";
   capabilities(): Promise<PlatformCapabilities>;  // { read: true, write: { lineup, addDrop, waiver, trade } as booleans, discoveredAt }
   listMyLeagues(): Promise<LeagueRef[]>;
   getLeague(ref: LeagueRef): Promise<League>;                       // metadata incl. current week, edit week, deadlines
@@ -382,6 +392,8 @@ export interface FantasyPlatform {
   // …
 }
 ```
+
+**What the two fallback implementations mean for the seam** *(round 1, OBJ-02)*: `ManualLeagueProvider` returns exactly what its YAML holds — `listMyLeagues()` one league, `getRoster()` for my team, `getScoringSettings()` from the same normalised shape the Yahoo normaliser produces (§8.1), and empty pages for `listPlayers`/`listTransactions` unless pasted; `capabilities().write` is all-false; `getPlayerWeekStats()` is unsupported and `ff_get_player_stats.match` is `null` for it (no platform points to match against). `SleeperProvider` maps Sleeper's league/rosters/settings JSON into the same types; its `PlayerRef.id` is Sleeper's id and the crosswalk's Sleeper seed (§5.2) gives `gsis_id`. Neither adds a method to the interface — that is the point of naming them now.
 
 **What the interface abstracts:** league discovery; a *normalised* `ScoringSettings` (§8.1); roster slots as `{ name, class, count, eligible: PositionSet }` where `class ∈ {starter, flex, bench, ir, other}` and `name` keeps the platform's literal (`W/R/T`, `BN`, `IR` for Yahoo [V-03 §B.2]); `PlatformPlayer` with `platformId` and the fields the crosswalk needs (name, team abbr, position, jersey number); transactions as a common event shape; writes as intents (`SlotMove`, `AddDropRequest`) with a `CommitTicket`.
 
@@ -438,7 +450,8 @@ Both are store tables owned by the domain (`write_journal`, `recommendation_log`
 
 | Component | Seam exists now | Build when |
 |---|---|---|
-| ESPN provider | `FantasyPlatform` | Chad has an ESPN league and time |
+| `SleeperProvider` (fallback X2) *(added round 1, OBJ-02)* | `FantasyPlatform` (§8) | plan 10 Ph8's decision point fires without a Yahoo read grant, or a Sleeper league exists; it precedes ESPN because Sleeper is not ToS-blocked (04 §B4 vs §B5) |
+| ESPN provider | `FantasyPlatform` | Chad has an ESPN league, time, **and** ESPN's ToS position permits it (04 §B5 — blocked today); never the first second seam |
 | Streamable HTTP + auth server | §3.2 table | a second user or remote use |
 | macOS Keychain for the client secret | `SecretSource` interface in `src/auth/secret.ts` | plan 02 §3 trigger |
 | Cross-process rate-limit bucket | `limiter_state` table | observed double-999s with two clients open |
