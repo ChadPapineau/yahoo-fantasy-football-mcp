@@ -8,11 +8,11 @@ product that is **📋 planned, not built** — the build starts after the owner
 | Path | What it is |
 |---|---|
 | [`HANDOFF.md`](HANDOFF.md) | **The single handoff document**: the finding that reshapes the product (Yahoo read-only, application-gated), program status, decisions made with dates, stack facts checked at source, Yahoo terms the plan must honour, the accumulating list of things the owner must know or decide, and the ▶ NEXT STEP |
-| [`research/`](#research-00–06) | Seven research documents (waves 1–3), each verified by the orchestrator against at least one load-bearing claim at source |
-| [`plan/`](#plan-01–10-plus-the-review-record) | The ten-part refined plan, the adversarial log and the changelog of what the review changed |
+| [`research/`](#research-00-to-06) | Seven research documents (waves 1–3), each verified by the orchestrator against at least one load-bearing claim at source |
+| [`plan/`](#plan-01-to-10-plus-the-review-record) | The ten-part refined plan, the adversarial log and the changelog of what the review changed |
 | [`scratch/`](#scratch) | Orchestration state — agent rosters, verbatim briefs, per-agent handover notes and WIP patches. Not product documentation |
 
-## Research (00–06)
+## Research 00 to 06
 
 | Doc | One line |
 |---|---|
@@ -24,7 +24,7 @@ product that is **📋 planned, not built** — the build starts after the owner
 | [`05-strategy-and-analytics.md`](research/05-strategy-and-analytics.md) | The analytics methodology behind every decision engine — projections, replacement level, start/sit, waivers and FAAB, trades, injury cascades, bye and playoff planning, K/DEF streaming, roster construction, news-vs-stats, win probability, the retrospective and calibration, the scoring-engine spec — each with inputs, method, format sensitivity, pitfalls, output contract and evaluation; plus the data-needs order and the clean negatives |
 | [`06-skills-and-mcp-design.md`](research/06-skills-and-mcp-design.md) | What is a tool, a Skill, a prompt, a resource: the MCP mechanisms as specified (revision 2026-07-28), elicitation and its client support, token economics, the split applied to every capability and decision type, vetted Skills prior art (inspiration only), the fourteen candidate Skills, and the repo layout and lifecycle for the bundle |
 
-## Plan (01–10) plus the review record
+## Plan 01 to 10 plus the review record
 
 The plan is **final** after a three-round adversarial review; its reading-order index with one-line summaries is [`plan/00-index.md`](plan/00-index.md). Plans 01–06 are the structural plan (architecture, security, lifecycle, repository and CI, testing, automation); 07–10 are the product plan (tool catalog, scoring engine, Skills bundle, phasing and acceptance). [`plan/adversarial-log.md`](plan/adversarial-log.md) holds every objection, the defence's ruling, and the closing verdict (30 objections: 29 conceded and landed, 1 withdrawn on evidence, 0 pressed). [`plan/changelog.md`](plan/changelog.md) says, one line per objection, what changed and where it landed.
 
