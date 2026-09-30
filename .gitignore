@@ -79,10 +79,10 @@ playwright-report/
 junit.xml
 
 # --- Third-party research clones (never committed here) ------------------
-research/vendor/
-scratch/
-tmp/
-temp/
+/research/vendor/
+/scratch/
+/tmp/
+/temp/
 
 # --- OS -------------------------------------------------------------------
 .DS_Store
