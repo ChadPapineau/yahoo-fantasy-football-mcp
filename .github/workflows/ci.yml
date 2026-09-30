@@ -1,0 +1,146 @@
+# ci — the product gate on every push (any branch) and every PR. Spec: docs/plan/04 §4.1 (jobs
+# lint, typecheck, test, supply-chain, pack; `process` and `smoke` arrive with the server in a later
+# stage), plan 05 §7 (coverage gate), plan 04 R5 (ubuntu, Node 24 only), R11 (full runtime tree).
+#
+# Choices, and why
+# - Actions pinned to full commit SHAs with the `# vX.Y.Z` comment, exactly as docs.yml/secrets.yml;
+#   Dependabot (github-actions ecosystem) rewrites both together.
+# - Node from .nvmrc (24, matching engines ">=24.15"; .npmrc engine-strict makes a mismatch fail).
+#   No dependency cache (package-manager-cache: false): one less thing that can be poisoned, and
+#   `npm ci` of the committed lockfile with ignore-scripts=true (.npmrc) is fast enough.
+# - Safe on a public repo: permissions contents: read; no secrets; `pull_request` (never
+#   pull_request_target); persist-credentials: false so the job token never lands in .git/config.
+# - Concurrency cancels superseded runs for PRs only — a cancelled run on a pushed commit is a commit
+#   without a verdict (as docs.yml).
+
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci
+      - name: ESLint (type-checked, import boundaries)
+        run: npm run lint
+      - name: Prettier
+        run: npm run format:check
+
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci
+      - name: tsc --noEmit (src + tests + scripts)
+        run: npm run typecheck
+
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci
+      - name: Tests with coverage (vitest thresholds, plan 05 §7)
+        run: npm run test:coverage
+      - name: Coverage gate, independent re-check (per-file 100 % modules)
+        run: npm run check:coverage
+      - name: Upload the coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 14
+          if-no-files-found: warn
+
+  supply-chain:
+    name: supply-chain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci
+      - name: npm audit — runtime tree, high/critical fails
+        run: npm audit --omit=dev --audit-level=high
+      - name: npm audit — full tree, report only
+        run: npm audit || echo "::notice::npm audit (full tree incl. dev) reported advisories — report only"
+      - name: No install scripts or native builds in the runtime tree
+        run: npm run check:no-scripts
+      - name: Runtime licenses on the allow-list
+        run: npm run check:licenses
+      - name: Runtime tree equals scripts/ci/runtime-allowlist.json (every depth)
+        run: npm run check:runtime-tree
+
+  pack:
+    name: pack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Scan what npm pack would ship
+        run: npm run pack:scan
