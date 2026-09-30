@@ -1,0 +1,27 @@
+{
+  "name": "dst-two-indicators",
+  "case": "DST line with two bracket indicators set (bad upstream data): refused with the family named, never a score",
+  "source": "plan 08 §8, §4.1",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "line": {
+        "position_type": "DT",
+        "provisional": false,
+        "values": {
+          "dst_pa_0": 1,
+          "dst_pa_1_6": 0,
+          "dst_pa_7_13": 1,
+          "dst_pa_14_20": 0,
+          "dst_pa_21_27": 0,
+          "dst_pa_28_34": 0,
+          "dst_pa_35p": 0
+        }
+      },
+      "expected_error": {
+        "code": "bracket_exclusivity",
+        "detail": ["dst_points_allowed"]
+      }
+    }
+  ]
+}

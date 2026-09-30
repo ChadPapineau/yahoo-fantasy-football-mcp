@@ -1,0 +1,24 @@
+{
+  "name": "qb-sack-fumble-lost",
+  "case": "fum_lost by a QB on a sack counts (sack_fumbles_lost in the sum)",
+  "source": "plan 08 §8, §3.2",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "nflverse_player": {
+        "position": "QB",
+        "passing_yards": 200,
+        "sack_fumbles_lost": 1,
+        "rushing_fumbles_lost": 0,
+        "receiving_fumbles_lost": null
+      },
+      "expected": {
+        "points": 6,
+        "points_exact": 6,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "name": "categories-order-differs",
+  "case": "stat_categories order differs from stat_modifiers order: irrelevant, hash order-independent",
+  "source": "plan 08 §8, P7",
+  "settings": "sample-league",
+  "compare": {
+    "settings": {
+      "base": "sample-league",
+      "reverse_rules": true
+    },
+    "same_hash": true
+  },
+  "checks": [
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {
+          "pass_yd": 300,
+          "pass_td": 2
+        }
+      },
+      "expected": {
+        "points": 20,
+        "points_exact": 20,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      },
+      "expected_compare": {
+        "points": 20,
+        "points_exact": 20,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    }
+  ]
+}

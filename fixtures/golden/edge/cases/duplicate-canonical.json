@@ -1,0 +1,20 @@
+{
+  "name": "duplicate-canonical",
+  "case": "Two rules mapping to one canonical in one position type: normaliser error naming both ids",
+  "source": "plan 08 §8, §3.1",
+  "settings": {
+    "base": "sample-league",
+    "add_rules": [
+      {
+        "platform_id": "900",
+        "name": "Passing Yards",
+        "position_types": ["O"],
+        "modifier": 0.05
+      }
+    ]
+  },
+  "settings_error": {
+    "code": "duplicate_canonical",
+    "detail": ["4", "900"]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "ir-player-with-line",
+  "case": "Player on IR with a line: scored like any line; the slot is not an input",
+  "source": "plan 08 §8, §3.3",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {
+          "rec": 5,
+          "rec_yd": 60,
+          "rec_td": 1
+        }
+      },
+      "expected": {
+        "points": 14.5,
+        "points_exact": 14.5,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "name": "bye-week-final",
+  "case": "Bye-week player, final week: no line, 0, complete",
+  "source": "plan 08 §8, §4.5",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {}
+      },
+      "expected": {
+        "points": 0,
+        "points_exact": 0,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    },
+    {
+      "line": {
+        "position_type": "K",
+        "provisional": false,
+        "values": {}
+      },
+      "expected": {
+        "points": 0,
+        "points_exact": 0,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    },
+    {
+      "line": {
+        "position_type": "DT",
+        "provisional": false,
+        "values": {}
+      },
+      "expected": {
+        "points": 0,
+        "points_exact": 0,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "name": "bonus-as-extra-stat-id",
+  "case": "Bonus present as an extra stat id rather than bonuses[]: folded onto the base stat, scoring identical",
+  "source": "plan 08 §8, §4.2 [U]",
+  "settings": {
+    "base": "sample-league",
+    "bonuses": {
+      "9": [
+        {
+          "target": 100,
+          "points": 3
+        }
+      ]
+    }
+  },
+  "compare": {
+    "settings": {
+      "base": "sample-league",
+      "add_rules": [
+        {
+          "platform_id": "900",
+          "name": "100+ Rushing Yards Bonus",
+          "position_types": ["O"],
+          "modifier": 3
+        }
+      ]
+    },
+    "same_hash": true
+  },
+  "checks": [
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {
+          "rush_yd": 120
+        }
+      },
+      "expected": {
+        "points": 15,
+        "points_exact": 15,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      },
+      "expected_compare": {
+        "points": 15,
+        "points_exact": 15,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    }
+  ]
+}

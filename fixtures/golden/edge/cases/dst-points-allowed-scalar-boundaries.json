@@ -1,0 +1,104 @@
+{
+  "name": "dst-points-allowed-scalar-boundaries",
+  "case": "Derived DST line (nflverse scalar): bracketize sets exactly one member; inclusive bounds",
+  "source": "plan 08 §4.1, P3",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "line": {
+        "position_type": "DT",
+        "provisional": false,
+        "values": {
+          "dst_pa": 6
+        }
+      },
+      "expected": {
+        "points": 7,
+        "points_exact": 7,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    },
+    {
+      "line": {
+        "position_type": "DT",
+        "provisional": false,
+        "values": {
+          "dst_pa": 7
+        }
+      },
+      "expected": {
+        "points": 4,
+        "points_exact": 4,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    },
+    {
+      "line": {
+        "position_type": "DT",
+        "provisional": false,
+        "values": {
+          "dst_pa": 13
+        }
+      },
+      "expected": {
+        "points": 4,
+        "points_exact": 4,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    },
+    {
+      "line": {
+        "position_type": "DT",
+        "provisional": false,
+        "values": {
+          "dst_pa": 34
+        }
+      },
+      "expected": {
+        "points": -1,
+        "points_exact": -1,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    },
+    {
+      "line": {
+        "position_type": "DT",
+        "provisional": false,
+        "values": {
+          "dst_pa": 35
+        }
+      },
+      "expected": {
+        "points": -4,
+        "points_exact": -4,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    },
+    {
+      "line": {
+        "position_type": "DT",
+        "provisional": false,
+        "values": {
+          "dst_pa": 70
+        }
+      },
+      "expected": {
+        "points": -4,
+        "points_exact": -4,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    }
+  ]
+}
