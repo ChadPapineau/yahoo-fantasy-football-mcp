@@ -32,7 +32,7 @@ Order matters: **nothing on the startup path touches the network**, because clie
 2. Install the shutdown handlers (§1.3) **before** anything can be half-open.
 3. Open the store (`DatabaseSync`, `busy_timeout=5000`, WAL), run migrations (§6) under an exclusive transaction; on a store from a newer version, exit 1 with the message.
 4. Load `tokens.json` (no network): derive the auth state (`NoTokens | Valid | Expired | NotProvisioned`) and the cached provisioning state.
-5. Register tools from one fixed list (plan 01 §3.1) filtered by capability: write tools only if `FF_WRITE_ENABLED=1` and provisioning is `provisioned_read`/`provisioned_write` (plan 02 §3.4). Register resources and prompts.
+5. Register tools from one fixed list (plan 01 §3.1) filtered by toolset — `FF_TOOLSET=core` (default: the 19 P0 tools) or `full` (plan 07 C3, *round 1*) — and by capability: write tools only if `FF_WRITE_ENABLED=1` and provisioning is `provisioned_read`/`provisioned_write` (plan 02 §3.4). Register resources and prompts.
 6. `serveStdio(...)` (SDK v2, dual era). Log one `info` line: version, node, store path, auth state, tools registered.
 7. Start the parent watchdog (§1.3) — a `setInterval(…, 5000).unref()` so it never keeps the loop alive on its own.
 
@@ -115,7 +115,7 @@ Shutdown is **idempotent and single-flight** (`shutdown()` returns the same prom
 
 ## 3. Config precedence
 
-`env` > `<config>/config.json` (optional, 0600 not required — no secrets allowed in it; `doctor` rejects a `client_secret` key there) > defaults. Keys: `YAHOO_CLIENT_ID` (required), `YAHOO_CLIENT_SECRET` | `YAHOO_CLIENT_SECRET_FILE`, `FF_CONFIG_DIR`, `FF_CACHE_DIR`, `FF_LEAGUE_KEYS`, `FF_WRITE_ENABLED`, `FF_AUTH_PORT`, `FF_LOG_LEVEL`, `ODDS_API_KEY` (optional), `FF_WEATHER_SOURCE` (`open-meteo` | `nws`). Every key is documented once, in `src/config/schema.ts` (zod) from which the README table is generated (plan 04 §6).
+`env` > `<config>/config.json` (optional, 0600 not required — no secrets allowed in it; `doctor` rejects a `client_secret` key there) > defaults. Keys: `YAHOO_CLIENT_ID` (required), `YAHOO_CLIENT_SECRET` | `YAHOO_CLIENT_SECRET_FILE`, `FF_CONFIG_DIR`, `FF_CACHE_DIR`, `FF_LEAGUE_KEYS`, `FF_WRITE_ENABLED`, `FF_TOOLSET` (`core` default | `full`; plan 07 C3), `FF_AUTH_PORT`, `FF_LOG_LEVEL`, `ODDS_API_KEY` (optional), `FF_WEATHER_SOURCE` (`open-meteo` | `nws`). Every key is documented once, in `src/config/schema.ts` (zod) from which the README table is generated (plan 04 §6).
 
 ---
 
