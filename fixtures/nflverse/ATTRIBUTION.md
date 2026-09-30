@@ -15,7 +15,7 @@ No league, team or manager data of any fantasy league is included — only publi
 | `schedules/games.excerpt.parquet` | excerpt | 557 of 7,548 | 186,071 | `schedules/games.parquet` | `2026-09-30 11:58:07 EDT` | `85f64502d5d6fc23…` |
 | `injuries/injuries_2026.parquet` | verbatim | 744 of 744 | 28,842 | `injuries/injuries_2026.parquet` | `2026-09-30 09:36:25 EDT` | `8dfa86b18c4f7cd5…` |
 | `injuries/injuries_2025.parquet` | verbatim | 6,068 of 6,068 | 97,472 | `injuries/injuries_2025.parquet` | `2026-09-07 08:23:38 EDT` | `c7637c2f63471944…` |
-| `weekly_rosters/roster_weekly_2026.excerpt.parquet` | excerpt | 144 of 10,579 | 61,764 | `weekly_rosters/roster_weekly_2026.parquet` | `2026-09-30 09:40:10 EDT` | `8d3e2f1c392a8ac2…` |
+| `weekly_rosters/roster_weekly_2026.excerpt.parquet` | excerpt | 333 of 10,579 | 137,758 | `weekly_rosters/roster_weekly_2026.parquet` | `2026-09-30 09:40:10 EDT` | `bccd5a5710ccbae1…` |
 | `stats_player/stats_player_week_2026.parquet` | verbatim | 3,339 of 3,339 | 262,007 | `stats_player/stats_player_week_2026.parquet` | `2026-09-30 05:05:44 EDT` | `b1e2afafb899f59c…` |
 | `{schedules,injuries,weekly_rosters,stats_player}/timestamp.txt` | verbatim | — | 24 each | `{tag}/timestamp.txt` | — | — |
 
@@ -34,9 +34,13 @@ not copied). Values are unchanged.
 
 - `games.excerpt.parquet`: every game of seasons **2025 and 2026** (285 + 272), all 46 columns.
 - `roster_weekly_2026.excerpt.parquet`: every row (weeks 1–4) of the players in
-  `fixtures/players/fixture-roster.json`; every row sharing a `same_surname` last name (Allen, Love,
-  Henry — matcher distractors); and the file's real anomalies — the rows with a null `gsis_id` and
-  the rows with `yahoo_id = ""`. All 36 columns.
+  `fixtures/players/fixture-roster.json` and of every `gsis_id` in `fixtures/manual/league.yaml`;
+  every row sharing a `same_surname` last name (Allen, Love, Henry — matcher distractors); every
+  kicker's row (position `K`, 40 kickers of whom 32 are on an active roster in week 4 — the K/DEF
+  streaming universe, plan 10 A8); and the file's real anomalies — the rows with a null `gsis_id`
+  and the rows with `yahoo_id = ""`. All 36 columns. Regenerated alone (`--only weekly_rosters`)
+  from the same upstream file (same bytes and `nflverse_timestamp`) when the kicker rule was added;
+  the unchanged rule reproduced the previous excerpt byte for byte first.
 
 The verbatim files are byte-identical to the release assets, so the loader's parquet path
 (Arrow-written SNAPPY pages, RLE_DICTIONARY encodings) is exercised on real nflverse output by the

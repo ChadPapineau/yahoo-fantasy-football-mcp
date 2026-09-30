@@ -77,12 +77,17 @@ week's points, and baseline (b) the implied total (DEF: facing the lowest oppone
 K: the highest own implied total).
 
 **Universe: backtest vs the served tool.** The served `ff_analyze_waivers` ranks the 32 defences plus
-every kicker on nflverse's `roster_weekly` for the season (`kdefUniverse` in
-`src/mcp/tools/analytics.ts`). With the full upstream file that is every rostered kicker — the same
-population as this backtest's "32 kickers who recorded a 2026 line", up to kickers cut or signed
-mid-season. The committed `roster_weekly` **excerpt** holds only the fixture league's players, so in
-fixture mode the served tool returns **3** K candidates (A8's hard "≥ 3" with no margin), while the
-numbers below describe the 32-kicker universe. The DEF rows are the same universe in both.
+every team's kicker — each kicker whose newest nflverse `roster_weekly` row is on an active roster
+(`status` ACT; cut and practice-squad kickers are excluded) — in `kdefUniverse`
+(`src/mcp/tools/analytics.ts`): 32 + 32 = 64 subjects, the same population as this backtest's "32
+kickers who recorded a 2026 line" up to mid-season signings. The committed `roster_weekly` excerpt
+holds **every kicker's row** (40 kickers, 32 active), so fixture mode serves the full universe
+too. The served result carries an even, rank-interleaved share of plan 07 E5's "10 candidates
+compact": **5 K + 5 DEF** at `compact`, **3 + 3** at `detail: "full"`, both inside C8's 10,000
+characters without truncation (Stage B fixer round 3; before it the excerpt held only the fixture
+league's 3 kickers, and on the real upstream file the ranking — 32 defences + 40 kickers, cut and
+practice-squad ones included, + my own K/DEF — exceeded E1's 64-target bound: every call was
+`VALIDATION`. The ranking pass now takes E5's own 96-candidate bound).
 
 <!-- generated:kdef:begin -->
 | position | week | n (played) | candidates | implied_total populated | ρ model | ρ last week's points | ρ implied total |

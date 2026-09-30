@@ -54,13 +54,13 @@
       "path": "weekly_rosters/roster_weekly_2026.excerpt.parquet",
       "url": "https://github.com/nflverse/nflverse-data/releases/download/weekly_rosters/roster_weekly_2026.parquet",
       "kind": "excerpt",
-      "rows": 200,
-      "bytes": 85100,
-      "sha256": "3dc4ab98d47e8892270ea27b0ed7ee43d8439c9ba8fd2e280dd26591207fc3e5",
+      "rows": 333,
+      "bytes": 137758,
+      "sha256": "bccd5a5710ccbae17544a4a0cd1b4f9a9f5c22ec887b7f970da1a916da01dc7f",
       "upstream_bytes": 737517,
       "upstream_rows": 10579,
       "nflverse_timestamp": "2026-09-30 09:40:10 EDT",
-      "excerpt": "every row of the fixture-roster players and of every gsis id in fixtures/manual/league.yaml (weeks 1-4), every row sharing a same_surname tag's last name (Allen, Love, Henry — matcher distractors), and the real anomalies: rows with null gsis_id and rows with yahoo_id = ''; all 36 columns"
+      "excerpt": "every row of the fixture-roster players and of every gsis id in fixtures/manual/league.yaml (weeks 1-4), every row sharing a same_surname tag's last name (Allen, Love, Henry — matcher distractors), every kicker's row (position K: the K/DEF streaming universe, A8), and the real anomalies: rows with null gsis_id and rows with yahoo_id = ''; all 36 columns"
     },
     {
       "path": "stats_player/stats_player_week_2026.parquet",

@@ -8,7 +8,9 @@
 // <download-dir> must hold: schedules_games.parquet, schedules_timestamp.txt,
 // injuries_injuries_2026.parquet, inj_2025.parquet, injuries_timestamp.txt,
 // weekly_rosters_roster_weekly_2026.parquet, weekly_rosters_timestamp.txt,
-// stats_player_stats_player_week_2026.parquet, stats_player_timestamp.txt.
+// stats_player_stats_player_week_2026.parquet, stats_player_timestamp.txt — or, with
+// `--only <dataset>`, just that dataset's files (the others and their manifest entries stay as
+// committed; the manifest is then prettier-formatted like the rest of the tree).
 // Excerpts are re-encoded with tests/sources/nflverse/helpers/parquet-writer.ts: same column names,
 // order, physical and logical types as the real file; literal-only SNAPPY pages; the nflverse
 // key-value metadata (`nflverse_type`, `nflverse_timestamp`) is kept, Arrow's `r`/`ARROW:schema`
@@ -25,7 +27,14 @@ const OUT = join(ROOT, "fixtures/nflverse");
 const REL = "https://github.com/nflverse/nflverse-data/releases/download";
 
 const src = process.argv[2];
-if (!src) throw new Error("usage: make-fixtures.ts <download-dir>");
+if (!src) throw new Error("usage: make-fixtures.ts <download-dir> [--only <dataset>]");
+// `--only weekly_rosters` regenerates one dataset and keeps every other file and manifest entry as
+// committed — for when only that dataset's rule changed and the other upstream files have moved on
+const TAGS = ["schedules", "injuries", "weekly_rosters", "stats_player"] as const;
+const only = process.argv[3] === "--only" ? (process.argv[4] ?? "") : null;
+if (only !== null && !(TAGS as readonly string[]).includes(only))
+  throw new Error(`--only takes one of ${TAGS.join(", ")}`);
+const want = (tag: (typeof TAGS)[number]): boolean => only === null || only === tag;
 
 const toAb = (b: Buffer): ArrayBuffer =>
   b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
@@ -133,46 +142,62 @@ const surnames = new Set(
   roster.players.filter((p) => p.tags.includes("same_surname")).map((p) => p.last_name),
 );
 
-for (const tag of ["schedules", "injuries", "weekly_rosters", "stats_player"]) {
+for (const tag of TAGS) {
+  if (!want(tag)) continue;
   mkdirSync(join(OUT, tag), { recursive: true });
   copyFileSync(join(src, `${tag}_timestamp.txt`), join(OUT, tag, "timestamp.txt"));
 }
 
-await excerpt(
-  "schedules_games.parquet",
-  "schedules/games.excerpt.parquet",
-  `${REL}/schedules/games.parquet`,
-  (r) => r.season === 2025 || r.season === 2026,
-  "seasons 2025 and 2026 only (every game of both); all 46 columns",
-);
-verbatim(
-  "injuries_injuries_2026.parquet",
-  "injuries/injuries_2026.parquet",
-  `${REL}/injuries/injuries_2026.parquet`,
-);
-verbatim(
-  "inj_2025.parquet",
-  "injuries/injuries_2025.parquet",
-  `${REL}/injuries/injuries_2025.parquet`,
-);
-await excerpt(
-  "weekly_rosters_roster_weekly_2026.parquet",
-  "weekly_rosters/roster_weekly_2026.excerpt.parquet",
-  `${REL}/weekly_rosters/roster_weekly_2026.parquet`,
-  (r) =>
-    ids.has(r.gsis_id as string) ||
-    leagueIds.has(r.gsis_id as string) ||
-    surnames.has(r.last_name as string) ||
-    r.gsis_id === null ||
-    r.yahoo_id === "",
-  "every row of the fixture-roster players and of every gsis id in fixtures/manual/league.yaml (weeks 1-4), every row sharing a same_surname tag's last name (Allen, Love, Henry — matcher distractors), and the real anomalies: rows with null gsis_id and rows with yahoo_id = ''; all 36 columns",
-);
-verbatim(
-  "stats_player_stats_player_week_2026.parquet",
-  "stats_player/stats_player_week_2026.parquet",
-  `${REL}/stats_player/stats_player_week_2026.parquet`,
-);
+if (want("schedules"))
+  await excerpt(
+    "schedules_games.parquet",
+    "schedules/games.excerpt.parquet",
+    `${REL}/schedules/games.parquet`,
+    (r) => r.season === 2025 || r.season === 2026,
+    "seasons 2025 and 2026 only (every game of both); all 46 columns",
+  );
+if (want("injuries")) {
+  verbatim(
+    "injuries_injuries_2026.parquet",
+    "injuries/injuries_2026.parquet",
+    `${REL}/injuries/injuries_2026.parquet`,
+  );
+  verbatim(
+    "inj_2025.parquet",
+    "injuries/injuries_2025.parquet",
+    `${REL}/injuries/injuries_2025.parquet`,
+  );
+}
+if (want("weekly_rosters"))
+  await excerpt(
+    "weekly_rosters_roster_weekly_2026.parquet",
+    "weekly_rosters/roster_weekly_2026.excerpt.parquet",
+    `${REL}/weekly_rosters/roster_weekly_2026.parquet`,
+    (r) =>
+      ids.has(r.gsis_id as string) ||
+      leagueIds.has(r.gsis_id as string) ||
+      surnames.has(r.last_name as string) ||
+      // every kicker: the served K streaming universe is roster_weekly's kickers (A8 needs ≥ 3
+      // candidates; with only the fixture league's kickers fixture mode had exactly 3)
+      r.position === "K" ||
+      r.gsis_id === null ||
+      r.yahoo_id === "",
+    "every row of the fixture-roster players and of every gsis id in fixtures/manual/league.yaml (weeks 1-4), every row sharing a same_surname tag's last name (Allen, Love, Henry — matcher distractors), every kicker's row (position K: the K/DEF streaming universe, A8), and the real anomalies: rows with null gsis_id and rows with yahoo_id = ''; all 36 columns",
+  );
+if (want("stats_player"))
+  verbatim(
+    "stats_player_stats_player_week_2026.parquet",
+    "stats_player/stats_player_week_2026.parquet",
+    `${REL}/stats_player/stats_player_week_2026.parquet`,
+  );
 
+// with --only, the other datasets' committed entries stay, in their committed order
+const files: ManifestEntry[] =
+  only === null
+    ? manifest
+    : (
+        JSON.parse(readFileSync(join(OUT, "manifest.json"), "utf8")) as { files: ManifestEntry[] }
+      ).files.map((f) => manifest.find((m) => m.path === f.path) ?? f);
 writeFileSync(
   join(OUT, "manifest.json"),
   `${JSON.stringify(
@@ -194,7 +219,7 @@ writeFileSync(
         "nflverse:roster_weekly": [2026],
         "nflverse:stats_player_week": [2026],
       },
-      files: manifest,
+      files,
     },
     null,
     2,
