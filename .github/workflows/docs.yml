@@ -1,0 +1,131 @@
+# docs — validates the documents on every change: every ```mermaid block must render, every internal
+# Markdown link must resolve. Spec: docs/plan/04-repo-structure-and-ci.md §4.2 (the `skills` and
+# `docs-current` jobs arrive with `skills/` and `package.json`); docs/plan/06-automation-inventory.md
+# §1.1. Both checkers are dependency-free (scripts/README.md) and each job first proves its checker
+# can FAIL, on scripts/docs-check-selftest/, before running it on the tree.
+#
+# Choices, and why
+# - Mermaid is rendered with @mermaid-js/mermaid-cli, the reference renderer (plan 04 R7), run via
+#   `npx --yes -p <pkg>@<exact>` rather than a third-party action: an action would be one more
+#   supply-chain item wrapping the same npm package. Pinned to the 11.x line (mermaid 11): 12.0.0
+#   shipped 2026-09-24 with breaking theme/layout changes, and GitHub's renderer is on mermaid 11
+#   (assumption A-D1, scripts/README.md). npx pins are not Dependabot-managed — bump deliberately.
+# - Chromium: mermaid-cli's puppeteer downloads its own Chrome for Testing at install and runs with
+#   --no-sandbox (scripts/puppeteer-config.json) because Ubuntu 24.04 restricts unprivileged user
+#   namespaces. All of this happens on the runner only; nothing is installed on a developer machine.
+# - Node: the ubuntu-24.04 image ships Node 22 (>= 22.13 is required by the scripts); a step asserts
+#   the major so an image change fails loudly, not subtly.
+# - actions/checkout is pinned to a full commit SHA (Dependabot keeps the `# vX.Y.Z` comment in
+#   step); persist-credentials: false so the job token never lands in .git/config.
+# - Safe on a public repo: permissions contents: read; no secrets; `pull_request` (never
+#   pull_request_target), so a fork PR runs with a read-only token and can reach nothing.
+# - Triggers: pushes on every branch (so a future ruleset can require these checks on a SHA before it
+#   reaches main), PRs, and manual. Path-filtered to documents and to the checkers themselves — if
+#   `docs` ever becomes a *required* check, drop the path filters (a required check that does not
+#   run blocks the push).
+
+name: docs
+
+on:
+  push:
+    paths:
+      - "**/*.md"
+      - "docs/**"
+      - "README.md"
+      - "scripts/check-mermaid.mjs"
+      - "scripts/check-links.mjs"
+      - "scripts/puppeteer-config.json"
+      - "scripts/docs-check-selftest/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "**/*.md"
+      - "docs/**"
+      - "README.md"
+      - "scripts/check-mermaid.mjs"
+      - "scripts/check-links.mjs"
+      - "scripts/puppeteer-config.json"
+      - "scripts/docs-check-selftest/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # exact pin; bump deliberately (see header)
+  MERMAID_CLI: "@mermaid-js/mermaid-cli@11.17.0"
+
+jobs:
+  mermaid:
+    name: mermaid
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Assert Node >= 22
+        run: |
+          node --version
+          node -e 'const major = Number(process.versions.node.split(".")[0]); if (major < 22) { console.error("Node >= 22 required, found " + process.version); process.exit(1); }'
+
+      - name: Install the pinned renderer into the npx cache (runner only)
+        run: npx --yes -p "$MERMAID_CLI" mmdc --version
+
+      - name: Self-test — the checker must fail on the known-bad fixture block
+        run: |
+          set +e
+          node scripts/check-mermaid.mjs --no-annotate --root scripts/docs-check-selftest \
+            --out "$RUNNER_TEMP/mermaid-selftest" \
+            --renderer "npx --yes -p $MERMAID_CLI mmdc -q --puppeteerConfigFile scripts/puppeteer-config.json" \
+            | tee "$RUNNER_TEMP/mermaid-selftest.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "self-test: check-mermaid exit code on the fixture = $rc (1 required)"
+          if [ "$rc" -ne 1 ] || ! grep -q 'rendered 1/2, failed 1' "$RUNNER_TEMP/mermaid-selftest.log"; then
+            echo "::error::check-mermaid self-test: expected exit 1 with 'rendered 1/2, failed 1' on scripts/docs-check-selftest — the checker cannot fail, so its pass would mean nothing"
+            exit 1
+          fi
+
+      - name: Render every mermaid block in the tree
+        run: >
+          node scripts/check-mermaid.mjs
+          --out "$RUNNER_TEMP/mermaid-blocks"
+          --renderer "npx --yes -p $MERMAID_CLI mmdc -q --puppeteerConfigFile scripts/puppeteer-config.json"
+
+  links:
+    name: links
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Assert Node >= 22
+        run: |
+          node --version
+          node -e 'const major = Number(process.versions.node.split(".")[0]); if (major < 22) { console.error("Node >= 22 required, found " + process.version); process.exit(1); }'
+
+      - name: Self-test — the checker must fail on the known-broken fixture links
+        run: |
+          set +e
+          node scripts/check-links.mjs --no-annotate --root scripts/docs-check-selftest | tee "$RUNNER_TEMP/links-selftest.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "self-test: check-links exit code on the fixture = $rc (1 required)"
+          if [ "$rc" -ne 1 ] || ! grep -q ', 3 broken' "$RUNNER_TEMP/links-selftest.log"; then
+            echo "::error::check-links self-test: expected exit 1 with '3 broken' on scripts/docs-check-selftest — the checker cannot fail, so its pass would mean nothing"
+            exit 1
+          fi
+
+      - name: Check every internal link in the tree
+        run: node scripts/check-links.mjs
