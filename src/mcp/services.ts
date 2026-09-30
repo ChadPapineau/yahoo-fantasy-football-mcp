@@ -27,14 +27,6 @@ export interface McpLogger {
   debug(event: string, fields?: Readonly<Record<string, unknown>>): void;
 }
 
-/** A logger that drops everything (tests, and callers that pass none). */
-export const NULL_LOGGER: McpLogger = Object.freeze({
-  error: () => undefined,
-  warn: () => undefined,
-  info: () => undefined,
-  debug: () => undefined,
-});
-
 /** Texts the composition root read from the package (Skill bodies, the cheat-sheet). */
 export interface ServerTexts {
   /** `skills/start-sit/SKILL.md` body (frontmatter stripped), or null when absent. */
