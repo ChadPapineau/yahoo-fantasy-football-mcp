@@ -38,8 +38,8 @@ Spec: `docs/plan/adversarial-log.md` § "Round 2 — defence" (§D.0 verified fa
 | # | Ruling | Status | Commit |
 |---|---|---|---|
 | R2-0 | Round 2 RESUME HERE pushed | [~] | — |
-| R2-R | Read round-2 objections + defence in full | [ ] | — |
-| OBJ-24 | plan 02: client sets → *session conditions* (no-reach vs reach); every "cannot" re-qualified; D.2 rule reworded; S12/README rule → any session with a file/shell-capable tool; doctor #13 heuristic over `claude_desktop_config.json`'s other `mcpServers`; Chad's multi-server setup as the motivating case | [ ] | — |
+| R2-R | Read round-2 objections + defence in full | [x] | — |
+| OBJ-24 | plan 02: client sets → *session conditions* (no-reach vs reach); every "cannot" re-qualified; D.2 rule reworded; S12/README rule → any session with a file/shell-capable tool; doctor #13 heuristic over `claude_desktop_config.json`'s other `mcpServers`; Chad's multi-server setup as the motivating case | [x] | c8a7696 |
 | OBJ-25 | Keychain = removes the refresh token from disk/backups; in a reach session a hurdle (`node -e`), never a proof; "so a Bash cat yields nothing" deleted; signed helper + user presence priced as a Phase W item; re-audit plan 02 for cannot/never/yields nothing (D.2 item 3) | [ ] | — |
 | OBJ-26 | plan 10 §5 D0 + §0: submit the application now (before plan review); Ph7 "starts on plan approval, does not wait for Yahoo"; D0 paragraph with both ends of L (wk 9 / wk 13 from a wk-5 approval; 1b +1–3 wks; pessimistic = playoffs-only even with an immediate grant); the 1a-minimum cut vs 1a-full as Chad's choice | [ ] | — |
 | OBJ-27 | per-source dataset files `<cache>/ds/<source>.sqlite`, fresh + fsync + atomic rename; server ATTACHes read-only, re-attaches on version change; main store never receives a dataset write; derived tables stay in main under OBJ-11 rules; plans 01 D4/D8/§5.1/§5.5, 03 L9/§1, 05 store row, 06 J3/§2, 10 A4a; sweep plan 06 jobs + plan 03 lifecycle | [ ] | — |
