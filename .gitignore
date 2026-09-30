@@ -1,0 +1,114 @@
+# ---------------------------------------------------------------------------
+# yahoo-fantasy-football-mcp — hardened .gitignore
+# Rule: nothing secret is ever committed. Real tokens live OUTSIDE the repo.
+# ---------------------------------------------------------------------------
+
+# --- Dependencies ---------------------------------------------------------
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# --- Build output ---------------------------------------------------------
+dist/
+build/
+out/
+lib/
+*.tsbuildinfo
+coverage/
+.nyc_output/
+.turbo/
+.cache/
+.eslintcache
+*.tgz
+
+# --- Environment files ----------------------------------------------------
+# Every env variant is ignored; only the placeholder example is tracked.
+.env
+.env.*
+*.env
+!.env.example
+
+# --- Secrets, tokens, credentials (belt and braces) -----------------------
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.token
+*.secret
+*.secrets
+secrets.*
+!secrets.example.*
+credentials.*
+!credentials.example.*
+*credentials*.json
+*token*.json
+*oauth*.json
+.yahoo/
+.tokens/
+tokens/
+private/
+
+# --- Local data caches the server may write ------------------------------
+data/cache/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+
+# --- Logs -----------------------------------------------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# --- Test artifacts -------------------------------------------------------
+test-results/
+playwright-report/
+junit.xml
+
+# --- Third-party research clones (never committed here) ------------------
+research/vendor/
+scratch/
+tmp/
+temp/
+
+# --- OS -------------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- Editors / IDEs -------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json.example
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.project
+.settings/
+.classpath
+
+# --- Claude Code local overrides -----------------------------------------
+.claude/settings.local.json
