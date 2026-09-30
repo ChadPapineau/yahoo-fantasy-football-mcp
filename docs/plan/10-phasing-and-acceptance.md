@@ -96,7 +96,7 @@ Consequence for the P0 Skills: `retro` leads with the top four rows, names the r
 
 ### 3.1 Phase 1 — Read-only MVP, split into 1a (Yahoo-free) and 1b (Yahoo) *(revised round 1, OBJ-02 / OBJ-03)*
 
-Phase 1 is one product — `v0.1.0` is tagged when **both** halves are green — built as two halves with separate scope, acceptance and exit gates so that work proceeds and is testable while the Yahoo application (D0) is pending. **1a needs no Yahoo access and starts now.** 1b needs a provisioned token and starts when one exists; if the Ph8 decision point passes without a read grant, 1b pauses and X1/X2 ship (§0). The original A1–A16 keep their numbers (other plans cite them); items that had a Yahoo half and a Yahoo-free half are split into `a`/`b`.
+Phase 1 is one product — `v0.1.0` is tagged when **both** halves are green — built as two halves with separate scope, acceptance and exit gates so that work proceeds and is testable while the Yahoo application (D0) is pending. **1a needs no Yahoo access; it starts on plan approval and does not wait for Yahoo** (round 2, OBJ-26). 1b needs a provisioned token and starts when one exists; if the Ph8 decision point passes without a read grant, 1b pauses and X1/X2 ship (§0). The original A1–A16 keep their numbers (other plans cite them); items that had a Yahoo half and a Yahoo-free half are split into `a`/`b`.
 
 #### 3.1a Phase 1a — the Yahoo-free half (L)
 
