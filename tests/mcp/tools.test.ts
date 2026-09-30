@@ -40,7 +40,9 @@ interface Env {
   truncated: boolean;
   warnings: string[];
 }
-interface ErrBody { error: { code: string; hint: string; field?: string; reason?: string } }
+interface ErrBody {
+  error: { code: string; hint: string; field?: string; reason?: string };
+}
 
 const ALLEN = "manual.p.00-0034857";
 const CHASE = "manual.p.00-0036900";

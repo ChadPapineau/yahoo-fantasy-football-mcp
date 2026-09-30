@@ -149,25 +149,6 @@ function isObj(v: Json | undefined): v is JsonObject {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** The JSON `type` of a schema node (a union's member types), or null when it has none. */
-function typeOf(node: Json | undefined): Json {
-  if (!isObj(node)) return null;
-  if (node.type !== undefined) return node.type;
-  const members = node.anyOf ?? node.oneOf;
-  if (!Array.isArray(members)) return null;
-  const types = new Set<string>();
-  for (const m of members) {
-    const t = typeOf(m);
-    if (typeof t === "string") types.add(t);
-    else if (Array.isArray(t))
-      for (const x of t)
-        if (typeof x === "string") types.add(x);
-        else return null;
-  }
-  const list = [...types].sort();
-  return list.length === 1 ? (list[0] ?? null) : list;
-}
-
 /**
  * The advertised OUTPUT schema: the envelope with `data`'s top-level field names — a superset of
  * the zod contract (every result is validated against the full zod schema
@@ -229,8 +210,8 @@ export function advertisedInputSchema(
     if (isObj(out.properties)) {
       const props: JsonObject = { ...out.properties };
       for (const [k, description] of Object.entries(opaque)) {
-        const t = typeOf(props[k]);
-        props[k] = { type: t === "array" ? "array" : "object", description };
+        const p = props[k];
+        props[k] = { type: isObj(p) && p.type === "array" ? "array" : "object", description };
       }
       out.properties = props;
     }
