@@ -2,9 +2,9 @@
 // fixture league (fixtures/manual/league.yaml) and the ≤ 300 KB nflverse excerpts (fixtures/nflverse)
 // published into a fresh store by `ff refresh` in fixture mode:
 //   - startup (spawn → initialize answered) < 1 s without network, on that fresh store;
-//   - every P0 tool answers in < 500 ms on a warm cache (median of 3 timed calls after a warm-up);
+//   - every P0 tool answers in < 500 ms on a warm cache (median of 3 timed calls after a warm-up) —
+//     read literally: ff_project_players included, for a whole roster at the default 4000 sims;
 //   - ff_project_players for 32 players with n_sims = 4000 in < 3 s.
-// E1 is held to its own clause (a roster-sized call at 4000 sims gets the 3-s budget pro rata).
 // Both data sizes are measured and printed (the league file's players/bytes; each dataset file's
 // bytes and the excerpt bytes). Wall-clock: run alone (`npm run test:process` runs one file at a time).
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -38,7 +38,14 @@ const CALLS: Readonly<Record<string, Record<string, unknown>>> = {
   ff_list_players: { position: "K" },
   ff_get_injuries: {},
   ff_get_schedule: { weeks: [4, 5] },
-  ff_project_players: { players: { team_key: TEAM_A }, horizon: "week", week: 4, seed: 1 },
+  // Team A's whole roster at the plan-default 4000 sims (named, so a lowered default cannot pass it)
+  ff_project_players: {
+    players: { team_key: TEAM_A },
+    horizon: "week",
+    week: 4,
+    n_sims: 4000,
+    seed: 1,
+  },
   ff_analyze_lineup: { week: 4 },
   ff_analyze_matchup: { week: 3 },
   ff_analyze_waivers: { positions: ["K", "DEF"], look_ahead: 2 },
@@ -49,8 +56,6 @@ const CALLS: Readonly<Record<string, Record<string, unknown>>> = {
 const LIMIT_MS = 500;
 const PROJECT_32_LIMIT_MS = 3000;
 const STARTUP_LIMIT_MS = 1000;
-/** Team A's roster (≤ 18 entries) at the default 4000 sims, held to the E1 budget pro rata. */
-const E1_ROSTER_LIMIT_MS = Math.round((PROJECT_32_LIMIT_MS * 18) / 32);
 
 let home: E2eHome;
 let srv: Served;
@@ -144,11 +149,8 @@ describe("A15: every P0 tool < 500 ms on a warm cache", () => {
         process.stdout.write(
           `A15 ${name}: median ${median(runs).toFixed(0)} ms (runs ${runs.map((x) => x.toFixed(0)).join("/")}, cold ${warm.ms.toFixed(0)})\n`,
         );
-        // E1 has its own A15 budget (32 players × 4000 sims < 3 s): a roster call at the default
-        // 4000 sims is held to it pro rata; every other P0 tool to 500 ms
-        expect(median(runs)).toBeLessThan(
-          name === "ff_project_players" ? E1_ROSTER_LIMIT_MS : LIMIT_MS,
-        );
+        // every P0 tool, E1's whole-roster call at the default 4000 sims included (A15 literal)
+        expect(median(runs)).toBeLessThan(LIMIT_MS);
       },
       30_000,
     );

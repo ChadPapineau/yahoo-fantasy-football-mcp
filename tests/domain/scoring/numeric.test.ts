@@ -1,11 +1,13 @@
 // numeric.test.ts — src/domain/scoring/{numeric,errors,policy}.ts: float hygiene (plan 08 §4.4,
 // A-3), wire-scalar coercion (§4.5, P11), the error type, the golden comparison constants (§6).
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { ScoringError } from "../../../src/domain/scoring/errors.js";
 import {
   at,
   coerceScalar,
   denoise,
+  denoiseReference,
   MAX_ABS_STAT,
   stableSum,
 } from "../../../src/domain/scoring/numeric.js";
@@ -25,6 +27,91 @@ describe("denoise", () => {
     expect(denoise(0)).toBe(0);
     expect(denoise(-4.6)).toBe(-4.6);
     expect(denoise(123456789.123456789)).toBe(123456789.123457); // 15 significant digits
+  });
+
+  // A15 (plan 10): the string-free fast path must return the reference value bit for bit — the
+  // golden tests and every stored total depend on it. Object.is also separates 0 from −0.
+  const same = (x: number): void => {
+    const got = denoise(x);
+    const want = x === 0 ? 0 : denoiseReference(x);
+    if (!Object.is(got, want) && !(Number.isNaN(got) && Number.isNaN(want)))
+      throw new Error(`denoise(${String(x)}) = ${String(got)}, reference ${String(want)}`);
+  };
+
+  it("equals Number(x.toPrecision(15)) for every double (property, all bit patterns)", () => {
+    fc.assert(
+      fc.property(fc.double(), (x) => {
+        same(x);
+      }),
+      { numRuns: 20_000 },
+    );
+  });
+
+  it("equals the reference for engine-shaped products (modifier × sampled stat)", () => {
+    const mods = [0.04, 0.1, 0.5, 6, 4, -2, -1, 0.05, 1.5, 0.25, 2, 0.2, 1 / 3];
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...mods),
+        fc.double({ min: 0, max: 600, noNaN: true }),
+        (m, v) => {
+          same(m * v);
+        },
+      ),
+      { numRuns: 20_000 },
+    );
+  });
+
+  it("equals the reference on the hard cases: ties, near-ties, powers of ten, range edges", () => {
+    const cases: number[] = [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      Number.MAX_VALUE,
+      Number.MIN_VALUE,
+      -Number.MIN_VALUE,
+      Number.EPSILON,
+      1e15,
+      999999999999999.4,
+      999999999999999.6,
+      1e-8,
+      9.99999999999999e-9,
+      9.999999999999994e-8, // log10 rounds up to −7: a mis-estimated exponent must be refused
+      9.999999999999993e-7,
+      0.1 + 0.2,
+    ];
+    for (let e = -12; e <= 16; e++) {
+      const p = Number(`1e${String(e)}`);
+      for (const f of [
+        1,
+        1 + Number.EPSILON,
+        1 - Number.EPSILON / 2,
+        9.999999999999995,
+        9.999999999999994,
+        1.000000000000005,
+        1.234567890123455, // a 16th-digit 5: exact ties and their neighbours
+        1.2345678901234549,
+        1.2345678901234551,
+        4.5e-15,
+      ])
+        cases.push(p * f, -p * f);
+    }
+    // x ≈ (m + ½)·10^−k: the doubles within 12 ulps either side of each decimal midpoint — where
+    // t = x·10^k can round across the tie (the guard's whole reason to exist)
+    const bits = new Float64Array(1);
+    const word = new BigInt64Array(bits.buffer);
+    const step = (x: number, n: number): number => {
+      bits[0] = x;
+      word[0] = (word[0] ?? 0n) + BigInt(n);
+      return bits[0];
+    };
+    for (let i = 0; i < 400; i++) {
+      const m = 1e14 + i * 2_249_999_999_999;
+      for (const k of [0, 3, 7, 12, 14, 18, 22]) {
+        const x = (m + 0.5) / Number(`1e${String(k)}`);
+        for (let n = -12; n <= 12; n++) cases.push(step(x, n), -step(x, n));
+      }
+    }
+    for (const x of cases) same(x);
   });
 });
 
