@@ -17,6 +17,11 @@
 | Ph4 | **Phase 2 adds the external usage/market stack and every P1 engine; Phase 3 replaces the v1 projection with the opportunity model and closes the backtests** | 05 §16 #6–#8, #13 vs #10, #14: the ingestion and the modelling are different kinds of work with different verification | one big "analytics" phase | nothing |
 | Ph5 | **Every acceptance criterion is a test, a CI job, a fixture assertion, or a one-line manual check Chad performs with named evidence** | the brief; SOTARA's `verify-before-handoff` rule | prose criteria | nothing |
 | Ph6 | **Soft gates report a number and must not regress; hard gates block the tag** | with three fixture weeks a backtest cannot be a hard threshold without lying; a hard gate on "not worse than baseline" and a reported number is honest | hard thresholds everywhere | ≥ 2 historical seasons loaded (Phase 2) turn the soft analytics gates into hard ones (Phase 3 lists them) |
+| Ph7 | **Phase 1 splits into 1a (Yahoo-free) and 1b (Yahoo)** — 1a is built and accepted on fixtures + nflverse only and **starts now**; 1b is everything that needs a Yahoo token (§3.1) *(revised round 1, OBJ-02)* | the critical path ran through a Yahoo approval with no observed grant, no date and no fallback (adversarial log OBJ-02); the analytics layer needs no Yahoo access (HANDOFF 2026-09-30) | one Phase 1 gated on the approval | nothing — 1a is valuable under every branch of the approval |
+| Ph8 | **Dated decision gate on the Yahoo application (D0):** application submitted on *<date Chad submits — recorded in HANDOFF>*; decision point = **4 weeks after submission or NFL week 9, whichever is earlier**; if no read grant by then, 1b pauses and the fallback (Ph9) ships *(revised round 1, OBJ-02)* | a plan silent on its expected value under its dominant risk cannot be approved honestly; the *rule* is fixed now, only the date is a placeholder | wait indefinitely | the grant arriving at any point — 1b resumes immediately and X1 becomes an import option |
+| Ph9 | **Fallbacks named: X1 = 1a with `ManualLeagueProvider` as the league source for Chad's league; X2 = `SleeperProvider` as the *first* second platform** (ESPN stays `later`, §3.5) *(revised round 1, OBJ-02)* | X1 keeps start/sit, K/DEF and usage-based waiver candidates without Yahoo (it loses the live FA pool and other teams' rosters unless pasted); Sleeper's read API is public, keyless and non-commercial (fine for personal use, 04 §B4) and is **not** ToS-blocked, so it proves the `FantasyPlatform` seam on a platform that can actually be built and makes the product usable to anyone on Sleeper; ESPN is ToS-blocked (04 §B5), which is why it is the wrong first seam | ESPN as the second seam | a read grant → X1 is only an import path and X2 stays a Phase 4 pull item |
+
+**D0 — the application, and the honest expected value for the 2026 season** *(added round 1, OBJ-02)*. Today is 2026-09-30, NFL week 4 of 18. Phase 1a starts now and does not wait for Yahoo. For 1b: **approved by week 6** → 1b live by about week 9–10, read-only weekly briefings for the second half of the season and the fantasy playoffs; **approved by week 10** → 1b live for the fantasy playoffs only; **denied or unanswered at the Ph8 decision point** → X1 for Chad's league (degraded but real: start/sit, K/DEF streaming, and — from Phase 2 — usage-based waiver candidates over a hand-filled league), X2 for the public, and every line of Phase 2–3 stays valuable for 2027. Under no branch does a week-4 start yield a week-4 product; the plan no longer implies it. D0 outranks D1–D10 (§5).
 
 ---
 
@@ -25,11 +30,12 @@
 | Phase | Name | Scope in one line | Effort | Exit gate (summary) |
 |---|---|---|---|---|
 | 0 | Foundation | docs-only repo protections, package skeleton, CI skeleton, Yahoo access application | S | `docs.yml`/`secrets` green; ruleset on; application submitted |
-| 1 | **Read-only MVP** | auth, provider, store, engine + golden, crosswalk, schedule/lines/injuries, 19 P0 tools, 6 P0 Skills, resources, prompts, rec log, retrospective v1, 5 launchd jobs | L | §3.1 acceptance A1–A16 |
+| 1a | **Read-only MVP — Yahoo-free half** *(revised round 1)* | store + migrations, `ff refresh` for nflverse `schedules`/`injuries`/`roster_weekly`/**`stats_player_week`**, lines + weather, crosswalk, scoring engine over nflverse lines, projections v1, K/DEF streaming, rec log + retrospective v1, the 19 P0 tools under `FF_TOOLSET=core` (platform-fact tools served by `ManualLeagueProvider`), Skills `stream-kdef`/`retro`/`start-sit` + `onboard` (manual mode) in fixture mode, the data launchd jobs | L | §3.1a acceptance (the 1a items of A1–A17); **needs no Yahoo access; starts now** |
+| 1b | **Read-only MVP — Yahoo half** *(revised round 1)* | `ff auth` + token store + lockfile, `YahooProvider`, the platform-fact tools over Yahoo, golden test vs `player_points`, Yahoo fixtures, `ff smoke`, Skills `onboard` (Yahoo mode)/`weekly`/`apply`, the credentialed launchd jobs | M | §3.1b acceptance (the 1b items of A1–A19); starts on a provisioned token; **pauses at the Ph8 decision point** if none — then X1/X2 |
 | 2 | Usage, market, P1 engines | nflverse stats/snaps/pbp subset, ffopportunity, Sleeper, DynastyProcess, depth charts, news, weather, odds (opt.), 15 P1 tools, 7 P1 Skills, live/season matchup, second fixture league, plugin manifest (if D3) | L | §3.2 acceptance B1–B14 |
 | 3 | Model wave | `v2-opportunity` projections, EP/TD layer, redistribution priors, source calibration table, parameter tuning loop, ≥ 2 held-out-season backtests | L | §3.3 acceptance C1–C9 |
 | W | **Conditional writes** | 7 write tools, gate channels, journal reconcile, `apply` write mode, `fspt-w` | M | §3.4 acceptance W1–W9; **starts only when Yahoo grants write** |
-| 4 | Later | draft tools + Skill, ESPN provider, remote/HTTP variant, marketplace release, commercial source swaps | M each | per item |
+| 4 | Later | `SleeperProvider` (X2 — pulled forward if Ph8 fires), draft tools + Skill, ESPN provider (after Sleeper; ToS-blocked today), remote/HTTP variant, marketplace release, commercial source swaps, `ff_get_playbook`, `ff_analyze_scoring` | M each | per item |
 
 ---
 
@@ -37,17 +43,18 @@
 
 | Measured quantity | First available | Producer | Where recorded |
 |---|---|---|---|
-| Engine golden (`|Δ| ≤ 0.01`) | Phase 1 | `tests/domain/scoring/golden.test.ts` | CI job summary |
-| Start/sit regret vs baselines | Phase 1 (soft) → Phase 3 (hard) | `ff_analyze_retrospective`; `tests/backtest/lineup.test.ts` on fixtures | `docs/evals/<date>.md` (plan 05 §6 output dir) + the retro Skill's weekly report |
-| `P(win)` Brier and reliability | Phase 1 (fixture weeks) → Phase 3 (held-out seasons) | same | same |
-| K/DEF rank correlation vs "last week" and "lowest implied total" baselines (05 §8 eval) | Phase 1 (soft) | `tests/backtest/kdef.test.ts` | same |
+| Engine properties over nflverse lines (plan 08 §7 P1–P13; 100 % coverage) | Phase 1a | `tests/property/scoring.test.ts` | CI job summary |
+| Engine golden vs Yahoo (`|Δ| ≤ 0.01`) | Phase 1b | `tests/domain/scoring/golden.test.ts` | CI job summary |
+| Start/sit regret vs baselines | Phase 1a (soft) → Phase 3 (hard) | `ff_analyze_retrospective`; `tests/backtest/lineup.test.ts` on fixtures | `docs/evals/<date>.md` (plan 05 §6 output dir) + the retro Skill's weekly report |
+| `P(win)` Brier and reliability | Phase 1a (fixture weeks) → Phase 3 (held-out seasons) | same | same |
+| K/DEF rank correlation vs "last week" and "lowest implied total" baselines (05 §8 eval) | Phase 1a (soft) | `tests/backtest/kdef.test.ts` | same |
 | Waiver detection precision/recall vs points-only detector (05 §4 eval) | Phase 2 (soft) → Phase 3 (hard) | `tests/backtest/waivers.test.ts` over historical seasons | same |
 | Projection CRPS / pinball / coverage / Spearman vs trailing-4 (05 §1 eval) | Phase 3 (hard) | `tests/backtest/projection.test.ts` | same |
 | Cascade MAE vs next-man-up (05 §6 eval) | Phase 3 | `tests/backtest/cascade.test.ts` | same |
 | News source calibration (Brier by source × claim type, 05 §10 eval) | Phase 3 | `ff_analyze_evidence.calibration_state` | `ff_get_status.checks[]` |
-| Skill Lane 1 (structural) | Phase 1 | `check:skills` | CI |
-| Skill Lane 2 (model-graded) | Phase 1, pre-release | `npm run eval:skills` | `docs/evals/` |
-| Token sizes vs plan 07 §5.1 table | Phase 1 | `tests/mcp/size.test.ts` (fixture mode, every tool, both `detail` levels) | CI |
+| Skill Lane 1 (structural) | Phase 1a | `check:skills` | CI |
+| Skill Lane 2 (model-graded) | Phase 1a/1b, pre-release | `npm run eval:skills` | `docs/evals/` |
+| Token sizes vs plan 07 §5.1 table | Phase 1a | `tests/mcp/size.test.ts` (fixture mode, every tool, both `detail` levels) | CI |
 
 ---
 
@@ -61,50 +68,75 @@
 - Z1 `docs.yml` and `secrets` jobs green on `main`; a PR that introduces a string matching `\d{3}\.l\.\d{4,8}` outside the placeholder range fails `secrets` (a deliberate test commit on a branch, then deleted).
 - Z2 Every Mermaid block in `docs/plan/*.md` (including 07–10) renders under the pinned `mermaid-cli`.
 - Z3 `npm ci && npm run lint && npm run typecheck` pass on an empty `src/` with the boundary rules configured (a test file in `src/domain/` importing `src/store/` fails lint — plan 04 A-5).
-- Z4 The access application is submitted and its date recorded in HANDOFF; the legacy-app check ("does Chad hold a still-working client id?") is answered.
+- Z4 The access application (D0) is submitted and its date recorded in HANDOFF — that date starts the Ph8 clock; the legacy-app check ("does Chad hold a still-working client id?") is answered (**resolved 2026-09-30: no existing app**, HANDOFF item 4).
 
 **Exit gate.** Z1–Z4. **Deferred:** everything else.
 
-### 3.1 Phase 1 — Read-only MVP (L)
+### 3.1 Phase 1 — Read-only MVP, split into 1a (Yahoo-free) and 1b (Yahoo) *(revised round 1, OBJ-02 / OBJ-03)*
+
+Phase 1 is one product — `v0.1.0` is tagged when **both** halves are green — built as two halves with separate scope, acceptance and exit gates so that work proceeds and is testable while the Yahoo application (D0) is pending. **1a needs no Yahoo access and starts now.** 1b needs a provisioned token and starts when one exists; if the Ph8 decision point passes without a read grant, 1b pauses and X1/X2 ship (§0). The original A1–A16 keep their numbers (other plans cite them); items that had a Yahoo half and a Yahoo-free half are split into `a`/`b`.
+
+#### 3.1a Phase 1a — the Yahoo-free half (L)
 
 **Scope.**
-- *Server core:* plan 02 §2 `oob` auth + token store + lockfile; plan 01 §8 `YahooProvider` (XML, path builder, limiter, cache, error classifier); store + migrations 001 (yahoo_cache, league_settings, datasets bookkeeping, crosswalk, write_journal, recommendation_log, projection, refresh_log, roster_snapshot, transactions_seen); plan 03 lifecycle, `ff` CLI (`serve`, `auth`, `status`, `doctor`, `smoke`, `refresh`, `snapshot`, `print-config`, `install-launchd`, `uninstall`); logger with redaction.
-- *Engine:* plan 08 in full for the fixture league's settings; `rounding`/`negative_floor` branches property-tested, `verified: false`.
+- *Store and lifecycle:* store + migrations 001 (yahoo_cache, league_settings, datasets bookkeeping, crosswalk, write_journal, recommendation_log, projection, refresh_log, roster_snapshot, transactions_seen); plan 03 lifecycle; the `ff` CLI without its Yahoo subcommands (`serve`, `status`, `doctor`, `refresh`, `snapshot`, `print-config`, `install-launchd`, `uninstall`); logger with redaction.
+- *Sources (05 §16 #1's stat lines and #3–#5):* nflverse `schedules` (lines, kickoffs, roof, byes), `injuries`, `roster_weekly`, and **`stats_player_week`** (moved from Phase 2 — OBJ-03: the same stat lines as Yahoo's, keyless, everyone, every season); weather via `FF_WEATHER_SOURCE` (D.1 OBJ-02 lists weather/lines in 1a; moved from Phase 2). Odds stay deferred (D4).
+- *Engine:* plan 08 in full **over nflverse lines** — `toStatLine(nflverse)` is the Phase-1 path (OBJ-03); `rounding`/`negative_floor` branches property-tested, `verified: false`.
 - *Crosswalk:* 04 §D steps 1–4 with `roster_weekly` ids + deterministic matcher + overrides file; DynastyProcess and Sleeper seeds deferred to Phase 2.
-- *Sources (05 §16 #3–#5):* nflverse `schedules` (lines, kickoffs, roof, byes), `injuries`, `roster_weekly`. Weather and odds deferred (the projection lists the weather driver as omitted in `assumptions[]`).
-- *Tools (plan 07 P0):* A1–A5, B1–B2, C1–C2, D2–D3, E1 (`v1-trailing`), E2, E3 (`pre`), E5 (`positions ⊆ {K, DEF}`), E12–E14, G1 — 19 tools.
-- *Resources:* `ff://league`, `ff://league/settings`, `ff://game/stat-categories`, `ff://status`, `ff://status/freshness`, `ff://roster/snapshot`, `ff://docs/tool-outputs`, `ff://rec/{log_id}`, `ff://rec/week/{week}`.
-- *Prompts:* `ff.onboard`, `ff.weekly`, `ff.start_sit`, `ff.stream`, `ff.retro`, `ff.apply`.
-- *Skills (plan 09 P0):* `onboard`, `weekly`, `start-sit`, `stream-kdef`, `retro`, `apply` (read-only mode); `_shared` references; `build-skills.ts`; `check:skills` Lane 1.
-- *Jobs (plan 06):* `refresh nflverse:schedules`, `refresh nflverse:daily` (injuries, roster_weekly), `snapshot roster`, `token check`, `pre-kickoff check`; `store prune/backup`.
-- *Fixtures:* Yahoo recordings for every endpoint the P0 tools touch, ≥ 3 final weeks of player stats for every rostered player of every team, scrubbed (plan 05 §3.1); nflverse excerpts; golden expected outputs.
+- *Platform seam:* **`ManualLeagueProvider`** behind `FantasyPlatform` (plan 01 §8): league settings and my roster from a hand-filled YAML the `onboard` Skill helps write; other teams' rosters, transactions and the FA pool are optional (empty, or pasted). It is what X1 ships for Chad's league under denial.
+- *Tools (plan 07 P0, registered under `FF_TOOLSET=core`):* A1–A5, B1–B2, C1–C2, D2–D3, E1 (`v1-trailing` from nflverse lines), E2, E3 (`pre`), E5 (`positions ⊆ {K, DEF}`), E12–E14, G1 — 19 tools. In 1a the platform-fact tools (A1–A5, B1–B2, C1–C2) serve what the YAML holds and `ff_get_player_stats.match` is `null` (no Yahoo points to match against); the Yahoo-free tools (D2, D3, E1–E3, E5, E12–E14, G1) are complete.
+- *Resources:* `ff://league`, `ff://league/settings`, `ff://status`, `ff://status/freshness`, `ff://docs/tool-outputs`, `ff://rec/{log_id}`, `ff://rec/week/{week}` (`ff://game/stat-categories` and `ff://roster/snapshot` need Yahoo → 1b).
+- *Prompts:* `ff.start_sit`, `ff.stream`, `ff.retro` (the rest → 1b).
+- *Skills (plan 09 P0):* `stream-kdef`, `retro`, `start-sit`, and `onboard`'s manual-league mode, in fixture mode; `_shared` references; `build-skills.ts`; `check:skills` Lane 1.
+- *Jobs (plan 06 §1.2):* `refresh nflverse:schedules`, `refresh nflverse:daily` (injuries, roster_weekly), `refresh nflverse:stats` (`stats_player_week` only in Phase 1), `refresh weather`; `store prune/backup`.
+- *Fixtures:* nflverse excerpts (plan 05 §3.2) including ≥ 3 final weeks of `stats_player_week` for the fixture league's players; a fixture manual league (`fixtures/manual/league.yaml`, placeholder names only); golden expected outputs for the engine over nflverse lines.
 
-**Acceptance.** Hard unless marked soft.
-- A1 **Golden gate:** `tests/domain/scoring/golden.test.ts` — every rostered player-week in the ≥ 3 fixture weeks matches `player_points.total` within 0.01; `complete = true` on final weeks; plan 08 §7 P1–P13 green; `src/domain/scoring/**` at 100 % lines + branches.
-- A2 **Live self-check:** `ff smoke` against the real league lists leagues, reads settings, scores the current roster's last final week with every player `match: true` (Chad runs it; output pasted into `docs/evals/`).
-- A3 **Inspector smoke:** `tools/list` in fixture mode equals `tests/smoke/expected-tools.json` (the 19 P0 names in registry order); no `ff_prepare_*`/`ff_commit_*` listed; `resources/list` carries `ttlMs`/`cacheScope`; `prompts/list` has the six P0 prompts.
-- A4 **Fault matrix:** every row of plan 05 §4.1 that applies to reads is green (999, 429/5xx, timeout, non-XML, malformed, XXE inert, `NOT_FOUND`, `token_rejected` once, `additional_authorization_required` terminal, `invalid_grant`, torn-write, two-process refresh, 25-page paging).
-- A5 **Crosswalk:** on the fixture league, ≥ 95 % of rostered players resolve by id or deterministic match [A-1] and the remainder appear in `ff_get_status.crosswalk.unmatched_rostered`; a fixture rookie with no `yahoo_id` resolves by name + team + position; a name-only candidate is rejected (plan 05 §2 row); a persisted pair survives a team change.
+**Acceptance (1a; hard unless marked soft).**
+- A1a **Engine over nflverse lines:** plan 08 §7 P1–P13 green; `src/domain/scoring/**` at 100 % lines + branches; `toStatLine(nflverse)` over the fixture excerpt scores every player-week without `NaN` and with `complete = true` on final weeks; the frozen `fixtures/golden/` outputs match (plan 08 §6 step 1). The golden gate against Yahoo `player_points.total` is **A1b** (1b).
+- A3a **Inspector smoke (fixture mode, `FF_TOOLSET=core`):** `tools/list` equals `tests/smoke/expected-tools.json` (the 19 P0 names in registry order); no `ff_prepare_*`/`ff_commit_*` listed; `resources/list` carries `ttlMs`/`cacheScope`; `prompts/list` has the three 1a prompts.
+- A4a **Fault matrix — store and sources:** the plan 05 §4.1 rows that need no Yahoo (torn-write, two-process refresh) and the `sources/*`/`store` rows of plan 05 §2 (schema assertion, transactional load, migrations from every historical version).
+- A5a **Crosswalk matcher:** every player in the fixture YAML resolves by `roster_weekly` id or deterministic name + team + position match, or is listed in `ff_get_status.crosswalk.unmatched_rostered`; a fixture rookie with no platform id resolves by name + team + position; a name-only candidate is rejected (plan 05 §2 row); a persisted pair survives a team change. The ≥ 95 % figure on the Yahoo fixture league is **A5b** (1b).
 - A6 **Envelope contract:** plan 05 §2 `mcp/envelope` assertions green for all 19 tools; `tests/mcp/size.test.ts` shows every tool's `compact` and `full` outputs on the fixture league are ≤ the plan 07 §5.1 worst-case column (analytics ≤ 10 000 chars).
-- A7 **Start/sit (soft, reported):** replaying the fixture weeks with `v1-trailing` projections, `ff_analyze_lineup(objective: mean)`'s realised regret is ≤ the "start by last week's points" baseline's, and `objective: pwin` produces `mode` consistent with the sign of `μ_m − μ_o` on every matchup (hard); the regret numbers are written to `docs/evals/`.
+- A7 **Start/sit (soft, reported):** replaying the fixture weeks with `v1-trailing` projections (nflverse lines, the fixture YAML roster), `ff_analyze_lineup(objective: mean)`'s realised regret is ≤ the "start by last week's points" baseline's, and `objective: pwin` produces `mode` consistent with the sign of `μ_m − μ_o` on every matchup (hard); the regret numbers are written to `docs/evals/`.
 - A8 **K/DEF (soft, reported):** `ff_analyze_waivers(positions: [K, DEF])` returns ≥ 3 candidates per position with `implied_total` populated for every fixture week (hard); rank correlation with realised points is reported against both 05 §8 baselines.
-- A9 **Retrospective:** the 05 §12 "evaluation of the evaluator" unit tests pass (a perfectly calibrated synthetic forecaster scores Brier = uncertainty; CRPS of the true distribution beats a misspecified one); running the six P0 Skills' Lane 1 dry runs on fixture week `N` and `ff_analyze_retrospective(N)` on week `N+1` yields `regret`, `followed`, and `brier.p_win` for every logged call; `n < 30` → `sample_size_caveats[]` non-empty.
-- A10 **Skills Lane 1:** `check:skills` green for the six P0 Skills, including the fixture dry run (plan 09 §5.1 item 7) and the pairwise trigger-collision check.
-- A11 **Skills Lane 2 (manual, tokens):** the doc 06 cases ON-1..3, WK-1..3, SS-1..4, KD-1..3, RT-1..3, AP-2 and AP-4 pass the plan 09 §5.2 bar; trigger evals: all positives trigger, no negatives, on both model classes.
-- A12 **Model-driven evals (plan 05 §6):** ≥ 8/10 on the 10 read-only fixture questions.
+- A9 **Retrospective:** the 05 §12 "evaluation of the evaluator" unit tests pass (a perfectly calibrated synthetic forecaster scores Brier = uncertainty; CRPS of the true distribution beats a misspecified one); running the 1a Skills' Lane 1 dry runs on fixture week `N` and `ff_analyze_retrospective(N)` on week `N+1` yields `regret`, `followed`, and `brier.p_win` for every logged call; `n < 30` → `sample_size_caveats[]` non-empty.
+- A10 **Skills Lane 1:** `check:skills` green for the 1a Skills, including the fixture dry run (plan 09 §5.1 item 7) and the pairwise trigger-collision check.
+- A11a **Skills Lane 2 (manual, tokens):** SS-1..4, KD-1..3, RT-1..3 pass the plan 09 §5.2 bar on the fixture YAML league; trigger evals: all positives trigger, no negatives, on both model classes.
 - A13 **Process/lifecycle:** plan 05 §4.2 green on ubuntu and once on macOS.
-- A14 **Coverage gate** (plan 05 §7) met; `supply-chain`, `secrets`, `pack` jobs green; the tarball contains `dist`, `skills` (without `_shared`? — no: `_shared` ships; it is harmless and keeps `build-skills` reproducible), `README`, `LICENSE`, `CHANGELOG` only.
+- A14 **Coverage gate** (plan 05 §7) met; `supply-chain`, `secrets`, `pack` jobs green; the tarball contains `dist`, `skills` (`_shared` ships; it is harmless and keeps `build-skills` reproducible), `README`, `LICENSE`, `CHANGELOG` only.
 - A15 **Latency:** on a warm cache every P0 tool answers in < 500 ms and `ff_project_players` for 32 players with `n_sims = 4000` in < 3 s on Chad's Mac [A-2]; startup < 1 s without network (plan 05 §4.2).
+
+**Exit gate (1a).** A1a, A3a, A4a, A5a, A6, A9, A10, A13–A15 green in CI on the SHA; A11a done by Chad with evidence in `docs/evals/`; A7–A8 reported. No tag of its own: `v0.1.0` is tagged when 1b's gate is also green. If the Ph8 decision point fires first, **X1 ships from 1a's green SHA** as `v0.1.0` with `ManualLeagueProvider` as the league source (the README says so), and X2 is pulled from §3.5.
+
+#### 3.1b Phase 1b — the Yahoo half (M; starts on a provisioned token)
+
+**Scope.**
+- *Auth and provider:* plan 02 §2 `oob` auth + token store + lockfile; plan 01 §8 `YahooProvider` (XML, path builder, limiter, cache, error classifier); `ff auth`, `ff smoke`; `ff doctor`'s online rows.
+- *Tools:* the platform-fact tools (A1–A5, B1–B2, C1–C2) over Yahoo; B2's golden `match`; D2's Yahoo `status`/`status_full` fields; E3 `pre`'s `yahoo_cross_check`.
+- *Resources:* `ff://game/stat-categories`, `ff://roster/snapshot`.
+- *Prompts:* `ff.onboard`, `ff.weekly`, `ff.apply`.
+- *Skills (plan 09 P0):* `onboard` (Yahoo mode), `weekly`, `apply` (read-only mode).
+- *Jobs (plan 06 §1.3):* `snapshot roster`, `snapshot fa-pool`, `transactions append`, `token check`, `pre-kickoff check`.
+- *Fixtures:* Yahoo recordings for every endpoint the P0 tools touch, ≥ 3 final weeks of player stats for every rostered player of every team, scrubbed (plan 05 §3.1); golden expected outputs vs `player_points.total`.
+
+**Acceptance (1b; hard unless marked soft).**
+- A1b **Golden gate:** `tests/domain/scoring/golden.test.ts` — every rostered player-week in the ≥ 3 Yahoo fixture weeks matches `player_points.total` within 0.01; `complete = true` on final weeks (plan 08 §6 step 1).
+- A2 **Live self-check:** `ff smoke` against the real league lists leagues, reads settings, scores the current roster's last final week with every player `match: true` (Chad runs it; output pasted into `docs/evals/`).
+- A3b **Inspector smoke (Yahoo fixture league):** `tools/list` unchanged from A3a; `prompts/list` has the six P0 prompts; a `tools/call` of `ff_get_player_stats` on a fixture week returns `match: true` for every player.
+- A4b **Fault matrix — Yahoo rows:** every row of plan 05 §4.1 that applies to reads (999, 429/5xx, timeout, non-XML, malformed, XXE inert, `NOT_FOUND`, `token_rejected` once, `additional_authorization_required` terminal, `invalid_grant`, 25-page paging).
+- A5b **Crosswalk on the Yahoo fixture league:** ≥ 95 % of rostered players resolve by id or deterministic match [A-1] and the remainder appear in `ff_get_status.crosswalk.unmatched_rostered`.
+- A11b **Skills Lane 2 (manual, tokens):** ON-1..3, WK-1..3, AP-2 and AP-4 pass the plan 09 §5.2 bar; trigger evals as in A11a.
+- A12 **Model-driven evals (plan 05 §6):** ≥ 8/10 on the 10 read-only fixture questions.
 - A16 **Usefulness check (manual, named evidence):** Chad runs `/onboard` then `/weekly` on the live league and confirms in HANDOFF that the briefing contained a lineup with intervals and `P(win)`, a K/DEF verdict with implied totals, every deadline, the attribution line, and a `log_id` per section.
 
-**Exit gate.** A1–A6, A9–A10, A13–A15 green in CI on the tagged SHA; A2, A11, A12, A16 done by Chad with evidence in `docs/evals/`; A7–A8 reported. Tag `v0.1.0` (pre-1.0 semver, plan 04 §4.4).
+**Exit gate (1b).** A1b, A3b, A4b, A5b green in CI on the tagged SHA; A2, A11b, A12, A16 done by Chad with evidence in `docs/evals/`. Tag `v0.1.0` (pre-1.0 semver, plan 04 §4.4) once **both** 1a and 1b gates are green.
 
-**Explicitly deferred to Phase 2.** Usage (`ff_get_player_usage`), skill-position waivers, trades, cascades, schedule planning, roster audit, news, live/season matchup modes, weather/odds drivers, Sleeper/DynastyProcess seeds, the plugin manifest, `ff_get_playbook`, `ff_analyze_scoring`.
+**Explicitly deferred to Phase 2.** Usage (`ff_get_player_usage`), skill-position waivers, trades, cascades, schedule planning, roster audit, news, live/season matchup modes, the odds driver, Sleeper/DynastyProcess seeds, the plugin manifest, `ff_get_playbook`, `ff_analyze_scoring`. (No longer deferred: `stats_player_week` and weather are in 1a.)
 
 ### 3.2 Phase 2 — Usage, market, and the P1 engines (L)
 
 **Scope.**
-- *Sources (05 §16 #6–#9, #13; 04 §C):* nflverse `stats_player_week`, `stats_team_week`, `snap_counts`, pbp projected subset (RZ/GL, `kick_distance`, `defteam`, `xpass`, `pass_oe`, `epa`), `depth_charts` (parquet), ffopportunity `ep_weekly`, Sleeper `players` + `trending`, DynastyProcess ids, RotoWire/ESPN RSS (CBS fallback), Open-Meteo or NWS (`FF_WEATHER_SOURCE`), The Odds API if D4; **two prior seasons** of `stats_player_week` + `schedules` + `injuries` for the soft backtests [A-3]; the plan 06 jobs for all of them; crosswalk rebuild job with the unmatched alert.
+- *Sources (05 §16 #6–#9, #13; 04 §C):* nflverse `stats_team_week`, `snap_counts`, pbp projected subset (RZ/GL, `kick_distance`, `defteam`, `xpass`, `pass_oe`, `epa`), `depth_charts` (parquet), ffopportunity `ep_weekly`, Sleeper `players` + `trending`, DynastyProcess ids, RotoWire/ESPN RSS (CBS fallback), The Odds API if D4 (`stats_player_week` and weather moved to Phase 1a — round 1); **two prior seasons** of `stats_player_week` + `schedules` + `injuries` for the soft backtests [A-3]; the plan 06 jobs for all of them; crosswalk rebuild job with the unmatched alert.
 - *Tools (plan 07 P1):* C3, D1, D4–D6, E3 (`live`, `season`), E4, E5 (all positions), E6–E11, E15, G2 — 15 tools.
 - *Skills (plan 09 P1):* `waivers`, `trade`, `injury-cascade`, `schedule-plan`, `roster-audit`, `news-check`, `live`; prompts for each.
 - *Engine branches:* record a **second fixture league** with `uses_fractional_points = 0` and/or `uses_negative_points = 0` and/or yardage bonuses (D8) → `rounding`/`negative_floor` verified; DST points-allowed definition (plan 08 U-6) pinned.
@@ -170,8 +202,9 @@
 
 | Item | Pull trigger | Acceptance sketch |
 |---|---|---|
+| **`SleeperProvider` (X2)** *(added round 1, OBJ-02)* — the first second platform behind `FantasyPlatform` (plan 01 §8); M | the Ph8 decision point fires without a read grant, **or** Chad (or a user) has a Sleeper league | the 19 P0 tools over a Sleeper league in fixture mode (Sleeper's read API is public and keyless, 04 §B4); plan 08 P14 round trip over Sleeper scoring settings; `ff_` names unchanged; `license: "non-commercial"` visible in `ff status` (personal use only, D1) |
 | `ff_get_draft_results`, `ff_analyze_draft`, `draft` Skill | Chad wants it for the next August draft | 05 §13 eval: xVBD-best-available beats ADP-order on ≥ 2 replayed drafts under the league's `S`; DR-1..3 pass |
-| ESPN provider | an ESPN league | plan 08 P14 round trip; ESPN golden vs `appliedTotal`; `ff_` names unchanged |
+| ESPN provider — **after** Sleeper, never the first second seam: ESPN's API is ToS-blocked (04 §B5) | an ESPN league **and** a ToS position that permits it | plan 08 P14 round trip; ESPN golden vs `appliedTotal`; `ff_` names unchanged |
 | Streamable HTTP + auth server; claude.ai install | a second user or hosted use (plan 01 §3.2/§3.3) | plan 01 §3.2 table implemented; DNS-rebinding tests |
 | Marketplace release via `npm` source | D3 = yes and 06 U-6 verified | `claude plugin install` from the published package works on a clean machine |
 | Commercial source swaps (Open-Meteo → NWS, Sleeper → own trending; FTN/ffverse attribution) | D1 = commercial | `ff status` lists no `non-commercial` source; attribution lines in every result |
@@ -206,6 +239,7 @@ Errors found in plan 01–06 while cross-reading: none that change a decision. T
 
 | # | Decision | Default the plan assumes | What changes if the other way |
 |---|---|---|---|
+| **D0** | **The Yahoo API access application itself** — when Chad submits it, and with what framing (HANDOFF item 4: personal use, one user, one league, read-only, locally-run open-source tool, low cached request volume; write requested in the notes with the confirmation-gate design as the justification) *(added round 1, OBJ-02)*. **Outranks D1–D10**: it decides whether 1b happens this season | submitted in Phase 0 (Z4); the Ph8 rule then runs: 4 weeks after submission or NFL week 9, whichever is earlier | not submitted → 1b never starts; X1 is the product for Chad's league and X2 for the public; every Yahoo-dependency:`read` line in plans 01–10 stays designed and untested |
 | D1 | **Commercial distribution?** (HANDOFF item 6) | personal use | Phase 4 source swaps become Phase 2 work; Sleeper trending → own snapshot diffs; Open-Meteo → NWS; FTN/ffverse attribution in every result |
 | D2 | **Buy a consensus projection feed as a baseline?** (HANDOFF item 7; FantasyPros ~$9/mo personal-use) | no — projections are ours | a `DataSource` for the feed lands in Phase 2 as a **retrospective comparator only** (05 §1 evaluation (c)); never shown as the recommendation |
 | D3 | **Ship the Claude Code plugin manifest in v1 (Phase 2)?** | yes, additive (plan 09 K7) | no → copy-install stays the only path; T3/T7 close as "not applicable" |

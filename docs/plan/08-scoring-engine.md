@@ -158,6 +158,8 @@ Rules: a rule whose id matches no pattern gets `canonical: null` and appears in 
 
 The projection layer (05 §1) produces canonical stat lines directly, so no third mapping exists. ffopportunity's `*_exp` columns feed the *projection*, not the engine (05 §1 step 5).
 
+**`toStatLine(nflverse)` is the Phase-1 path** *(revised round 1, OBJ-03)*: v1 projections (plan 07 E1 `v1-trailing`) are built from nflverse `stats_player_week` lines scored by this engine, so the projection/start-sit/K-DEF chain needs no Yahoo access (plan 10 Phase 1a). `toStatLine(yahoo)` feeds the golden check (§6) and `ff_get_player_stats.match` only. Both translators must agree on a shared week: a test scores the same player-week through both paths and asserts `|Δ| ≤ 0.01` wherever the two sources report the same stats — a cheap cross-check that the nflverse column map (§3.2, A-1) is right before the Yahoo golden gate exists.
+
 ### 3.3 Position-type gating
 
 A rule applies only to lines whose `position_type` is in `rule.position_types` (05 §15 "a DEF touchdown is stat 35 (DT), not 13 (O)"). A player's *slot* never changes his scoring (an RB in `W/R/T` scores as `O`). Team defences are `DT`; kickers `K`; IDP `D`. The gate is part of `score`, not of the translators, so a mis-typed line fails a property test rather than silently scoring.
