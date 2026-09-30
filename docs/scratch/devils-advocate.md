@@ -9,7 +9,24 @@ Off-limits (owned by `ci-bootstrap`, in flight in the same tree): `.github/**`,
 
 ## RESUME HERE
 
-**Round:** 2 (verdicts + new objections) — **DONE and pushed at 1ab4db5**.
+**Round:** 3 (verdicts + closing) — **DONE**; the advocate rests. Round 3 over
+`b904a6f` (diffed against `8c39191`): OBJ-24…30 all conceded-by-defence and
+landed (7/7; sweeps clean; `DiscoverResult.instructions` re-verified by me on
+the spec page; `.gitignore` exception verified with `git check-ignore -v`).
+Nothing structural remains — three nits (42-char pointer vs "≤ 40" prose;
+vacuous "superseded ds/ files" prune wording under rename-over publishing;
+`file:?mode=ro` on ATTACH is [U] at build time). **Remainder declared
+marginal; `## Closing verdict` written** (survived / changed / residuals
+ranked — Yahoo's answer, the size of L, v1 usefulness, the two client spikes,
+reach heuristic, build-time [U]s, "the plan is unbuilt"). Total over three
+rounds: 30 objections — 28 conceded-by-defence and landed, 1 withdrawn
+(OBJ-20), 1 concede-modified I agree with (OBJ-28); 0 pressed.
+
+**No further rounds are needed.** If resumed: only re-open if the orchestrator
+edits a security sentence, a phase, or a number after `b904a6f`; otherwise the
+log is final and the orchestrator finalises `docs/plan/changelog.md`.
+
+**Round-2 record:** DONE and pushed at 1ab4db5.
 Round 1: 23 objections (2 blocking) → orchestrator defence `f2abb64` (18 concede,
 4 concede-modified, 1 justified) → reviser applied everything through `8c39191`.
 Round 2 (`## Round 2 — verdicts and objections`): verdict table = 22
