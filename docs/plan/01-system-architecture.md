@@ -283,7 +283,7 @@ Rules: **no upstream body ever appears in a tool result** (02 §4 #6: Yahoo retu
 
 ### 5.1 Storage decision (D4, expanded)
 
-SQLite, one file `~/.cache/fantasy-football-mcp/store.sqlite` (override `FF_CACHE_DIR`), WAL mode, `synchronous=NORMAL`, `foreign_keys=ON`, a `schema_version` table with forward-only migrations (plan 03 §6). Everything that is not a secret lives here: the Yahoo response cache, loaded datasets, the crosswalk, the write journal, the recommendation log, refresh bookkeeping. Secrets never do (plan 02 §3).
+SQLite, one file `~/.cache/fantasy-football-mcp/store.sqlite` (override `FF_CACHE_DIR`), WAL mode, `synchronous=NORMAL`, `foreign_keys=ON`, a `schema_version` table with forward-only migrations (plan 03 §6). Everything that is not a secret lives here: the Yahoo response cache, loaded datasets, the crosswalk, the write journal, the recommendation log, refresh bookkeeping. Secrets never do (plan 02 §3). **Never pruned** (T5, round 1): `recommendation_log`, the `league_settings` rows it references, and `write_journal` — `store prune` (plan 06 §1.2) touches caches, news, temp files and old backups only.
 
 *Why one file and not one per concern:* one transaction can refresh a dataset and its bookkeeping atomically; `ff status` is one query; backup is one copy. *Alternative:* separate files for journal/log (audit isolation). *What would change it:* a wish to ship the journal elsewhere — it is one table to move.
 
@@ -444,7 +444,7 @@ The `license` field is not decoration: `ff status` and the docs list which sourc
 
 ### 8.2 Journal and recommendation log
 
-Both are store tables owned by the domain (`write_journal`, `recommendation_log`); plan 02 §4 specifies the journal's states and reconciliation; 05 §12/§19.3 specifies the log's content. They are named here so the store schema has them from migration 1. The log's free text is **model-authored and untrusted on read** (§4.2 item 3; plan 02 §6.1) — the store is an injection source like any other *(round 1, OBJ-15)*.
+Both are store tables owned by the domain (`write_journal`, `recommendation_log`); plan 02 §4 specifies the journal's states and reconciliation; 05 §12/§19.3 specifies the log's content. They are named here so the store schema has them from migration 1. **Migration 001 carries (T12, round 1):** `schema_version`, `yahoo_cache`, `league_settings`, `crosswalk`, `write_journal`, `recommendation_log`, `projection`, `points_cache`, `refresh_log`, `job_lock`, `limiter_state`, `roster_snapshot`, `scoreboard_snapshot`, `fa_pool_snapshot`, `transactions_seen`, and the `ds_*` dataset tables. Prunable: `yahoo_cache`, `points_cache`, `ds_news`, backups. Never pruned (T5): `recommendation_log`, the `league_settings` rows it references, `write_journal` — the migration file says so in a comment above each of those three `CREATE TABLE`s. The log's free text is **model-authored and untrusted on read** (§4.2 item 3; plan 02 §6.1) — the store is an injection source like any other *(round 1, OBJ-15)*.
 
 ---
 

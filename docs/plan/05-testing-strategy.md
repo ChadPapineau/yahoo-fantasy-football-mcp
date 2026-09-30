@@ -18,7 +18,7 @@ Standard carried over from SOTARA (`docs/12-testing-standards.md` there): **ever
 | T4 | **Fault injection through an injected `fetch`** (constructor DI on `httpClient`); no `nock`/`msw` | zero dependencies; the failure modes we need (999 with HTML, reset, timeout, malformed XML) are trivially expressed as a function | msw | Nothing |
 | T5 | **Inspector CLI smoke in fixture mode runs in CI** (no credentials, no tokens) | the Inspector is the reference client; `--cli` + `--format json` is made for CI [V-inspector] | a hand-written stdio client | Nothing |
 | T6 | **Model-driven evals: 10 read-only questions over the frozen fixture league**, run manually with the mcp-builder Python harness before a release | `evaluation.md`'s rules (read-only, independent, stable, single verifiable answer) are satisfiable only on frozen data | evals against the live league (answers change weekly) | Nothing |
-| T7 | **Coverage gate: 90 % lines / 85 % branches / 90 % functions globally; 100 % lines + branches for six named modules** | §7 | 80 % flat | Nothing downward; upward as the codebase settles |
+| T7 | **Coverage gate: 90 % lines / 85 % branches / 90 % functions globally; 100 % lines + branches for seven named modules** *(six → seven, T10 round 1: the retrospective's metric code)* | §7 | 80 % flat | Nothing downward; upward as the codebase settles |
 | T8 | **Every regression test is mutation-verified** before its finding is closed | SOTARA round-5 lesson | trust the green | Nothing |
 
 ---
@@ -35,6 +35,8 @@ Standard carried over from SOTARA (`docs/12-testing-standards.md` there): **ever
 | Inspector smoke | `tests/smoke/` | `@modelcontextprotocol/inspector --cli` | yes | no (fixture mode) | no |
 | Live smoke | `ff smoke` | the CLI against real Yahoo | **never in CI** | yes | no |
 | Model-driven evals | `tests/evals/` | mcp-builder `scripts/evaluation.py` | no — manual, pre-release | no (fixture mode) | **yes** |
+| Skills Lane 1 (structural + fixture dry run) *(T4, round 1)* | `skills/*/evals/tool_sequence.json`, `trigger_eval.json` | `npm run check:skills` (plan 09 §5.1; `docs.yml` `skills` job) | yes, every push | no (fixture mode) | no |
+| Skills Lane 2 (model-graded) *(T4, round 1)* | `skills/*/evals/cases.json` | `npm run eval:skills` (plan 09 §5.2) | no — manual, pre-release | no (fixture mode) | **yes** |
 
 ---
 
@@ -175,10 +177,10 @@ Built exactly as `evaluation.md` prescribes, with the fixture league as the worl
 ## 7. Coverage gate
 
 **Global:** lines 90 %, branches 85 %, functions 90 %, statements 90 % (`@vitest/coverage-v8`, `thresholds` in `vitest.config.ts`, enforced by `scripts/check-coverage.ts` in CI so the numbers are also reviewable in the job summary).
-**Per-file 100 % lines and branches:** `src/domain/scoring/**`, `src/domain/gate/**`, `src/providers/yahoo/path.ts`, `src/providers/yahoo/errors.ts`, `src/auth/token-store.ts`, `src/cli/log.ts`.
+**Per-file 100 % lines and branches:** `src/domain/scoring/**`, `src/domain/gate/**`, `src/providers/yahoo/path.ts`, `src/providers/yahoo/errors.ts`, `src/auth/token-store.ts`, `src/cli/log.ts`, and **`src/domain/reclog/metrics.ts`** (Brier decomposition, CRPS, pinball, coverage — the "evaluation of the evaluator", 05 §12: a wrong metric silently mis-tunes the model; T10, round 1).
 **Excluded from coverage:** `src/cli/cli.ts` (arg dispatch), generated code, `tests/`.
 
-*Why these numbers:* 90/85 is where a codebase this size stops being "coverage by accident" without spending effort on glue; the six 100 % modules are the ones where an untested branch is a silent wrong score, an accepted bad key, an unrecognised terminal error, a torn token file, or a leaked secret — a branch there is a threat-model row (plan 02 §8). *Alternative:* 80 % flat. *What would change it:* only upward. The gate is never lowered to pass a build; a red gate means write the test or delete the dead code.
+*Why these numbers:* 90/85 is where a codebase this size stops being "coverage by accident" without spending effort on glue; the seven 100 % modules are the ones where an untested branch is a silent wrong score, an accepted bad key, an unrecognised terminal error, a torn token file, a leaked secret, or a wrong calibration metric — a branch there is a threat-model row (plan 02 §8). *Alternative:* 80 % flat. *What would change it:* only upward. The gate is never lowered to pass a build; a red gate means write the test or delete the dead code.
 
 ---
 

@@ -221,7 +221,7 @@ Every write is two tools plus a human step:
 
 1. **`ff_prepare_<kind>`** (local-write annotations — `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false`: it writes our journal, mints the gate key on first use and may fire a notification, so it is not read-only in the spec's sense; plan 01 §4.1, *round 1 OBJ-19 / T8*) computes the intended change from the *current* state, produces a **human-readable diff** and a **structured diff**, records a `PreparedWrite` in `write_journal` with status `prepared`, and returns the diff plus `prepared_id`. It **never** touches Yahoo's write endpoints.
 2. **A human confirmation** through one of three channels (§4.2).
-3. **`ff_commit_<kind>`** (`destructiveHint: true`, `idempotentHint: true`) verifies the ticket, **re-fetches the affected state and recomputes the precondition hash** (compare-and-set), performs exactly one write, journals the outcome, and returns a receipt. A repeated commit with the same `prepared_id` returns the original receipt without writing.
+3. **`ff_commit_<kind>(prepared_id, evidence?)`** (`destructiveHint: true`, `idempotentHint: true`) — `evidence` is **optional and only for channel 2** (`{ kind: "code", code }`); channel 1's answer arrives as the client's `inputResponses`, and channel 3 never calls the tool at all (T13, round 1; plan 07 §3.F) — verifies the ticket, **re-fetches the affected state and recomputes the precondition hash** (compare-and-set), performs exactly one write, journals the outcome, and returns a receipt. A repeated commit with the same `prepared_id` returns the original receipt without writing.
 
 ```mermaid
 sequenceDiagram
@@ -238,7 +238,7 @@ sequenceDiagram
     S->>J: insert PreparedWrite(id, diff, pre, expires_at = now + 10 min, status = prepared)
     S-->>C: { prepared_id, diff (human + structured), expires_at, how_to_confirm }
     Note over C,S: Human channel (one of three, §4.2) produces confirmation evidence
-    C->>S: ff_commit_lineup(prepared_id, evidence)
+    C->>S: ff_commit_lineup(prepared_id, evidence? — channel 2 only)
     S->>S: verify evidence (elicitation accept | OOB code | CLI-approved flag)
     S->>Y: GET roster week=N (force refresh)
     S->>S: hash(roster) == pre ? else PRECONDITION_CHANGED (void, re-prepare)
@@ -292,7 +292,7 @@ The crux the brief names: an *opaque token returned to the model* proves the mod
 ## 5. Input validation and path construction
 
 - **Zod v4 `.strict()` on every tool input** (unknown keys rejected — the SDK accepts Zod v4 schemas [V-sdk tools.md]); every string has `max`; every number has `int().min().max()`; enums for `status` (`A|FA|W|T|K` [V-03 §B.2]), positions (from the league's own `roster_positions`, not a hard-coded list), stat types.
-- **Bounds (all [A-7], centralised in `src/mcp/bounds.ts`):** `week` 1–22, `limit` 1–100, `offset` 0–10 000, `player_keys` ≤ 25 per call [V-03 §B.2], `search` ≤ 64 chars, `trade_note` ≤ 200 chars, `count` (transactions) 1–200, `faab_bid` 0–1000 and ≤ `faab_balance`.
+- **Bounds (all [A-7], centralised in `src/mcp/bounds.ts`):** `week` 1–22, `limit` 1–100, `offset` 0–10 000, `player_keys` ≤ 25 per call [V-03 §B.2] — a bound on *key lists*; analytics tools that need a FA pool or every roster use a `PlayerSelector` (`team_key`, `nfl_team`, `pool`, plan 07 legend), which is the sanctioned way past 25 and never a longer list (T6, round 1) — `search` ≤ 64 chars, `trade_note` ≤ 200 chars, `count` (transactions) 1–200, `faab_bid` 0–1000 and ≤ `faab_balance`.
 - **Yahoo key grammar** (from [V-03 §B "Key formats"]; digit widths are [A-8]):
 
 | Kind | Regex |

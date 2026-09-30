@@ -61,7 +61,7 @@ Every tool below carries **decision · why · alternative · what would change i
 | `schedule_plan` | `ff_analyze_schedule` | |
 | `roster_construction` | `ff_analyze_roster` | |
 | `evidence_conflict_check` | `ff_analyze_evidence` | |
-| `rec_log` | `ff_record_recommendation` | verb `record` — **tension T1** (plan 10) |
+| `rec_log` | `ff_record_recommendation` | verb `record` — T1, applied round 1 (plan 01 §4.1 verb list) |
 | `rec_retrospective` | `ff_analyze_retrospective` | |
 | `yahoo-ff://rec/{id}` | `ff://rec/{log_id}` + `ff_list_recommendations` | |
 | `draft_advise` | `ff_analyze_draft` | later |
