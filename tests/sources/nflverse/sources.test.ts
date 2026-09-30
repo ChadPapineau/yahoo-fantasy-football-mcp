@@ -237,3 +237,34 @@ describe("fetch hygiene", () => {
     expect(readdirSync(c.tempDir)).toHaveLength(4);
   });
 });
+
+describe("fetch failures", () => {
+  it("a missing season file fails the run and removes what was already downloaded", async () => {
+    const c = makeCtx([2026, 2027]); // no 2027 release yet → 404
+    open.push(c);
+    const v = await injuriesSource.version(c.ctx);
+    await expect(injuriesSource.fetch(v!, c.ctx)).rejects.toThrow(
+      /injuries_2027\.parquet answered 404/,
+    );
+    expect(readdirSync(c.tempDir)).toEqual([]);
+  });
+
+  it("schedules: a failed games.parquet download leaves nothing behind", async () => {
+    const routes = new Map([
+      [`${REL}/schedules/timestamp.txt`, new TextEncoder().encode("2026-09-30 11:58:07 EDT")],
+    ]);
+    const c = makeCtx([2026], routes);
+    open.push(c);
+    const v = await schedulesSource.version(c.ctx);
+    await expect(schedulesSource.fetch(v!, c.ctx)).rejects.toThrow(/404/);
+    expect(readdirSync(c.tempDir)).toEqual([]);
+  });
+
+  it("no seasons → no files and no request", async () => {
+    const c = makeCtx([]);
+    open.push(c);
+    const files = await rosterWeeklySource.fetch({ version: "v", released_at: null }, c.ctx);
+    expect(files).toEqual([]);
+    expect(c.calls).toEqual([]);
+  });
+});

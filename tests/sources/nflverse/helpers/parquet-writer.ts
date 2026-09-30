@@ -47,12 +47,24 @@ const CODEC_ID: Record<Codec, number> = {
 // --- byte sink ---------------------------------------------------------------------------------------
 
 class Sink {
-  private chunks: number[] = [];
+  private buf = new Uint8Array(1024);
+  private len = 0;
+  private reserve(n: number): void {
+    if (this.len + n <= this.buf.length) return;
+    let cap = this.buf.length * 2;
+    while (cap < this.len + n) cap *= 2;
+    const next = new Uint8Array(cap);
+    next.set(this.buf.subarray(0, this.len));
+    this.buf = next;
+  }
   byte(b: number): void {
-    this.chunks.push(b & 0xff);
+    this.reserve(1);
+    this.buf[this.len++] = b & 0xff;
   }
   bytes(u: Uint8Array | readonly number[]): void {
-    for (const b of u) this.chunks.push(b);
+    this.reserve(u.length);
+    this.buf.set(u, this.len);
+    this.len += u.length;
   }
   uvarint(n: bigint | number): void {
     let v = BigInt(n);
@@ -68,16 +80,29 @@ class Sink {
     const v = BigInt(n);
     this.uvarint(v >= 0n ? v << 1n : (-v << 1n) - 1n);
   }
+  private scratch = new DataView(new ArrayBuffer(8));
+  private scratchBytes = new Uint8Array(this.scratch.buffer);
   u32le(n: number): void {
-    const b = new Uint8Array(4);
-    new DataView(b.buffer).setUint32(0, n, true);
-    this.bytes(b);
+    this.scratch.setUint32(0, n, true);
+    this.bytes(this.scratchBytes.subarray(0, 4));
+  }
+  i32le(n: number): void {
+    this.scratch.setInt32(0, n, true);
+    this.bytes(this.scratchBytes.subarray(0, 4));
+  }
+  i64le(n: bigint): void {
+    this.scratch.setBigInt64(0, n, true);
+    this.bytes(this.scratchBytes);
+  }
+  f64le(n: number): void {
+    this.scratch.setFloat64(0, n, true);
+    this.bytes(this.scratchBytes);
   }
   get length(): number {
-    return this.chunks.length;
+    return this.len;
   }
   toBytes(): Uint8Array {
-    return Uint8Array.from(this.chunks);
+    return this.buf.slice(0, this.len);
   }
 }
 
@@ -197,27 +222,23 @@ function plainValues(col: WriterColumn, present: readonly unknown[]): Uint8Array
     if (bit > 0) s.byte(cur);
     return s.toBytes();
   }
+  const enc = new TextEncoder();
   for (const v of present) {
-    const b8 = new Uint8Array(8);
-    const dv = new DataView(b8.buffer);
     switch (col.type) {
       case "INT32": {
         const n = v instanceof Date ? Math.round(v.getTime() / 86_400_000) : Number(v);
         if (!Number.isInteger(n)) throw new Error(`INT32 column ${col.name}: ${String(v)}`);
-        dv.setInt32(0, n, true);
-        s.bytes(b8.subarray(0, 4));
+        s.i32le(n);
         break;
       }
       case "INT64":
-        dv.setBigInt64(0, BigInt(v as bigint | number), true);
-        s.bytes(b8);
+        s.i64le(BigInt(v as bigint | number));
         break;
       case "DOUBLE":
-        dv.setFloat64(0, Number(v), true);
-        s.bytes(b8);
+        s.f64le(Number(v));
         break;
       case "BYTE_ARRAY": {
-        const b = v instanceof Uint8Array ? v : new TextEncoder().encode(String(v));
+        const b = v instanceof Uint8Array ? v : enc.encode(String(v));
         s.u32le(b.length);
         s.bytes(b);
         break;
