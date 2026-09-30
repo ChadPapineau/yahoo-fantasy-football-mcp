@@ -16,7 +16,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 | 1 | OBJ-02 / plan 10 (Phase 1a/1b split, D0, X1/X2, EV para) + plan 01 §8 providers (brief says §3; seam is §8); OBJ-03 stats_player_week → 1a (plan 07 E1, plan 08 §3.2) | [x] | 59d0d99 |
 | 2 | OBJ-01 / plan 02 (§0 rule, §1, §4.2 per-client column, §8 #2/#5, S3/S6) + "cannot"/"never" audit (S5, §7 qualified; §6.2 "no code path" waits for G7) | [x] | d5f7934 |
 | 3 | OBJ-18 / plan 09 (`live` → `start-sit` branch; 12 Skills) + xrefs in 07/10 | [x] | 22b5553 |
-| 4 | OBJ-08 + OBJ-21 / plans 07, 10 (`FF_TOOLSET`, outputSchema, E15/E10/G2, ledger, Skill desc ≤350) | [ ] | — |
+| 4 | OBJ-08 + OBJ-21 / plans 07, 10 (+01, 03, 05, 09) (`FF_TOOLSET`, outputSchema, E15/E10/G2, ledger, Skill desc ≤350) | [x] | 1403118 |
 | 5 | OBJ-09 / plans 01, 03, 04 (Node >= 24.15, RC cite, CI matrix, fnm) | [ ] | — |
 | 6 | OBJ-14 / plans 02, 04 (fast-xml-parser flags, allow-list tree, pin-time rule) | [ ] | — |
 | 7 | OBJ-06/07/15 / plans 01, 02, 07 (untrusted_fields labelling, wrappers, structuredContent, rec-log source) | [ ] | — |
@@ -35,6 +35,9 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 (none yet)
 
 ### Choices I had to make
+- G4: per-turn fixed-cost ceilings (defence said 'with a ceiling', no number): `core` ≤ 40 000 chars, `full` ≤ 70 000, Skills listing ≤ 4 500 — [A-4]/[A-6], calibrated on first measurement.
+- G4: the C10 list-tool set that drops `outputSchema` = the five §5.1 rows with a 12 000–20 000 worst case (`ff_list_players`, `ff_list_transactions`, `ff_list_recommendations`, `ff_get_player_usage`, `ff_get_news`).
+- G4: Skill description cap applied as a rule (≤ 350; the §3 trigger paragraphs are content, trimmed at authoring time with phrases moving to `when_to_use`) rather than rewriting 12 descriptions now.
 - G1: effort sizes for the split — 1a = L, 1b = M, X2 `SleeperProvider` = M (defence gave none; kept the total ≥ the old L).
 - G1: 1a Skills — defence names `stream-kdef`/`retro`; added `start-sit` (E2 is in 1a; X1 promises start/sit) and `onboard`'s manual-YAML mode (defence says `onboard` helps write the YAML). `weekly`/`apply` stay 1b.
 - G1: weather moved into 1a because D.1 OBJ-02 item 1 lists "weather/lines" in 1a (plan 10 had deferred weather to Phase 2). Odds stay deferred.
@@ -43,6 +46,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 - G1: "plan 01 §3" in the brief read as §8 (the `FantasyPlatform` seam lives there); also touched §1 diagram and §11.
 
 ### Cross-reference inconsistencies found
+- G4: plan 09 §3.12 `news-check` called E10 (now P2) at P1 → the Skill reconciles D6/D2/D1/D3 itself at P1 and says "priors are hand-set".
 - Plan 07 C3 "34 read tools (19 P0 + 15 P1)" was a miscount: the P1 list (C3, D1, D4–D6, E4, E6–E11, E15, G2) is 14. After OBJ-21 (E15, G2 → later; E10 → P2): v1 = 31 (19 P0 + 11 P1 + 1 P2); Phase 2 tools/list = 30 under `FF_TOOLSET=full`. Plan 10 B10/B12 said 34 → fix to 30 (G4).
 
 ### Notes
