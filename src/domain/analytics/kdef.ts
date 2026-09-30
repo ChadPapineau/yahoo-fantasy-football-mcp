@@ -23,7 +23,7 @@ import {
   type ProjectedWeek,
   type ProjectionReaders,
   type ProjectionTarget,
-  projectPlayers,
+  projectForRanking,
 } from "./projection.js";
 import type {
   Assumption,
@@ -206,18 +206,42 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
     position: c.position,
     nfl_team: c.nfl_team,
   }));
-  const out = projectPlayers({
-    targets,
+  const nFirst = req.n_sims ?? KDEF.nSims;
+  const base = {
     season: req.season,
-    weeks,
     settings: req.settings,
     readers: req.readers,
     clock: req.clock,
     rng: req.rng.fork("kdef"),
-    n_sims: req.n_sims ?? KDEF.nSims,
     ...(req.engine === undefined ? {} : { engine: req.engine }),
     ...(req.extra_stamps === undefined ? {} : { extra_stamps: req.extra_stamps }),
-  });
+  };
+  // pass 1: this week only, a small sample, to shortlist each position (A15 latency)
+  const shortN = Math.min(nFirst, KDEF.shortlistSims);
+  const first = projectForRanking({ ...base, targets, weeks: [req.week], n_sims: shortN }, shortN);
+  const mineSet = new Set(current.map((c) => c.player_key));
+  const keep = new Set<PlayerKey>(mineSet);
+  for (const pos of positions) {
+    first.players
+      .filter((p) => p.target.position === pos && !mineSet.has(p.target.player_key ?? ""))
+      .sort(
+        (a, b) =>
+          meanOf(b, 0) - meanOf(a, 0) ||
+          ((a.target.player_key ?? "") < (b.target.player_key ?? "") ? -1 : 1),
+      )
+      .slice(0, KDEF.shortlistPerPosition)
+      .forEach((p) => keep.add(p.target.player_key ?? ""));
+  }
+  // pass 2: the shortlist over the look-ahead at full ranking size
+  const out = projectForRanking(
+    {
+      ...base,
+      targets: targets.filter((t) => keep.has(t.player_key ?? "")),
+      weeks,
+      n_sims: nFirst,
+    },
+    Math.min(nFirst, KDEF.nSimsLookAhead),
+  );
   const byKey = new Map(out.players.map((p) => [p.target.player_key ?? "", p]));
   const inputs = out.result.inputs;
   const assumptions: Assumption[] = [
