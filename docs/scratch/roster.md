@@ -96,3 +96,12 @@ only if the ID is gone.
   in plan 10 §1 and §3; client-qualified "cannot"s in plan 02; no stale
   `live`-Skill references).
 - 2026-09-30 — `devils-advocate` resumed for **round 2** on `8c39191`.
+- 2026-09-30 — round 2 delivered (`1ab4db5`): 22 conceded-by-defence,
+  1 withdrawn, 0 pressed; 7 new objections (0 blocking, 5 significant,
+  2 marginal) — session-condition taxonomy, Keychain overstated, the
+  application behind the review gate, the "millisecond swap" was a row
+  copy, ceilings too high + a sentence paid per tool, X1 overclaims, a
+  pin-time maintenance gap. Orchestrator verified `DiscoverResult.instructions`
+  in the 2026-07-28 spec before ruling; defence pushed (`0cb7ddb`): 7/7
+  conceded (OBJ-28 modified). `plan-reviser` resumed for round-2
+  revisions; advocate parked for round 3 (expected closing).
