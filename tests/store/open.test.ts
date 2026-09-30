@@ -68,6 +68,14 @@ describe("open: files, modes, pragmas", () => {
     expect(readSchemaVersion(new DatabaseSync(t.storePath, { readOnly: true }))).toBe(1);
   });
 
+  it("migrates a pre-existing empty 0600 file (version 0) without a backup", () => {
+    writeFileSync(t.storePath, "", { mode: 0o600 });
+    const store = openStore(t);
+    expect(store.schemaVersion).toBe(1);
+    store.close();
+    expect(existsSync(t.backupDir)).toBe(false);
+  });
+
   it("re-opening an up-to-date store runs nothing and keeps data", async () => {
     const a = openStore(t);
     await a.repos.refreshLog.record({
