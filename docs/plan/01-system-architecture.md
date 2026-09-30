@@ -467,7 +467,7 @@ Both are store tables owned by the domain (`write_journal`, `recommendation_log`
 | `SleeperProvider` (fallback X2) *(added round 1, OBJ-02)* | `FantasyPlatform` (§8) | plan 10 Ph8's decision point fires without a Yahoo read grant, or a Sleeper league exists; it precedes ESPN because Sleeper is not ToS-blocked (04 §B4 vs §B5) |
 | ESPN provider | `FantasyPlatform` | Chad has an ESPN league, time, **and** ESPN's ToS position permits it (04 §B5 — blocked today); never the first second seam |
 | Streamable HTTP + auth server | §3.2 table | a second user or remote use |
-| macOS Keychain for the client secret | `SecretSource` interface in `src/auth/secret.ts` | plan 02 §3 trigger |
+| macOS Keychain `SecretSource` for the refresh token (and the client secret) | `SecretSource` interface in `src/auth/secret.ts` | Phase W prerequisite (plan 10 §3.4 a): removes the token from disk and backups; in a reach session a hurdle — `node -e` reads whatever the server's `node` may read — never a proof (plan 02 §3.3, round 2 OBJ-25); a code-signed helper with a user-presence prompt is a priced Phase W item (plan 10 W11), not assumed |
 | Cross-process rate-limit bucket | `limiter_state` table | observed double-999s with two clients open |
 | The Odds API secondary lines | `DataSource` | free key requested |
 | Full pbp column set | `ds_pbp` projection list | an analytics need names a column |
