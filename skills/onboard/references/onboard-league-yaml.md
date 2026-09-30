@@ -86,18 +86,19 @@ Players are `{ name, team, position, slot }` with the nflverse team abbreviation
 
 ### Saving it
 
-Paste the YAML into a new file with these commands in a terminal (macOS or Linux). `umask 077` makes the new file private from the start:
+The server reads `league.yaml` from its config directory: `$FF_CONFIG_DIR` when that is set, otherwise `$XDG_CONFIG_HOME/fantasy-football-mcp` when `XDG_CONFIG_HOME` is set to an absolute path, otherwise `~/.config/fantasy-football-mcp`. These commands (macOS or Linux) work that directory out the same way and print it; `umask 077` makes the new file private from the start:
 
 ```sh
 umask 077
-mkdir -p ~/.config/fantasy-football-mcp
-chmod 700 ~/.config/fantasy-football-mcp
-# save the YAML as ~/.config/fantasy-football-mcp/league.yaml with any editor, then:
-chmod 600 ~/.config/fantasy-football-mcp/league.yaml
+case "${XDG_CONFIG_HOME:-}" in /*) B="$XDG_CONFIG_HOME" ;; *) B="$HOME/.config" ;; esac
+D="${FF_CONFIG_DIR:-$B/fantasy-football-mcp}"
+mkdir -p "$D" && chmod 700 "$D" && echo "League file: $D/league.yaml"
+# save the YAML as "$D/league.yaml" with any editor, then:
+chmod 600 "$D/league.yaml"
 ff doctor
 ```
 
-When `FF_CONFIG_DIR` is set, use that directory instead. Never save it inside a code repository or a synced folder (iCloud Drive, Dropbox, or Desktop/Documents when they sync): the server refuses those paths, and the repository is public.
+Save the file at the path printed after `League file:`. If `ff doctor` then reports "no league file at" some other path, that is the path the server reads: move the file there. Never save it inside a code repository or a synced folder (iCloud Drive, Dropbox, or Desktop/Documents when they sync): the server refuses those paths, and the repository is public.
 
 ### Keeping it current
 

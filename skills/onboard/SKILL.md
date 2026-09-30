@@ -40,7 +40,7 @@ Ask in small batches, in this order, accepting "I don't know" (the field stays e
 The league and team names can be anything the user likes — they stay in the private file.
 
 ### 3. Show the file; the user saves it
-Show the complete YAML in one code block, then the save steps from the guide: the path (`~/.config/fantasy-football-mcp/league.yaml`, or `$FF_CONFIG_DIR/league.yaml` when that variable is set), `chmod 700` on the directory and `chmod 600` on the file, then `ff doctor`.
+Show the complete YAML in one code block, then the save steps from the guide: the path (`$FF_CONFIG_DIR/league.yaml` when that variable is set, else `$XDG_CONFIG_HOME/fantasy-football-mcp/league.yaml` when that one is, else `~/.config/fantasy-football-mcp/league.yaml` — the guide's commands work it out and print it), `chmod 700` on the directory and `chmod 600` on the file, then `ff doctor` (a "no league file at <path>" line names the path the server reads).
 
 - **Do not write the file yourself**, even when a file tool is available: it holds the user's real league and team names, and the user decides where they live.
 - **Refuse any location inside a code repository or a synced folder** (this project's checkout, any git working tree, iCloud Drive, Desktop or Documents when they sync, Dropbox). The server refuses those too. The repository is public; a file there is one commit away from publishing the league.
