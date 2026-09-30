@@ -248,6 +248,8 @@ export const Z90 = 1.2815515655446004;
 export const LINEUP = Object.freeze({
   /** Added to every legal (player, starting slot) weight so filling slots dominates the mean. */
   fillBonus: 1e4,
+  /** Tie-break: a player already in a slot keeps it when the values tie (no churn swaps). */
+  stayBonus: 1e-6,
   /** Forced starters (`force_start`, locked starters) dominate the fill bonus. */
   forceBonus: 1e7,
   /** |μ_m − μ_o| below this share of σ(M − O) reads `neutral` (near even → maximise the mean). */

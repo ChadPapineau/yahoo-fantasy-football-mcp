@@ -164,7 +164,12 @@ function solve(input: SolveInput): Assignment {
         if (j === res) c = -(LINEUP.forceBonus * 10 + v);
       } else if (!locked && !input.exclude.has(p.player_key) && !taken.has(j)) {
         if (canOccupy(x.slot, { positions: p.positions, status: p.status })) {
-          c = -(LINEUP.fillBonus + v + (input.force.has(p.player_key) ? LINEUP.forceBonus : 0));
+          c = -(
+            LINEUP.fillBonus +
+            v +
+            (input.force.has(p.player_key) ? LINEUP.forceBonus : 0) +
+            (p.slot === x.slot.name ? LINEUP.stayBonus : 0)
+          );
         }
       }
       row[j] = c;
