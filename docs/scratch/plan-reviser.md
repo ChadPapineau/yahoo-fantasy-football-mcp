@@ -23,7 +23,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 | 8 | OBJ-04/05 / plans 07, 10 (+08, 09) (Dist.basis, A7, mean default, delta_pwin, E13, n≥30 table, params → Phase 3) | [x] | e04efde |
 | 9 | OBJ-10/11/16/17/19/22/23 / plans 01–10 | [x] | 94bc8fb |
 | 10 | OBJ-12 / docs.yml + plan 04 §4.2 + plan 10 Z3 — PROVE GREEN (runs pending at push time) | [~] | 7592321 |
-| 11 | OBJ-13 / plan 04 §5, plan 10 Z1 | [ ] | — |
+| 11 | OBJ-13 / plan 04 §5 + R9 + A-4, plan 06 §1.1/§3, plan 10 §1/Z1 | [x] | 1150810 |
 | 12 | OBJ-20 / plan 01 D7 (snappy, upload.R:85) | [ ] | — |
 | 13 | D.2 items (Yahoo-dependency header tag ×10, FF_TOOLSET default, re-tag sources) | [ ] | — |
 | 14 | T1–T13 per plan 10 §4 + log §1.3 additions | [ ] | — |
