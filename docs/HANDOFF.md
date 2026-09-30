@@ -48,7 +48,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 0 — repo setup | ✅ done | `.gitignore`, `.env.example`, `main` pushed, description + 14 topics applied via `gh`, tooling inventory (`docs/research/00-*`) |
 | 1 — research (waves 1–3) | ✅ 01–06 all verified by the orchestrator (SHAs on origin, identifier scan, one load-bearing claim per doc checked at source) | `docs/research/01-*` … `06-*` |
 | 2 — plan | ✅ all ten files (`docs/plan/01-*`…`10-*`, 2,935 lines), both halves verified; plan 10 §4 lists 13 small tensions to fold in during the adversarial round | `docs/plan/` |
-| 2b — docs-only automation (plan 06 §4 step 1) | 🟢 `ci-bootstrap` running: Mermaid + link CI, gitleaks with Yahoo-key rules + self-test, Dependabot, PR template — no product code | `.github/**`, `.gitleaks.toml`, `scripts/**` |
+| 2b — docs-only automation (plan 06 §4 step 1) | ✅ `docs` (Mermaid 7/7 + links, with self-tests) and `secrets` (gitleaks 8.30.1 pinned by sha256, 7 Yahoo rules, self-test, weekly full-history scan) green on `main` at `f3a0a48`; Dependabot; PR template. GitHub secret scanning + push protection were already enabled. **Chad's step:** the branch ruleset (no force-push / no deletion / linear history) — exact `gh api` command in `docs/scratch/ci-bootstrap.md` § "For Chad"; required status checks deliberately deferred until PRs are required (a required check rejects every fresh direct push) | `.github/**`, `.gitleaks.toml`, `scripts/**` |
 | 3 — adversarial review | 🟢 round 1 running (`devils-advocate`); orchestrator defends + edits the plan between rounds | `docs/plan/adversarial-log.md`, changelog |
 | docs — README, LICENSE, SECURITY.md | ⚪ | root + `docs/README.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
