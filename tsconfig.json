@@ -28,6 +28,8 @@
     "tests/**/*.ts",
     "scripts/**/*.ts",
     "scripts/ci/**/*.mjs",
+    "scripts/skills/**/*.mjs",
+    "tests/**/*.mjs",
     "vitest.config.ts",
     "eslint.config.js"
   ],
