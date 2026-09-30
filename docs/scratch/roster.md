@@ -13,8 +13,8 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | data-source-evaluator | a3b161a00df32916a | 2 | ✅ done (SHAs verified; nflverse 2026 freshness + Sleeper keyless spot-checked live) | `docs/research/04-data-sources.md`, `docs/scratch/data-source-evaluator.md` | `7dad267` | — |
 | fantasy-strategy-analyst | a370e42955935355b | 2 | ✅ done (SHAs verified; Questionable-tag 71% claim spot-checked at source) | `docs/research/05-strategy-and-analytics.md`, `docs/scratch/fantasy-strategy-analyst.md` | `d9bd716` | — |
 | skills-mcp-researcher | a5edf2189cef8e218 | 3 | ✅ done (SHAs verified; spec rev 2026-07-28 confirmed at source; claude-code#41110 is closed `completed` with no visible out-of-scope statement → Desktop elicitation = unverified, design falls back automatically) | `docs/research/06-skills-and-mcp-design.md`, `docs/scratch/skills-mcp-researcher.md` | `5b30fba` | — |
-| architecture-planner-core | a45fab2bbf0065893 | 3 | 🟢 running | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | — | `docs/scratch/architecture-planner-core.md` §RESUME HERE |
-| product-planner | — | 4 | ⚪ not started | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | — | brief: `docs/scratch/briefs/product-planner.md` |
+| architecture-planner-core | a45fab2bbf0065893 | 3 | ✅ done (SHAs verified; SDK v2 2.2.0 = npm `latest` and `node:sqlite` on Node 22.23 checked live — the latter still prints ExperimentalWarning) | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | `c5ea355` | — |
+| product-planner | a47f1502e3ab64907 | 4 | 🟢 running | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | — | `docs/scratch/product-planner.md` §RESUME HERE |
 | devils-advocate | — | 5 | ⚪ not started | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | brief: `docs/scratch/briefs/devils-advocate.md` |
 | docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md`, `docs/scratch/docs-writer.md` | — | brief: `docs/scratch/briefs/docs-writer.md` |
 
@@ -52,3 +52,8 @@ only if the ID is gone.
   `completed` with no statement → recorded as unverified in HANDOFF.
   Research phase complete: 01–06 all verified. `product-planner` waits for
   the core plan (`docs/plan/01-*`…`06-*`).
+- 2026-09-29 — `architecture-planner-core` ✅ (`c5bb839`…`c5ea355`), six
+  plan files, 1,693 lines. Orchestrator verified SDK v2 2.2.0 on the npm
+  registry and `node:sqlite` on local Node 22.23 (loads; ExperimentalWarning
+  still printed — flagged for the adversarial round).
+- 2026-09-29 — wave 4 spawned: `product-planner` (sole agent in the tree).
