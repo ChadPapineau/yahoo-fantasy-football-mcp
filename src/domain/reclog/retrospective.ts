@@ -22,6 +22,7 @@ import {
   stableSum,
   type ProbabilityOutcome,
 } from "./metrics.js";
+import { isIsoInstant } from "./record.js";
 import {
   DEFAULT_MIN_N,
   nTooSmall,
@@ -259,7 +260,14 @@ export function scoreCall(
   const regret = realised !== null && best !== null ? best.value - realised : null;
   const followed = followedOf(record, roster);
   let decisive: boolean | null = null;
-  if (regret !== null && followed === true && team !== null && DECISIVE_KINDS.has(record.kind)) {
+  if (
+    regret !== null &&
+    followed === true &&
+    team !== null &&
+    Number.isFinite(team.my_points) &&
+    Number.isFinite(team.opponent_points) &&
+    DECISIVE_KINDS.has(record.kind)
+  ) {
     const margin = team.my_points - team.opponent_points;
     decisive = sign(margin) !== sign(margin + regret);
   }
@@ -475,7 +483,8 @@ function validPair(p: ProbabilityOutcome): boolean {
 /**
  * The retrospective's `rec` (plan 07 E13 `rec: Rec`): always a no-move — v1 reports and never tunes
  * (OBJ-05; parameter proposals are Phase 3). point_estimate = mean call regret; the distribution is the
- * empirical spread of the per-call regrets (linear-interpolated quantiles; `basis` is `position_cv`
+ * empirical spread of the per-call regrets (linear-interpolated quantiles; `as_of` = the newest valid
+ * input instant, else the clock; `basis` is `position_cv`
  * because DistBasis has no "empirical" value — needs_from_others).
  */
 export function retroRec(
@@ -496,7 +505,9 @@ export function retroRec(
   const mean = stableMean(regrets) ?? 0;
   const zero = regrets.filter((r) => r === 0).length;
   let asOf: IsoInstant | null = null;
-  for (const i of inputs) if (asOf === null || parseIso(i.as_of) > parseIso(asOf)) asOf = i.as_of;
+  for (const i of inputs)
+    if (isIsoInstant(i.as_of) && (asOf === null || parseIso(i.as_of) > parseIso(asOf)))
+      asOf = i.as_of;
   return {
     action: "Keep the model unchanged: v1 retrospectives report calibration, they do not tune it",
     subjects: [],
