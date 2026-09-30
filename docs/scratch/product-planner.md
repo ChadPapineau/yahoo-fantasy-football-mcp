@@ -6,9 +6,9 @@ Does not touch anything else.
 
 ## RESUME HERE
 
-**Status:** plan 07 (tool catalog) written and committed. Writing plan 08 (scoring engine) next.
+**Status:** plans 07 and 08 written and committed. Writing plan 09 (Skills bundle) next.
 
-**Next step:** write `docs/plan/08-scoring-engine.md` → commit+push → 09 → 10, updating this
+**Next step:** write `docs/plan/09-skills-bundle.md` → commit+push → 10, updating this
 section after each push. If resuming cold: the decisions in "Settled decisions" are binding for
 all four files; do not re-derive them. Plan 07's tool names (§3) and `Rec`/`Dist`/`PlayerSelector`
 types (legend) are the vocabulary 08–10 must use.
