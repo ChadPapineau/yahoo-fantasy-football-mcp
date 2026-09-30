@@ -16,8 +16,8 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | architecture-planner-core | a45fab2bbf0065893 | 3 | ✅ done (SHAs verified; SDK v2 2.2.0 = npm `latest` and `node:sqlite` on Node 22.23 checked live — the latter still prints ExperimentalWarning) | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | `c5ea355` | — |
 | product-planner | a47f1502e3ab64907 | 4 | ✅ done (SHAs verified; identifier scan clean; 13 tensions + 10 open decisions in plan 10 §4–§5) | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | `b830114` | — |
 | ci-bootstrap | afe971bb2e5796cc9 | 4 | ✅ done (orchestrator verified: `docs` + `secrets` green on `f3a0a48`; full-history scan green; 20 files tracked) | `.github/**`, `.gitleaks.toml`, `scripts/**`, `docs/scratch/ci-bootstrap.md` | `f3a0a48` | — |
-| devils-advocate | a2ed55e691cda6d2a | 5 | 🟢 running (round 3 — expected closing — resumed via SendMessage on `b904a6f`) | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | `101510f` | `docs/scratch/devils-advocate.md` §RESUME HERE |
-| plan-reviser | a4ae16bdc0e7b6482 | 5 | ✅ round 2 done (orchestrator verified: 11 SHAs on origin, CI green on `b904a6f`, no main-store dataset write survives, changelog counts fixed) | `docs/plan/01-*`…`10-*`, `docs/plan/changelog.md`, `.github/workflows/docs.yml` (OBJ-12 only), `docs/scratch/plan-reviser.md` | `b904a6f` | resume the same ID via SendMessage if round 3 yields rulings |
+| devils-advocate | a2ed55e691cda6d2a | 5 | ✅ **rested** after round 3 (`4c1d981`: 7/7 round-2 rulings landed, 0 new objections, remainder marginal, closing verdict written; 30/30 answered over three rounds) | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | `618ab31` | — |
+| plan-reviser | a4ae16bdc0e7b6482 | 5 | ✅ done (rounds 1–2 applied and verified; round-3 nits fixed by the orchestrator) | `docs/plan/01-*`…`10-*`, `docs/plan/changelog.md`, `.github/workflows/docs.yml` (OBJ-12 only), `docs/scratch/plan-reviser.md` | `b904a6f` | — |
 | docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md`, `docs/scratch/docs-writer.md` | — | brief: `docs/scratch/briefs/docs-writer.md` |
 
 ## Cutoff procedure
@@ -111,3 +111,10 @@ only if the ID is gone.
   no-main-store-dataset-write sweep, the `instructions` move with its [U]
   caveat, and the changelog counts.
 - 2026-09-30 — `devils-advocate` resumed for **round 3** on `b904a6f`.
+- 2026-09-30 — round 3 delivered (`4c1d981`): 7/7 round-2 rulings
+  conceded-by-defence and landed; **no new objections**; three wording
+  nits; remainder declared marginal; `## Closing verdict` written. **The
+  advocate rests: 30 objections over three rounds, 29 conceded-and-landed,
+  1 withdrawn on evidence, 0 pressed.** Orchestrator fixed the three nits
+  directly (plans 01/02/06/07/10) and finalised `docs/plan/changelog.md`
+  (process in numbers, closing summary, Round 3). Phase 3 complete.
