@@ -21,8 +21,16 @@ const gate = JSON.parse(
 // implies every file under it does; check-coverage.mjs re-checks per file from the summary.
 const perFile = Object.fromEntries(gate.perFile100.map((g) => [g, { lines: 100, branches: 100 }]));
 
-/** The process-level suites (plan 05 §4.2): spawned servers and the built package. */
-const PROCESS_TESTS = ["tests/process/**/*.test.ts", "tests/e2e/**/*.test.ts"];
+/**
+ * The process-level suites (plan 05 §4.2): spawned servers, the built package, and the pure
+ * wall-clock budgets (`perf.test.ts`, A15's analytics share) — which coverage instrumentation
+ * slows ~3× and so must not run under `test:coverage`.
+ */
+const PROCESS_TESTS = [
+  "tests/process/**/*.test.ts",
+  "tests/e2e/**/*.test.ts",
+  "tests/**/perf.test.ts",
+];
 
 export default defineConfig({
   test: {

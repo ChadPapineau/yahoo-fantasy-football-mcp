@@ -132,7 +132,7 @@ describe("duplicates and null keys", () => {
       "SELECT def_interceptions FROM ds_team_defense_week WHERE team = 'BUF' AND week = 2",
     )[0];
     expect(buf2?.def_interceptions).toBe(credited(playerRows, "def_interceptions") + 2);
-  });
+  }, 30_000); // two full publishes of the 3,339-row file
 
   it("a player row whose player_id is blanked is not stored; its offence yardage is not aggregated", async () => {
     const { dir, w } = env();
