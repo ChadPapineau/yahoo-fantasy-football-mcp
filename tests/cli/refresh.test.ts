@@ -85,6 +85,21 @@ describe("ff refresh all (fixture mode)", () => {
   });
 });
 
+describe("ff refresh all (fixture mode, no --seasons)", () => {
+  it("defaults to the seasons the fixture tree records and exits 0 (never asks for 2025 stats)", async () => {
+    const s = sandbox();
+    sb = s;
+    const io = makeIo(s, { env: fixtureEnv(), clock: fixedClock(FIXTURE_NOW) });
+    const code = await main(["refresh", "all"], io);
+    expect(code, io.out.text + io.err.text).toBe(EXIT.OK);
+    const lines = io.out.text.split("\n").filter((l) => l !== "" && !l.startsWith("  "));
+    for (const l of lines) expect(l).toMatch(/ published /);
+    expect(lines.find((l) => l.startsWith("nflverse:stats_player_week"))).toMatch(/_2026 /);
+    expect(lines.find((l) => l.startsWith("nflverse:schedules"))).toMatch(/_2025-2026 /);
+    expect(io.err.text).not.toMatch(/stats_player_week_2025/);
+  }, 60_000);
+});
+
 describe("ff refresh <source>", () => {
   it("publishes, then reports unchanged, then --force re-publishes; --json has fixed fields", async () => {
     const s = sandbox();

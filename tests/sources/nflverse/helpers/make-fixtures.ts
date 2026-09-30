@@ -186,6 +186,14 @@ writeFileSync(
         weekly_rosters: "weekly_rosters/timestamp.txt",
         stats_player: "stats_player/timestamp.txt",
       },
+      // what fixture-mode `ff refresh` requests by default: the seasons recorded here (stats
+      // hold 2026 only, so the production default's prior season would 404)
+      default_seasons: {
+        "nflverse:schedules": [2025, 2026],
+        "nflverse:injuries": [2026],
+        "nflverse:roster_weekly": [2026],
+        "nflverse:stats_player_week": [2026],
+      },
       files: manifest,
     },
     null,
