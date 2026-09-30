@@ -9,25 +9,39 @@ Off-limits (owned by `ci-bootstrap`, in flight in the same tree): `.github/**`,
 
 ## RESUME HERE
 
-**Round:** 1 (attack) — **DONE and pushed.** `docs/plan/adversarial-log.md`
-§ `## Round 1 — objections` holds 23 objections (2 blocking: OBJ-01 gate
-forgeable in Claude Code; OBJ-02 no date/gate/fallback on Yahoo approval + phase
-sizing vs the calendar; 16 significant; 5 marginal), a verification table
-(§1.0), the tensions verdict (§1.3), what was not attacked (§1.4), and the
-staked objection (§1.5 = OBJ-02).
+**Round:** 2 (verdicts + new objections) — **DONE and pushed** (SHA below).
+Round 1: 23 objections (2 blocking) → orchestrator defence `f2abb64` (18 concede,
+4 concede-modified, 1 justified) → reviser applied everything through `8c39191`.
+Round 2 (`## Round 2 — verdicts and objections`): verdict table = 22
+conceded-by-defence, 1 withdrawn (OBJ-20 — nflverse parquet is snappy per
+`upload.R:85`; fast-xml-parser `processEntities:true` confirmed by the
+orchestrator), 0 pressed. **7 new objections, 0 blocking, 5 significant,
+2 marginal:** OBJ-24 client taxonomy leaks (OS access is per session — a Desktop
+chat with a filesystem MCP server = Claude Code); OBJ-25 Keychain prerequisite
+overstated (ACL is per executable; the server's `node` is the model's `node`);
+OBJ-26 **(staked)** D0 gated behind plan approval that HANDOFF 2026-09-30 says
+blocks all work — submit the Yahoo application now; EV paragraph uses optimistic
+L; OBJ-27 attached-staging "millisecond swap" is a row copy under the main lock
+(< 50 ms test cannot pass on pbp) → per-source DB files + rename + ATTACH;
+OBJ-28 40k-char `core` ceiling constrains nothing; §6.3 sentence duplicated per
+tool → server-level instructions; OBJ-29 X1 overclaims K/DEF streaming +
+game-day; YAML location; OBJ-30 pin-time rule lacks a maintenance criterion.
+Stated explicitly: remainder NOT yet marginal; round 3 expected to close if the
+five significant items land.
 
-**Next step (round 2):** wait for the orchestrator to append
-`## Round 1 — defence`. Then: (1) re-read the *revised* plan files (diff them
-against `7663b6a` — `git diff 7663b6a -- docs/plan/0*.md`) and the defence;
-(2) open `## Round 2 — verdicts` with one row per OBJ-01…23:
-withdrawn / conceded-by-defence / pressed + one line why; (3) raise anything
-the revisions broke as OBJ-24+; (4) say explicitly whether the remainder is
-marginal. Do NOT re-litigate items that were answered with evidence. Watch for:
-whether the defence re-verifies fast-xml-parser `processEntities` (OBJ-14's
-[knowledge] half) and the nflverse parquet codec (OBJ-20) — both are cheap to
-settle and I could not reach the sources this session (404s on the paths I
-tried; try `docs/v4, v5` literal dir name in the fast-xml-parser repo, and the
-`nflverse/nflverse-pbp` pipeline scripts for the parquet writer).
+**Next step (round 3):** wait for `## Round 2 — defence` + reviser commits.
+Then: diff plan files against `8c39191`; verdict table over OBJ-24…30 (and any
+round-1 row whose fix moved); raise only what broke; if nothing significant
+remains, write `## Closing verdict` (what survived unchanged, what changed,
+residual concerns ranked) — the brief's final section. Watch: OBJ-27's fix
+must not reintroduce a main-DB write path; OBJ-28's server-instructions field
+name for 2026-07-28 must be verified (spec `server/discover`), not assumed;
+OBJ-26 — check HANDOFF for the application-submitted date.
+
+**Tree note:** `docs/scratch/roster.md` is modified-uncommitted by the
+orchestrator; `git pull --rebase` refuses. Use `git fetch` + `git merge
+--ff-only origin/main` when 0 ahead, or push directly when 0 behind. Never
+stash/checkout it.
 
 **If resuming cold:** `git log --oneline -5 -- docs/plan/adversarial-log.md`
 tells you which rounds have landed; the last `## Round N — …` heading in the
