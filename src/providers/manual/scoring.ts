@@ -3,15 +3,11 @@
 // names, §4.1 bracket families). A preset (`standard` | `half_ppr` | `ppr`, Yahoo's public default
 // values) plus explicit per-canonical-stat overrides and threshold bonuses. The manual platform's
 // stat id IS the canonical name. `rounding`/`negative_floor` stay unverified (plan 10 A1a).
-import { createHash } from "node:crypto";
+import { normalizeSettings, type RuleDraft } from "../../domain/scoring/settings.js";
 import {
-  BRACKET_FAMILY_KIND,
   KNOWN_CANONICAL,
-  type BracketFamily,
-  type BracketMember,
   type PositionType,
   type ScoringBonus,
-  type ScoringRule,
   type ScoringSettings,
 } from "../../domain/scoring/types.js";
 import type { LeagueFile } from "./schema.js";
@@ -72,41 +68,16 @@ export function positionTypeOf(canonical: string): PositionType {
   return "O";
 }
 
-/** Bracket ranges (inclusive; null upper = open) by canonical member name (plan 08 §4.1). */
-const BRACKET_RANGES: Readonly<
-  Record<
-    string,
-    { family: "dst_points_allowed" | "fg_distance"; lower: number; upper: number | null }
-  >
-> = Object.freeze({
-  dst_pa_0: { family: "dst_points_allowed", lower: 0, upper: 0 },
-  dst_pa_1_6: { family: "dst_points_allowed", lower: 1, upper: 6 },
-  dst_pa_7_13: { family: "dst_points_allowed", lower: 7, upper: 13 },
-  dst_pa_14_20: { family: "dst_points_allowed", lower: 14, upper: 20 },
-  dst_pa_21_27: { family: "dst_points_allowed", lower: 21, upper: 27 },
-  dst_pa_28_34: { family: "dst_points_allowed", lower: 28, upper: 34 },
-  dst_pa_35p: { family: "dst_points_allowed", lower: 35, upper: null },
-  fg_0_19: { family: "fg_distance", lower: 0, upper: 19 },
-  fg_20_29: { family: "fg_distance", lower: 20, upper: 29 },
-  fg_30_39: { family: "fg_distance", lower: 30, upper: 39 },
-  fg_40_49: { family: "fg_distance", lower: 40, upper: 49 },
-  fg_50p: { family: "fg_distance", lower: 50, upper: null },
-});
+/** Canonical JSON (sorted keys, no whitespace) — the scoring engine's one definition. */
+export { canonicalJson } from "../../domain/scoring/settings.js";
 
-/** Canonical JSON: object keys sorted, no whitespace (the settings-hash input). */
-export function canonicalJson(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
-  if (v !== null && typeof v === "object") {
-    const o = v as Record<string, unknown>;
-    return `{${Object.keys(o)
-      .sort()
-      .map((k) => `${JSON.stringify(k)}:${canonicalJson(o[k])}`)
-      .join(",")}}`;
-  }
-  return v === undefined ? "null" : JSON.stringify(v);
-}
-
-/** Builds ScoringSettings from a validated `scoring` block. Deterministic for equal inputs. */
+/**
+ * Builds ScoringSettings from a validated `scoring` block. Deterministic for equal inputs. The last
+ * step is the scoring engine's own `normalizeSettings` (plan 08 §2), so the manual league gets the
+ * same bracket derivation, duplicate checks, negative-floor default (plan 08 §4.4 / P9: scope
+ * `player_week_total` when `negative_points: false`) and the one settings_hash definition as every
+ * other provider.
+ */
 export function buildScoringSettings(s: LeagueFile["scoring"]): ScoringSettings {
   const values = new Map<string, number>(Object.entries(BASE_SCORING));
   const rec = PRESET_REC[s.preset];
@@ -120,68 +91,25 @@ export function buildScoringSettings(s: LeagueFile["scoring"]): ScoringSettings 
     bonuses.set(b.stat, list);
     if (!values.has(b.stat)) values.set(b.stat, 0);
   }
-  const rules: ScoringRule[] = [];
+  const rules: RuleDraft[] = [];
   for (const c of KNOWN_CANONICAL) {
     const modifier = values.get(c);
     if (modifier === undefined) continue;
-    rules.push(
-      Object.freeze({
-        canonical: c,
-        platform_id: c,
-        name: c,
-        position_types: Object.freeze([positionTypeOf(c)]),
-        modifier,
-        bonuses: Object.freeze(
-          [...(bonuses.get(c) ?? [])].sort((a, b) => a.target - b.target || a.points - b.points),
-        ),
-      }),
-    );
+    rules.push({
+      canonical: c,
+      platform_id: c,
+      name: c,
+      position_types: [positionTypeOf(c)],
+      modifier,
+      bonuses: [...(bonuses.get(c) ?? [])].sort(
+        (a, b) => a.target - b.target || a.points - b.points,
+      ),
+    });
   }
-  const brackets: BracketFamily[] = [];
-  for (const family of ["dst_points_allowed", "fg_distance"] as const) {
-    const members: BracketMember[] = rules
-      .flatMap((r) => {
-        const range = r.canonical === null ? undefined : BRACKET_RANGES[r.canonical];
-        return range?.family === family && r.canonical !== null
-          ? [
-              Object.freeze({
-                canonical: r.canonical,
-                platform_id: r.platform_id,
-                lower: range.lower,
-                upper: range.upper,
-              }),
-            ]
-          : [];
-      })
-      .sort((a, b) => a.lower - b.lower);
-    if (members.length > 0)
-      brackets.push(
-        Object.freeze({
-          family,
-          position_type: family === "fg_distance" ? "K" : "DT",
-          members: Object.freeze(members),
-          kind: BRACKET_FAMILY_KIND[family],
-        }),
-      );
-  }
-  const body = {
-    platform: "manual" as const,
+  return normalizeSettings({
+    platform: "manual",
     rules,
-    brackets,
     uses_fractional_points: s.fractional_points ?? true,
     uses_negative_points: s.negative_points ?? true,
-    rounding: { mode: "exact" as const },
-    negative_floor: { scope: "none" as const },
-  };
-  const settings_hash = createHash("sha256").update(canonicalJson(body)).digest("hex");
-  return Object.freeze({
-    platform: "manual",
-    rules: Object.freeze(rules),
-    brackets: Object.freeze(brackets),
-    uses_fractional_points: body.uses_fractional_points,
-    uses_negative_points: body.uses_negative_points,
-    rounding: Object.freeze({ mode: "exact", verified: false }),
-    negative_floor: Object.freeze({ scope: "none", verified: false }),
-    settings_hash,
   });
 }

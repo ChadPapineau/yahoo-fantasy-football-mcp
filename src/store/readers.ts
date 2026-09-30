@@ -30,6 +30,19 @@ import {
 } from "./datasets/tables.js";
 
 /** Most ids/weeks/teams one reader call accepts (bounded statement; 20 k ids is well inside). */
+
+/**
+ * A game's roof: the venue's physical roof decides for open-air (`outdoors`) and fixed-roof (`dome`)
+ * venues — nflverse says `dome` for the open-air MCG, Stade de France and Allianz Arena — and only
+ * for a retractable venue (`closed`/`open` default) does the game row's own state win, falling back
+ * to the venue default. The same rule as the weather sources' needsWeather, so analytics and the
+ * published forecasts agree on which games are outdoors.
+ */
+export function gameRoof(gameRoofValue: string | null, venueDefault: string | null): string | null {
+  if (venueDefault === "outdoors" || venueDefault === "dome") return venueDefault;
+  return gameRoofValue ?? venueDefault;
+}
+
 export const READER_LIST_MAX = 100_000;
 /** Longest platform id `byPlatformId` sends to SQL. */
 export const PLATFORM_ID_MAX = 64;
@@ -132,7 +145,7 @@ export function createReaders(o: ReadersOptions): {
       stadium_id: str(r.venue_id),
       stadium: str(r.stadium),
       venue_tz: str(r.venue_tz),
-      roof: str(r.roof) ?? str(r.venue_roof_default),
+      roof: gameRoof(str(r.roof), str(r.venue_roof_default)),
       surface: str(r.surface),
       divisional: div === null ? null : div === 1,
       rest_days: { away: numOrNull(r.away_rest), home: numOrNull(r.home_rest) },

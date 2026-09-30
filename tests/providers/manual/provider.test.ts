@@ -106,7 +106,11 @@ describe("the fixture league loads and maps", () => {
     expect(mod("fum_lost")).toBe(-2);
     expect(mod("pass_int")).toBe(-1);
     expect(s.rules.every((r) => r.bonuses.length === 0)).toBe(true);
-    expect(s.brackets.map((b) => [b.family, b.kind, b.members.length])).toEqual([
+    expect(
+      s.brackets
+        .map((b) => [b.family, b.kind, b.members.length])
+        .sort((x, y) => (x[0] < y[0] ? -1 : 1)),
+    ).toEqual([
       ["dst_points_allowed", "indicator", 7],
       ["fg_distance", "count", 5],
     ]);
