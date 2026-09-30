@@ -17,6 +17,7 @@ export const MAX_FIXTURE_BYTES = 32 * 1024 * 1024;
 interface NflverseManifest {
   readonly timestamps?: Readonly<Record<string, unknown>>;
   readonly files?: readonly { readonly path?: unknown; readonly url?: unknown }[];
+  readonly default_seasons?: unknown;
 }
 
 /** Reads a regular file under `root` (no symlink at the leaf, no `..` escape), bounded. */
@@ -45,17 +46,55 @@ export function readFixture(root: string, rel: string): Uint8Array | null {
   }
 }
 
+/** `<fixtureDir>/nflverse/manifest.json`, parsed; null when missing or malformed. */
+function readManifest(fixtureDir: string): NflverseManifest | null {
+  const bytes = readFixture(fixtureDir, path.join("nflverse", "manifest.json"));
+  if (bytes === null) return null;
+  try {
+    const m: unknown = JSON.parse(Buffer.from(bytes).toString("utf8"));
+    return m !== null && typeof m === "object" && !Array.isArray(m) ? m : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The seasons fixture mode refreshes by default, per source id (manifest `default_seasons`): the
+ * seasons the tree actually records, so a bare `ff refresh all` in fixture mode requests only files
+ * it holds (the clock-derived production defaults ask for last season's stats, which the ≤ 300 KB
+ * excerpts do not carry). An entry that is not a `<provider>:<dataset>` id with 1–30 ascending,
+ * distinct 1999–2100 seasons is ignored (that source keeps the production default).
+ */
+export function fixtureDefaultSeasons(fixtureDir: string): ReadonlyMap<string, readonly number[]> {
+  const out = new Map<string, readonly number[]>();
+  const m = readManifest(path.resolve(fixtureDir));
+  const raw = m?.default_seasons;
+  if (raw === undefined || raw === null || typeof raw !== "object" || Array.isArray(raw))
+    return out;
+  for (const [id, v] of Object.entries(raw)) {
+    if (!/^[a-z_]{1,20}:[a-z_]{1,40}$/.test(id) || !Array.isArray(v)) continue;
+    const seasons = v as unknown[];
+    const ok =
+      seasons.length >= 1 &&
+      seasons.length <= 30 &&
+      seasons.every(
+        (x, i) =>
+          typeof x === "number" &&
+          Number.isInteger(x) &&
+          x >= 1999 &&
+          x <= 2100 &&
+          (i === 0 || (seasons[i - 1] as number) < x),
+      );
+    if (ok) out.set(id, Object.freeze([...(seasons as number[])]));
+  }
+  return out;
+}
+
 /** URL → fixture-relative path, from `<fixtureDir>/nflverse/manifest.json` (missing → empty). */
 export function nflverseRoutes(fixtureDir: string): Map<string, string> {
   const routes = new Map<string, string>();
-  const bytes = readFixture(fixtureDir, path.join("nflverse", "manifest.json"));
-  if (bytes === null) return routes;
-  let m: NflverseManifest;
-  try {
-    m = JSON.parse(Buffer.from(bytes).toString("utf8")) as NflverseManifest;
-  } catch {
-    return routes;
-  }
+  const m = readManifest(fixtureDir);
+  if (m === null) return routes;
   const TAG = /^[a-z0-9_]{1,40}$/;
   for (const [tag, rel] of Object.entries(m.timestamps ?? {})) {
     if (TAG.test(tag) && typeof rel === "string")

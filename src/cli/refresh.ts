@@ -17,7 +17,7 @@ import { weatherSourceFor } from "../sources/weather/index.js";
 import { storeFactory } from "../store/index.js";
 import type { StoreFactory } from "../store/types.js";
 import { EXIT, UsageError } from "./exit.js";
-import { fixtureFetch } from "./fixture-fetch.js";
+import { fixtureDefaultSeasons, fixtureFetch } from "./fixture-fetch.js";
 import { writeLine, type CliIo } from "./io.js";
 import type { Logger } from "./log.js";
 import { createNotifier } from "./notify.js";
@@ -246,6 +246,11 @@ export async function refresh(
   }
 
   const transport = config.fixtureDir !== null ? fixtureFetch(config.fixtureDir) : io.fetch;
+  // fixture mode defaults to the seasons the fixture tree records (its manifest says which)
+  const fixtureSeasons =
+    config.fixtureDir !== null
+      ? fixtureDefaultSeasons(config.fixtureDir)
+      : new Map<string, readonly number[]>();
   const http = createHttpClient({ ...(transport === null ? {} : { fetch: transport }), log });
   const rng = seededRng(randomInt(0, MAX_SEED));
   const temp = fsTempArea(path.join(config.cacheDir, "tmp"));
@@ -261,7 +266,8 @@ export async function refresh(
       const r = await runRefresh(
         {
           source,
-          seasons: seasonsOverride ?? defaultSeasons(source, season),
+          seasons:
+            seasonsOverride ?? fixtureSeasons.get(source.id) ?? defaultSeasons(source, season),
           week: null,
           signal,
           ...(opts.force ? { force: true } : {}),

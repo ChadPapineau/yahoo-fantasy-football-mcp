@@ -5,6 +5,7 @@ import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  fixtureDefaultSeasons,
   fixtureFetch,
   NFLVERSE_RELEASE_BASE,
   nflverseRoutes,
@@ -116,5 +117,62 @@ describe("a hostile fixture tree", () => {
     expect(nflverseRoutes(sb.dir).size).toBe(0);
     writeFileSync(path.join(sb.dir, "nflverse", "manifest.json"), "{}");
     expect(nflverseRoutes(sb.dir).size).toBe(0);
+  });
+});
+
+describe("fixtureDefaultSeasons (manifest default_seasons)", () => {
+  const withManifest = (body: unknown): string => {
+    sb = sandbox();
+    mkdirSync(path.join(sb.dir, "nflverse"), { recursive: true });
+    writeFileSync(
+      path.join(sb.dir, "nflverse", "manifest.json"),
+      typeof body === "string" ? body : JSON.stringify(body),
+    );
+    return sb.dir;
+  };
+
+  it("the committed fixtures default to the seasons they record (stats: 2026 only)", () => {
+    expect(Object.fromEntries(fixtureDefaultSeasons(FIXTURES))).toEqual({
+      "nflverse:schedules": [2025, 2026],
+      "nflverse:injuries": [2026],
+      "nflverse:roster_weekly": [2026],
+      "nflverse:stats_player_week": [2026],
+    });
+  });
+
+  it("keeps only well-formed entries; a hostile or malformed manifest yields none", () => {
+    const root = withManifest({
+      default_seasons: {
+        "nflverse:ok": [2025, 2026],
+        "nflverse:unsorted": [2026, 2025],
+        "nflverse:dup": [2026, 2026],
+        "nflverse:empty": [],
+        "nflverse:too_many": Array.from({ length: 31 }, (_, i) => 1999 + i),
+        "nflverse:early": [1998],
+        "nflverse:late": [2101],
+        "nflverse:frac": [2026.5],
+        "nflverse:string": ["2026"],
+        "nflverse:notarray": 2026,
+        "../../etc:passwd": [2026],
+        "NFLVERSE:UPPER": [2026],
+        "nflverse:unicodé": [2026],
+        noprovider: [2026],
+      },
+    });
+    expect(Object.fromEntries(fixtureDefaultSeasons(root))).toEqual({
+      "nflverse:ok": [2025, 2026],
+    });
+    for (const body of [
+      "{not json",
+      "[]",
+      "null",
+      {},
+      { default_seasons: null },
+      { default_seasons: [["nflverse:x", [2026]]] },
+      { default_seasons: "nflverse:x" },
+    ])
+      expect(fixtureDefaultSeasons(withManifest(body)).size).toBe(0);
+    sb = sandbox();
+    expect(fixtureDefaultSeasons(sb.dir).size).toBe(0); // no manifest at all
   });
 });
