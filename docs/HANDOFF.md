@@ -141,6 +141,8 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 2026-09-30 | **Projection storage (Stage B fixer round 2):** samples stored in a compact column form (header + little-endian Float64 matrix, base64; exact; JSON fallback; legacy rows still read) and only a `SIMS.stored` = 1,000-sample prefix of each run's iid draws (plan 08 §5 says `StatLine[n_sims]`) | the only reader (E13) scores ≤ 500; full JSON storage was 43 % of an E1 call and ~25 MB per roster call into a never-pruned table (A15) |
 | 2026-09-30 | **E12 checks `week` against its `source_calls`** (Stage B fixer round 2): a per-server ledger of the last 1,024 successful calls (request_id → tool, week); a cited call answered by another tool or about another week is `VALIDATION`; an id this session never answered is warned, not refused | the gate logged a week-3 lineup rec as week 4 and E13 would have scored it against the wrong week; plan 07 E12 is silent |
 | 2026-09-30 | **Fixture mode's default seasons come from the fixture manifest** (`default_seasons`), not the clock | a bare `ff refresh all` in fixture mode asked for 2025 stats the excerpts do not hold and exited 1 |
+| 2026-09-30 | **E5's K universe is every team's kicker = status `ACT` in its newest `roster_weekly` row** (Stage B fixer round 3); the ranking pass is bounded by `LIMITS.maxKdefCandidates` (96), not E1's 64; the served list is an even, rank-interleaved share of `E5_CANDIDATES_OUT` (10 compact / 6 full) | plan 07 E5 says "every team's kicker" and "10 candidates compact"; on the real file the universe was 32 DEF + 40 K (cut/practice-squad included) + mine > 64 → every call `VALIDATION`; K then DEF blocks of 10 were halved to ten kickers and no defence |
+| 2026-09-30 | **A required write reserves its longest observed yield (≥ poll + the store's own 110 ms stall) before sleeping** (Stage B fixer round 3) | the last yield could wake past the 1 s budget (982 ms measured; the test allowed +50 ms); now ~880 ms and the tests assert the literal ≤ 1 s |
 | 2026-09-30 | **Read-only is acceptable as the product** (Chad): thorough reads of free agents, roster, adds/drops, league activity, stats + intelligent move recommendations are sufficient. Write access is a bonus if Yahoo ever grants it, not a requirement | Yahoo's "write access is not available at this time"; the plan's Phase 1–3 are read-only by design, Phase W stays conditional and low priority |
 
 ## Stack facts checked by the orchestrator (2026-09-29)
@@ -344,3 +346,18 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   macOS A4a p95 126 ms, E1 roster 222 ms, 32 × 4000 556 ms; ubuntu A4a 97 ms, E1 250 ms. A
   pre-existing fast-check oracle flake in the CRPS property (a subnormal counterexample whose
   correctly rounded CRPS is 0) was fixed in the test (`7def120`).
+- 2026-09-30 — **Stage B fixer round 3** (gate RED only on A17's manual half, which is Chad's —
+  item 9; plan 10's 1a-full exit gate does not list A17). The three thin margins were fixed at the
+  root. **A8:** the "exactly 3 K candidates" margin hid a production defect — the roster excerpt
+  held only the fixture league's kickers, while on the real `roster_weekly` E5 ranked 32 DEF + 40 K
+  + my K/DEF through E1's 64-target validation, so every served `ff_analyze_waivers` was
+  `VALIDATION`. Fixed (`d323e13`): E5's own 96 bound, `ACT`-only kickers, a balanced 5 + 5 compact /
+  3 + 3 full list that fits C8 without halving, and a roster excerpt that keeps every kicker's row
+  (regenerated with `make-fixtures --only weekly_rosters` from byte-identical upstream).
+  **A4a:** `STORE_BUSY` measured 982 ms against the 1 s budget with a +50 ms test tolerance; each
+  yield now reserves the longest one observed (`e8cc991`), ~880 ms, tests assert the literal 1 s.
+  **Exit on stdin close during maximum-size synchronous calls (~1.28 s):** not changed — a
+  synchronous `node:sqlite`/engine call cannot be pre-empted; plan 05 §4.2's bound is 3 s and the
+  idle case exits in 15–17 ms. **CI green on `2774446`** (push `36782980116` + dispatch
+  `36782980065` with macOS): A4a `STORE_BUSY` 891 ms ubuntu / 875 ms macOS, p95 97 / 110 ms.
+
