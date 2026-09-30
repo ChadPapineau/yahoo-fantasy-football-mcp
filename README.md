@@ -31,6 +31,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io/) server, writt
 - [Tool reference](#tool-reference)
 - [Skills reference](#skills-reference)
 - [Quickstart and installation (planned)](#quickstart-and-installation-planned)
+- [The `ff` CLI as built (Phase 1a)](#the-ff-cli-as-built-phase-1a)
 - [Configuration](#configuration)
 - [Launch configuration for Claude Desktop and Claude Code](#launch-configuration-for-claude-desktop-and-claude-code)
 - [Security model](#security-model)
@@ -693,6 +694,29 @@ Evals run in two lanes: a **zero-token structural lane** in CI on every push (fr
 11. **Say `/onboard`** — the Skill finds your league and team, summarises the rules, checks the scoring engine against Yahoo's own points for a few players and tells you whether the API grants read-only or read/write access. Then `/weekly`.
 
 Upgrades: `git pull && npm ci && npm run build`, then `ff doctor` (it warns when the client is launching a stale `dist/`). After a Node upgrade re-run `ff print-config` — the launch config carries the exact `node` binary path. Uninstall: `ff uninstall` removes what it created and prints what it will not touch (your client config, Yahoo's consent page).
+
+---
+
+## The `ff` CLI as built (Phase 1a)
+
+Phase 1a is built on the `build/phase-1a` branch (the manual league: `<config>/league.yaml` + nflverse; no Yahoo). `node dist/cli.js <subcommand>` from a checkout; `ff` when installed. The MCP server registers as **`fantasy-football-mcp-server`** (not plan 03 §4.1's `fantasy-football`), because the Skills qualify tool names with it; `ff print-config` writes that name.
+
+| Subcommand | What it does |
+|---|---|
+| `serve` | The MCP server on stdio (what a client launches). No network at startup; stdin EOF, SIGTERM, SIGINT, SIGHUP, EPIPE or reparenting → a clean shutdown |
+| `refresh <target> [--seasons 2025,2026] [--force] [--notify] [--json]` | The only writer of dataset files. Targets: `all`, `nflverse`, `nflverse:schedules`, `nflverse:daily` (injuries + roster_weekly), `nflverse:stats`, the single source ids, `weather` |
+| `status [--json]` · `doctor [--json] [--online] [--fix --yes]` | The freshness dashboard; the install diagnosis (exit code = worst finding). Neither creates nor migrates the store |
+| `print-config --client desktop\|code` | The launch config with absolute paths and no secrets |
+| `install-launchd [--jobs a,b] [--dry-run]` · `uninstall [--dry-run] [--purge [--purge-config] --yes]` | The six LaunchAgents below; removal (data only with `--purge --yes`) |
+| `prune` · `backup [--to <abs path>]` | Expired cache rows and temp debris; a consistent `store.sqlite` backup (4 weekly copies kept) |
+
+**Exit codes:** 0 ok · 1 failure · 2 usage or configuration · 5 `serve` forced shutdown.
+
+**Fixture mode:** with `FF_FIXTURE_DIR=<checkout>/fixtures`, `ff refresh` reads the committed fixtures through the production HTTP client's allow-list/size/redirect code (no socket is opened) and `serve` registers the fixture-only `ff_debug_echo`. For example, into a throwaway cache: `FF_FIXTURE_DIR=$PWD/fixtures FF_CACHE_DIR=<tmp> node dist/cli.js refresh nflverse:stats --seasons 2026` (the fixtures hold 2026 stats only).
+
+**Scheduled jobs** (`ff install-launchd`, local time; kickoffs are Eastern, so on a non-Eastern Mac they are approximate): `nflverse-schedules` every 30 min Thu/Sun/Mon and every 6 h otherwise · `nflverse-daily` 10:30 daily and 16:30 Wed–Sat · `nflverse-stats` 04:30 daily plus Sun 13:00/17:00/21:00 and 00:30 Fri/Mon/Tue · `weather` hourly at :05 Wed–Mon (dropped when `FF_WEATHER_SOURCE=off`) · `store-prune` Sun 03:00 · `store-backup` Sun 03:10.
+
+**Checks:** `npm test` (unit + in-process integration), `npm run test:coverage` + `npm run check:coverage` (the gate), `npm run build && npm run test:process` (spawned `dist/` server: lifecycle, end-to-end over stdio, the Skills dry run, latency), `npm run smoke` (the A3a smoke over real stdio, both protocol eras), `npm run check:skills`.
 
 ---
 
