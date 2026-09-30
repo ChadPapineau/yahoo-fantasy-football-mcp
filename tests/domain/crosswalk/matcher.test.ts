@@ -468,9 +468,16 @@ describe("platform-supplied gsis ids", () => {
     });
   });
 
-  it("a hint whose roster name differs is still exact but reported", () => {
+  it("a hint whose roster name differs (team and position agree) is still exact but reported", () => {
+    // A nickname: the hand-typed id is what settles it. Without team + position agreement the same
+    // name mismatch is a conflict (QA-1-042, below).
     const r = run([
-      pp("manual", `manual.p.${allen.gsis_id}`, { name: "Joshua Allen", gsis_hint: allen.gsis_id }),
+      pp("manual", `manual.p.${allen.gsis_id}`, {
+        name: "Joshua Allen",
+        team_abbr: allen.team,
+        position: allen.position,
+        gsis_hint: allen.gsis_id,
+      }),
     ]);
     expect(gsisOf(only(r))).toBe(allen.gsis_id);
     expect(r.diagnostics).toEqual([
@@ -1174,5 +1181,119 @@ describe("manual pool aliases (QA-1-041)", () => {
     });
     const r = run([a, b]);
     expect(r.resolved[0]!.resolution.status).toBe("ambiguous");
+  });
+});
+
+// --- QA-1-042: a hand-typed gsis id that names another real player is never silently trusted ---------
+
+describe("a gsis hint that contradicts the entry (QA-1-042)", () => {
+  const allen = fx("Josh Allen");
+  const henry = fx("Hunter Henry");
+  /** Josh Allen's league.yaml line with one digit wrong: Hunter Henry's id. */
+  const typo = pp("manual", `manual.p.${henry.gsis_id}`, {
+    name: allen.name,
+    team_abbr: allen.team,
+    position: allen.position,
+    eligible_positions: ["QB", "BN"],
+    gsis_hint: henry.gsis_id,
+  });
+  /** The real Hunter Henry, entered by name (as the guide writes him). */
+  const henryByName = pp("manual", "manual.p.n-00000000000000a1", {
+    name: henry.name,
+    team_abbr: henry.team,
+    position: henry.position,
+    eligible_positions: ["TE", "BN"],
+  });
+
+  it("is not an id match: the entry is listed (ambiguous) with both identities as candidates", () => {
+    const r = run([typo]);
+    const res = only(r);
+    expect(res.status).toBe("ambiguous");
+    expect(gsisOf(res)).toBeNull();
+    const ids = res.status === "ambiguous" ? res.candidates.map((c) => c.gsis_id) : [];
+    expect(ids).toContain(henry.gsis_id);
+    expect(ids).toContain(allen.gsis_id);
+    expect(r.report.unmatched_rostered.map((u) => [u.player.ref.id, u.reason])).toEqual([
+      [typo.ref.id, "ambiguous"],
+    ]);
+    expect(r.diagnostics).toContainEqual({
+      code: "hint_conflict",
+      platform_player_id: typo.ref.id,
+      gsis_ids: [henry.gsis_id],
+    });
+  });
+
+  it("the player the mistyped id belongs to keeps his own match", () => {
+    const r = run([typo, henryByName]);
+    expect(r.resolved[0]!.resolution.status).toBe("ambiguous");
+    expect(gsisOf(r.resolved[1]!.resolution)).toBe(henry.gsis_id);
+    expect(r.pairs.map((p) => p.gsis_id)).toEqual([henry.gsis_id]);
+  });
+
+  it("a stale persisted pair learned from the same wrong hint is not used either", () => {
+    const stale = pair({
+      platform: "manual",
+      platform_player_id: typo.ref.id,
+      gsis_id: henry.gsis_id,
+      method: "id",
+      source: "platform",
+      confidence: 1,
+    });
+    const res = only(run([typo], fixtureRosterRows(), { persisted: new MemPairs([stale]) }));
+    expect(res.status).toBe("ambiguous");
+  });
+
+  it("an override still settles the entry (the owner's explicit decision wins)", () => {
+    const r = run([typo], fixtureRosterRows(), {
+      overrides: [
+        { platform: "manual", platform_player_id: typo.ref.id, gsis_id: allen.gsis_id, note: null },
+      ],
+    });
+    expect(gsisOf(only(r))).toBe(allen.gsis_id);
+  });
+
+  it.each([
+    ["name differs, team and position agree (a nickname)", { name: "Joshua Allen" }, true],
+    ["name agrees, team differs (a trade not yet in the file)", { team_abbr: "KC" }, true],
+    ["name agrees, position differs", { position: "TE", eligible_positions: ["TE"] }, true],
+    ["name and team differ", { name: "Somebody Else", team_abbr: "KC" }, false],
+    [
+      "name and position differ",
+      { name: "Somebody Else", position: "WR", eligible_positions: ["WR"] },
+      false,
+    ],
+    ["name differs, no team given", { name: "Somebody Else", team_abbr: null }, false],
+  ] as const)("%s → trusted: %s", (_label, edit, trusted) => {
+    const entry = pp("manual", `manual.p.${allen.gsis_id}`, {
+      name: allen.name,
+      team_abbr: allen.team,
+      position: allen.position,
+      eligible_positions: ["QB"],
+      gsis_hint: allen.gsis_id,
+      ...edit,
+    });
+    const res = only(run([entry]));
+    if (trusted) {
+      expect(res).toMatchObject({
+        status: "matched",
+        pair: { gsis_id: allen.gsis_id, method: "id" },
+      });
+    } else {
+      expect(res.status).not.toBe("matched");
+    }
+  });
+
+  it("a Sleeper-supplied hint is held to the same check", () => {
+    const res = only(
+      run([
+        pp("sleeper", "4984", {
+          name: allen.name,
+          team_abbr: "BUF",
+          position: "QB",
+          gsis_hint: henry.gsis_id,
+        }),
+      ]),
+    );
+    expect(gsisOf(res)).not.toBe(henry.gsis_id);
   });
 });

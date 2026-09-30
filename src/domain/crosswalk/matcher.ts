@@ -160,6 +160,7 @@ export interface CrosswalkDiagnostic {
     | "id_vs_persisted"
     | "duplicate_gsis"
     | "hint_name_mismatch"
+    | "hint_conflict"
     | "hint_not_in_roster"
     | "ambiguous_platform_id"
     | "stale_override_pair"
@@ -264,8 +265,9 @@ function candidateOf(
   team: NflTeam | null,
   families: ReadonlySet<string>,
   jersey: number | null,
+  via: "name" | "id" = "name",
 ): MatchCandidate {
-  const evidence: MatchEvidence[] = ["name"];
+  const evidence: MatchEvidence[] = [via];
   if (team !== null && row.team === team) evidence.push("team");
   const fam = positionFamily(row.position);
   if (fam !== null && families.has(fam)) evidence.push("position");
@@ -351,23 +353,54 @@ function makePair(
 }
 
 interface IdHit {
+  readonly kind: "hit";
   readonly gsis: string;
   readonly source: CrosswalkSource;
 }
 
-function idEvidence(player: PlatformPlayer, ctx: Ctx): IdHit | null {
+/** A platform-supplied gsis id whose roster row contradicts the entry (QA-1-042). */
+interface IdConflict {
+  readonly kind: "conflict";
+  readonly row: NflRosterPlayer;
+}
+
+/**
+ * Whether a gsis hint's roster row is the entry's player. The name agreeing is enough (a team or
+ * position change is ordinary). A name that disagrees is accepted only when team AND position
+ * family both agree — a nickname or a spelling nflverse does not share, which is exactly what a
+ * hand-typed id is for — and is reported. Anything else (a mistyped id landing on another real
+ * player: other name, other team or position) is a conflict: research 04 §D exact id "with checks",
+ * plan 10 A5a; guardrail "say what the data cannot see".
+ */
+function hintAgrees(row: NflRosterPlayer, player: PlatformPlayer, ctx: Ctx): boolean {
+  const key = nameKey(player.name);
+  if (key !== null && nameKey(row.full_name) === key) return true;
+  const team = normalizeTeam(player.team_abbr);
+  const fam = positionFamily(row.position);
+  const agrees =
+    team !== null && row.team === team && fam !== null && platformFamilies(player).has(fam);
+  if (agrees) {
+    ctx.diag({
+      code: "hint_name_mismatch",
+      platform_player_id: player.ref.id,
+      gsis_ids: [row.gsis_id],
+    });
+  }
+  return agrees;
+}
+
+function idEvidence(player: PlatformPlayer, ctx: Ctx): IdHit | IdConflict | null {
   const id = player.ref.id;
   const hint =
     cleanGsisId(player.gsis_hint) ?? (ctx.platform === "manual" ? gsisFromManualKey(id) : null);
   if (hint !== null) {
     const row = ctx.roster.byGsis(hint);
     if (row !== null) {
-      if (nameKey(row.full_name) !== nameKey(player.name)) {
-        ctx.diag({ code: "hint_name_mismatch", platform_player_id: id, gsis_ids: [hint] });
-      }
-      return { gsis: hint, source: "platform" };
+      if (hintAgrees(row, player, ctx)) return { kind: "hit", gsis: hint, source: "platform" };
+      ctx.diag({ code: "hint_conflict", platform_player_id: id, gsis_ids: [hint] });
+      return { kind: "conflict", row };
     }
-    if (ctx.roster.size === 0) return { gsis: hint, source: "platform" };
+    if (ctx.roster.size === 0) return { kind: "hit", gsis: hint, source: "platform" };
     ctx.diag({ code: "hint_not_in_roster", platform_player_id: id, gsis_ids: [hint] });
   }
   if (ctx.platform === "manual") return null;
@@ -375,7 +408,9 @@ function idEvidence(player: PlatformPlayer, ctx: Ctx): IdHit | null {
   if (native === null) return null;
   const rows = ctx.roster.byPlatformId(ctx.platform, native);
   const only = rows.length === 1 ? rows[0] : undefined;
-  if (only !== undefined) return { gsis: only.gsis_id, source: "nflverse:roster_weekly" };
+  if (only !== undefined) {
+    return { kind: "hit", gsis: only.gsis_id, source: "nflverse:roster_weekly" };
+  }
   if (rows.length > 1) {
     ctx.diag({
       code: "ambiguous_platform_id",
@@ -464,6 +499,36 @@ function deterministic(
   };
 }
 
+/**
+ * A contradicted hint is never an id match, and neither a persisted pair (learned from the same
+ * hint) nor a name match may silently replace it: the entry is ambiguous between the id the owner
+ * typed and what its name/team/position match, until an edit or an override settles it.
+ */
+function hintConflict(player: PlatformPlayer, row: NflRosterPlayer, ctx: Ctx): Internal {
+  const team = normalizeTeam(player.team_abbr);
+  const jersey =
+    typeof player.uniform_number === "number" && Number.isInteger(player.uniform_number)
+      ? player.uniform_number
+      : null;
+  const byId = candidateOf(row, team, platformFamilies(player), jersey, "id");
+  const det = deterministic(player, player.ref.id, null, ctx);
+  const r = det.resolution;
+  const named: readonly MatchCandidate[] =
+    r.status === "matched"
+      ? det.candidate === null
+        ? []
+        : [det.candidate]
+      : r.status === "team_unit"
+        ? []
+        : r.candidates;
+  const candidates = [byId, ...named.filter((c) => c.gsis_id !== byId.gsis_id)];
+  return {
+    resolution: { status: "ambiguous", candidates: topCandidates(candidates) },
+    stage: null,
+    candidate: null,
+  };
+}
+
 function resolveOne(player: PlatformPlayer, ctx: Ctx): Internal {
   const id = player.ref.id;
   if (isTeamUnit(player)) {
@@ -485,7 +550,7 @@ function resolveOne(player: PlatformPlayer, ctx: Ctx): Internal {
   const override = ctx.overrides.get(canon);
   if (override !== undefined) {
     const gsis = override.gsis_id;
-    if (hit !== null && hit.gsis !== gsis) {
+    if (hit?.kind === "hit" && hit.gsis !== gsis) {
       ctx.diag({ code: "override_vs_id", platform_player_id: id, gsis_ids: [gsis, hit.gsis] });
     }
     if (prev !== null && prev.gsis_id !== gsis) {
@@ -507,6 +572,7 @@ function resolveOne(player: PlatformPlayer, ctx: Ctx): Internal {
       ["id"],
     );
   }
+  if (hit?.kind === "conflict") return hintConflict(player, hit.row, ctx);
   if (hit !== null) {
     if (prev !== null && prev.gsis_id !== hit.gsis) {
       ctx.diag({
