@@ -64,6 +64,37 @@ export type HttpGet = (
   readonly final_url: string;
 }>;
 
+/**
+ * A bounded HTTP GET that STREAMS the body to a new file at `dest` (created exclusively, mode 0600)
+ * instead of returning it — the release-download path (plan 01 §5.5 "downloads to a temp file").
+ * Same allow-list, redirect, timeout, size and error rules as HttpGet; on any failure the partial
+ * file is removed. Additive (src/http): a source uses `ctx.download` when present.
+ */
+export type HttpDownload = (
+  url: string,
+  opts: {
+    readonly signal: AbortSignal;
+    readonly maxBytes: number;
+    readonly dest: string;
+    readonly accept?: string;
+  },
+) => Promise<{
+  readonly status: number;
+  /** Bytes written to `dest` (after any content decoding). */
+  readonly bytes: number;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly final_url: string;
+  /** Equals `dest`. */
+  readonly path: string;
+}>;
+
+/**
+ * When a job runs (plan 06 §2 "Season awareness"): `always` (nflverse — schedules must load even
+ * off-season), or `in_season` (weather: outside the season — no game within ±7 days, or schedules
+ * never loaded — the runner exits with a skip outcome before any network call).
+ */
+export type SeasonGate = "always" | "in_season";
+
 /** What the runner gives a source for one run. */
 export interface SourceContext {
   readonly http: HttpGet;
@@ -77,6 +108,13 @@ export interface SourceContext {
   readonly week: Week | null;
   /** Read access to already-published datasets a source is driven by (weather ← schedules). */
   readonly datasets: { readonly schedules: ScheduleReader };
+  /**
+   * The run's private temp directory (created by the runner, removed by it on EVERY path — a
+   * source writes its TempFiles here). Additive; set by src/sources/runner.ts.
+   */
+  readonly tempDir?: string;
+  /** Streaming download to a file (src/http); additive, set by the runner when it has one. */
+  readonly download?: HttpDownload;
 }
 
 /**
@@ -128,6 +166,8 @@ export interface DataSource {
   readonly limiter: RateLimit;
   /** Release-versioned or hour-bucketed. */
   readonly versioning: Versioning;
+  /** Whether the job runs off-season (default `always`); additive (plan 06 §2). */
+  readonly seasonGate?: SeasonGate;
   /** The `ds_*` tables it publishes into its dataset file (per-season tables key on `season`). */
   readonly tables: readonly DatasetTableSpec[];
   /** The current version; null when upstream is unreachable (the run fails, nothing is written). */
