@@ -33,7 +33,7 @@ import {
   recordRecommendationInputSchema,
   weekSchema,
 } from "../bounds.js";
-import { defineTool, type ToolContext } from "../define.js";
+import { defineTool, recentCall, type ToolContext } from "../define.js";
 import {
   bareUntrusted,
   recSchema,
@@ -142,6 +142,26 @@ export const recordRecommendation = defineTool({
         field: SAFE_PATH.test(first.path) ? first.path : "(root)",
         reason: SAFE_CODE.test(first.code) ? first.code : "invalid",
       });
+    // A rec carries no week of its own: hold the logged week to the calls it cites. A call this
+    // session answered must be the named tool and (when it names one) about the logged week — a
+    // week-3 lineup logged as week 4 would be scored against the wrong week by E13.
+    const warnings: string[] = [];
+    let unseen = 0;
+    for (const [i, c] of args.source_calls.entries()) {
+      const seen = recentCall(ctx.services, c.request_id);
+      if (seen === null) unseen += 1;
+      else if (seen.tool !== c.tool)
+        throw new FfError("VALIDATION", {
+          field: `source_calls[${String(i)}].tool`,
+          reason: "source_call_tool_mismatch",
+        });
+      else if (seen.week !== null && seen.week !== args.week)
+        throw new FfError("VALIDATION", { field: "week", reason: "source_call_week_mismatch" });
+    }
+    if (unseen > 0)
+      warnings.push(
+        `${String(unseen)} source_calls were not answered in this server session: their week was not checked`,
+      );
     const r = await ctx.services.recommendationLog.record(
       input,
       new Date(ctx.nowMs).toISOString(),
@@ -156,6 +176,7 @@ export const recordRecommendation = defineTool({
         deduplicated: r.deduplicated,
       },
       inputs,
+      warnings,
     };
   },
 });
@@ -454,6 +475,7 @@ export const analyzeRetrospective = defineTool({
       estimate: true,
       provisional: !final,
       listKey: "calls",
+      week: w,
     };
   },
 });
