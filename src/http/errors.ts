@@ -237,24 +237,25 @@ export function classifyFetchError(e: unknown, abort: AbortReason, host: string 
  */
 export function isTransientNetworkError(e: unknown): boolean {
   if (e instanceof HttpError) return e.transient;
+  // A known code anywhere in the chain decides (a TLS failure wrapped in "fetch failed" is not
+  // transient); otherwise a TimeoutError or undici's bare "fetch failed" counts as transient.
+  let shaped = false;
   let cur: unknown = e;
   for (let depth = 0; depth < 5 && cur instanceof Error; depth++) {
     const code = ownString(cur, "code");
-    if (code !== null) {
-      const kind = kindForCode(code);
-      if (kind !== null && TRANSIENT_KINDS.has(kind)) return true;
-    }
-    if (cur.name === "TimeoutError") return true;
-    if (cur.name === "TypeError" && cur.message === "fetch failed") return true;
+    const kind = code === null ? null : kindForCode(code);
+    if (kind !== null) return TRANSIENT_KINDS.has(kind);
+    if (cur.name === "TimeoutError" || (cur.name === "TypeError" && cur.message === "fetch failed"))
+      shaped = true;
     let next: unknown;
     try {
       next = cur.cause;
     } catch {
-      return false;
+      break;
     }
     cur = next;
   }
-  return false;
+  return shaped;
 }
 
 /** Whether a thrown value is any network failure (transient or not) — refresh_log `error: "network"`. */
