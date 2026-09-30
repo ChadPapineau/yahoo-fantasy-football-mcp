@@ -336,3 +336,11 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   mode (`b42f2e6`), E12's unchecked week (`06372c7`); `docs/evals/1a-backtest.md` now says the
   served K universe (roster_weekly kickers: 3 on the fixture excerpt) differs from the backtest's
   32. A17's manual half stays with Chad (item 9); item 12 (E5 availability) is a product call.
+  **A13 on macOS in CI on this round's head:** the first dispatch (`36777995749`, on `eb7eacc`)
+  was the A4a contention test's first macOS CI run and failed (p95 551 ms): best-effort writes
+  used SQLite's busy handler, which sums its *intended* sleeps, so on a macOS VM whose short
+  sleeps overshoot a "100 ms" wait stalled ~5×. Fixed at the root (`27cee94`: non-blocking tries
+  until a monotonic 100 ms deadline); dispatch `36779073123` on `27cee94` is green on both OSes —
+  macOS A4a p95 126 ms, E1 roster 222 ms, 32 × 4000 556 ms; ubuntu A4a 97 ms, E1 250 ms. A
+  pre-existing fast-check oracle flake in the CRPS property (a subnormal counterexample whose
+  correctly rounded CRPS is 0) was fixed in the test (`7def120`).
