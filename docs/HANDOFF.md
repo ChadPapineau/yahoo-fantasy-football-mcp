@@ -44,8 +44,8 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | phase | status | artefacts |
 |---|---|---|
 | 0 — repo setup | ✅ done | `.gitignore`, `.env.example`, `main` pushed, description + 14 topics applied via `gh`, tooling inventory (`docs/research/00-*`) |
-| 1 — research (waves 1–3) | 🟢 wave 1 ✅ (01, 02, 03 verified) · wave 2: 05 ✅ verified, 04 running · wave 3: 06 running | `docs/research/01-*` … `06-*` |
-| 2 — plan | ⚪ | `docs/plan/` |
+| 1 — research (waves 1–3) | 🟢 01–05 ✅ verified · 06 running (`skills-mcp-researcher`) | `docs/research/01-*` … `06-*` |
+| 2 — plan | 🟢 core planner running (`docs/plan/01-*`…`06-*`); product planner ⚪ waits for 06 + core plan | `docs/plan/` |
 | 3 — adversarial review | ⚪ | `docs/plan/adversarial-log.md`, changelog |
 | docs — README, LICENSE, SECURITY.md | ⚪ | root + `docs/README.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
