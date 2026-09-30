@@ -6,17 +6,23 @@ Does not touch anything else.
 
 ## RESUME HERE
 
-**Status:** plans 07, 08, 09 written and committed. Writing plan 10 (phasing) next — the last file.
+**Status: DONE.** All four plan files are on `origin/main`. No WIP patch was ever needed (each
+file landed in one write followed by an immediate push), so there is nothing to retire.
 
-**Next step:** write `docs/plan/10-phasing-and-acceptance.md` (phases, testable acceptance,
-tensions T1–T12, open decisions D1–D10) → commit+push → final scratch update → reply with SHAs.
-An untracked `scripts/` dir appeared in the tree (not mine) — never stage it. If resuming cold: the decisions in "Settled decisions" are binding for
-all four files; do not re-derive them. Plan 07's tool names (§3) and `Rec`/`Dist`/`PlayerSelector`
-types (legend) are the vocabulary 08–10 must use.
+**Next step (for the devil's-advocate round, not for this agent):** attack plan 10 §4 tensions
+T1–T13 and §5 decisions D1–D10; the assumptions by name are in 07 §7, 08 §11, 09 §7, 10 §6.
+If a later product-planner session is spawned: the "Settled decisions" below remain binding;
+plan 07's tool names (§3) and `Rec`/`Dist`/`PlayerSelector` types are the vocabulary 08–10 use;
+edits to 07–10 should be surgical and re-run the identifier scan (`[0-9]{3}\.l\.[0-9]{4,8}`
+minus the `.l.100x` placeholders) before every push.
 
-**Done:** scratch doc (2c9b6b0); reading + decisions (6237cf7); plan 07 (this commit).
+Untracked `scripts/`, `.github/`, `.gitleaks.toml` appeared in the tree during this session —
+another agent's Phase 0 work; never staged by this agent.
 
-**Pushed SHAs:** 2c9b6b0, 6237cf7, + plan 07 commit (see log below).
+**Done:** scratch (2c9b6b0) · reading + decisions (6237cf7) · plan 07 (d10835c) · plan 08
+(7446368) · plan 09 (52f5e28) · plan 10 (d828deb) · this final scratch update.
+
+**Pushed SHAs:** 2c9b6b0, 6237cf7, d10835c, 7446368, 52f5e28, d828deb, + this commit.
 
 **Tensions with plan 01–06 noticed so far:** see "Tensions" below (carried into plan 10).
 
