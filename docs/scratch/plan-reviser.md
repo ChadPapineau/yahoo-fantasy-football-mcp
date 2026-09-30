@@ -21,7 +21,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 | 6 | OBJ-14 / plans 02, 04 (+05, 10 A18) (fast-xml-parser flags, allow-list tree, pin-time rule) | [x] | 1cc2dfc |
 | 7 | OBJ-06/07/15 / plans 01, 02, 07 (+05, 09, 10) (untrusted_fields labelling, wrappers, structuredContent, rec-log source) | [x] | 0b4489a |
 | 8 | OBJ-04/05 / plans 07, 10 (+08, 09) (Dist.basis, A7, mean default, delta_pwin, E13, n≥30 table, params → Phase 3) | [x] | e04efde |
-| 9 | OBJ-10/11/16/17/19/22/23 / plans 01, 02, 03, 05, 07, 08 | [ ] | — |
+| 9 | OBJ-10/11/16/17/19/22/23 / plans 01–10 | [x] | 94bc8fb |
 | 10 | OBJ-12 / docs.yml + plan 04 §4.2 + plan 10 Z3 — PROVE GREEN | [ ] | — |
 | 11 | OBJ-13 / plan 04 §5, plan 10 Z1 | [ ] | — |
 | 12 | OBJ-20 / plan 01 D7 (snappy, upload.R:85) | [ ] | — |
@@ -35,6 +35,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 (none yet)
 
 ### Choices I had to make
+- G9: game-day window = within 3 h of the player's kickoff (defence said 'within 3 h' — used as given); the 10 % league-wide mismatch threshold lives in `src/domain/scoring/policy.ts` [plan 08 A-5]; doctor rows numbered 19–22 (T9's 19–20 + OBJ-22's 21–22); Claude Desktop log path tagged [plan 03 A-8]; `ff_debug_elicit` named as G3's sibling for A19; `STORE_BUSY` retry window ≤ 1 s and cache `busy_timeout` 100 ms as the defence stated; the swap-transaction bound (< 50 ms) is mine.
 - G8: the §2.1 per-week n estimates (player-weeks ~150–190/wk, designations ~8–15/wk, swaps ~3–6/wk …) are mine, tagged [A-7]; E13's `n_by_metric[]` corrects them. The coarse `delta_pwin` shape is `{ sign, band: small|medium|large }` and `coin_flip` widens to `|ΔP(win)| < 0.04` in `position_cv` mode (defence said 'widened', no number).
 - G7: `meta.untrusted_fields[]` entries become `{ path, source }` objects (were bare path strings) — the minimum that lets the OBJ-15 ruling ('listed … with `source: "store.recommendation_log"`') be true. The defence scoped bare strings to *player names* only; dataset text (nflverse `desc`, depth-chart labels, Sleeper notes) stays wrapped.
 - G7: plan 02 §6.3's verbatim sentence gained 'and the fields listed in `meta.untrusted_fields`' + 'player names, earlier recommendations' so it covers the path-listed classes; plan 09 carries the same wording.
@@ -50,6 +51,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 - G1: "plan 01 §3" in the brief read as §8 (the `FantasyPlatform` seam lives there); also touched §1 diagram and §11.
 
 ### Cross-reference inconsistencies found
+- G9: plan 03 §1.1 step 3 cited '(§6)' for migrations; plan 03's migration section is §7 (§6 is token expiry) → fixed.
 - G4: plan 09 §3.12 `news-check` called E10 (now P2) at P1 → the Skill reconciles D6/D2/D1/D3 itself at P1 and says "priors are hand-set".
 - Plan 07 C3 "34 read tools (19 P0 + 15 P1)" was a miscount: the P1 list (C3, D1, D4–D6, E4, E6–E11, E15, G2) is 14. After OBJ-21 (E15, G2 → later; E10 → P2): v1 = 31 (19 P0 + 11 P1 + 1 P2); Phase 2 tools/list = 30 under `FF_TOOLSET=full`. Plan 10 B10/B12 said 34 → fix to 30 (G4).
 
