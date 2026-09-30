@@ -45,8 +45,10 @@
 |---|---|---|---|
 | Engine properties over nflverse lines (plan 08 §7 P1–P13; 100 % coverage) | Phase 1a | `tests/property/scoring.test.ts` | CI job summary |
 | Engine golden vs Yahoo (`|Δ| ≤ 0.01`) | Phase 1b | `tests/domain/scoring/golden.test.ts` | CI job summary |
-| Start/sit regret vs baselines | Phase 1a (soft) → Phase 3 (hard) | `ff_analyze_retrospective`; `tests/backtest/lineup.test.ts` on fixtures | `docs/evals/<date>.md` (plan 05 §6 output dir) + the retro Skill's weekly report |
-| `P(win)` Brier and reliability | Phase 1a (fixture weeks) → Phase 3 (held-out seasons) | same | same |
+| Start/sit regret vs baselines — **incl. `objective: pwin` vs `objective: mean`** (round 1, OBJ-04) | Phase 1a (soft) → Phase 3 (hard) | `ff_analyze_retrospective`; `tests/backtest/lineup.test.ts` on fixtures | `docs/evals/<date>.md` (plan 05 §6 output dir) + the retro Skill's weekly report |
+| Per-player projection CRPS / pinball / coverage / Spearman (soft, reported weekly — the metrics that reach n ≥ 30 in weeks for one league, §2.1) *(added round 1, OBJ-05)* | Phase 1a | `ff_analyze_retrospective.metrics.per_player` | the retro Skill's weekly report + `docs/evals/` |
+| Swap regret and `P(active)` Brier *(added round 1, OBJ-05)* | Phase 1a | `ff_analyze_retrospective.metrics.swap_regret`, `.brier.p_active` | same |
+| `P(win)` Brier and reliability | reported with the "n too small" caveat in-season (14 outcomes/season, §2.1) → **Phase 3** (held-out seasons) for a number | same | same |
 | K/DEF rank correlation vs "last week" and "lowest implied total" baselines (05 §8 eval) | Phase 1a (soft) | `tests/backtest/kdef.test.ts` | same |
 | Waiver detection precision/recall vs points-only detector (05 §4 eval) | Phase 2 (soft) → Phase 3 (hard) | `tests/backtest/waivers.test.ts` over historical seasons | same |
 | Projection CRPS / pinball / coverage / Spearman vs trailing-4 (05 §1 eval) | Phase 3 (hard) | `tests/backtest/projection.test.ts` | same |
@@ -56,6 +58,24 @@
 | Skill Lane 2 (model-graded) | Phase 1a/1b, pre-release | `npm run eval:skills` | `docs/evals/` |
 | Token sizes vs plan 07 §5.1 table | Phase 1a | `tests/mcp/size.test.ts` (fixture mode, every tool, both `detail` levels) | CI |
 | **Per-turn fixed cost**: `tools/list` bytes under `FF_TOOLSET=core` and `full` + Skills listing chars + prompts list, vs the plan 07 §5.1 ceilings *(added round 1, OBJ-08)* | Phase 1a (`core`) → Phase 2 (`full`) | `tests/mcp/size.test.ts` (fixture mode) | CI job summary; the measured numbers are copied into plan 07 §5.1 |
+
+### 2.1 When each retrospective metric reaches n ≥ 30 for one 12-team H2H league *(added round 1, OBJ-05)*
+
+05 §12.6's rule — refuse conclusions from `n < ~30` calls of a type — decides which of E13's metrics can say anything in a season. Counts assume one user logging every P0 Skill weekly from NFL week 5; they are order-of-magnitude estimates **[A-7]** and E13's `n_by_metric[]` reports the real ones.
+
+| Metric | What one week adds (n) | Reaches n ≥ 30 by | Where it is honest |
+|---|---|---|---|
+| Per-player projection CRPS / pinball / coverage (all rostered players, all rosters) | ~150–190 player-weeks | the **first** logged week | Phase 1a (soft), Phase 3 (hard) |
+| Per-player CRPS / pinball / coverage (my roster only) | ~15–16 | week 2 of logging | same |
+| Spearman by position (within-position rank, all rosters) | ~20–25 per position (RB/WR), ~12 (QB/TE) | week 2 (RB/WR), week 3 (QB/TE) | same |
+| `P(active)` Brier (Q/D/O designations on rostered players, all rosters) | ~8–15 | week 3–4 of logging | Phase 1a |
+| Swap regret (logged start/sit swaps, my team) | ~3–6 per week | week 6–10 of logging | Phase 1a (soft) → Phase 3 (hard) |
+| `p_role_holds` (waiver/cascade calls) | ~1–3 | around season end, if at all | Phase 2 soft; Phase 3 |
+| `P(win)` Brier / reliability (H2H outcomes) | 1 (14 a regular season) | **never in-season**; ≥ 3 held-out seasons | Phase 3 only (C2) |
+| `p_win_given_bid` (FAAB claims) | 0–2 | never in-season | Phase 3 (C4, soft where `n < 30`) |
+| `parameter_changes_proposed[]` | — | needs the rows above at n **and** a held-out season to test a proposal against | Phase 3 (C8) — not in the v1 schema |
+
+Consequence for the P0 Skills: `retro` leads with the top four rows, names the rest as "n too small (k of 30)", and never proposes a parameter change in v1 (plan 09 §3.5).
 
 ---
 
@@ -99,9 +119,9 @@ Phase 1 is one product — `v0.1.0` is tagged when **both** halves are green —
 - A5a **Crosswalk matcher:** every player in the fixture YAML resolves by `roster_weekly` id or deterministic name + team + position match, or is listed in `ff_get_status.crosswalk.unmatched_rostered`; a fixture rookie with no platform id resolves by name + team + position; a name-only candidate is rejected (plan 05 §2 row); a persisted pair survives a team change. The ≥ 95 % figure on the Yahoo fixture league is **A5b** (1b).
 - A6 **Envelope contract:** plan 05 §2 `mcp/envelope` assertions green for all 19 tools (every third-party string wrapped or path-listed; recommendation-log text carries `source: "store.recommendation_log"` — OBJ-07/OBJ-15); `tests/mcp/size.test.ts` shows every tool's `compact` and `full` outputs on the fixture league are ≤ the plan 07 §5.1 worst-case column (analytics ≤ 10 000 chars), **records the `ff_list_players`/`ff_get_roster` payloads with player names wrapped vs bare** (the OBJ-07 before/after, copied into plan 07 §5.1), and records the per-turn fixed cost against its ceiling (§2 ledger; OBJ-08).
 - A17 **Structured-content spike (round 1, OBJ-06; week 1 of 1a):** `ff_debug_echo` (fixture mode only) returns a nonce only in `structuredContent`; Chad asks Claude Code and Claude Desktop to repeat it; the answer per client is recorded in HANDOFF "Stack facts"; plan 07 §5.1 is re-based on measured tokens per client; the C10 list tools omit `structuredContent` until this is answered and regain it only if a client forwards one copy.
-- A7 **Start/sit (soft, reported):** replaying the fixture weeks with `v1-trailing` projections (nflverse lines, the fixture YAML roster), `ff_analyze_lineup(objective: mean)`'s realised regret is ≤ the "start by last week's points" baseline's, and `objective: pwin` produces `mode` consistent with the sign of `μ_m − μ_o` on every matchup (hard); the regret numbers are written to `docs/evals/`.
+- A7 **Start/sit (soft, reported; revised round 1, OBJ-04):** replaying the fixture weeks with `v1-trailing` projections (nflverse lines, the fixture YAML roster): (a) `ff_analyze_lineup(objective: mean)`'s realised regret is ≤ the "start by last week's points" baseline's (hard); (b) **`objective: pwin` vs `objective: mean` realised regret is reported on the same weeks** — `mean` stays the v1 default unless `pwin` wins (plan 07 C11); (c) `objective: pwin` produces `mode` consistent with the sign of `μ_m − μ_o` on every matchup (hard); (d) every `Dist` in every 1a tool carries `basis: "position_cv"` and the Skills' output template prints it (Lane 1 test); (e) in `position_cv` mode `delta_pwin` is the `{ sign, band }` form and never a two-decimal number (schema test). The regret numbers are written to `docs/evals/`.
 - A8 **K/DEF (soft, reported):** `ff_analyze_waivers(positions: [K, DEF])` returns ≥ 3 candidates per position with `implied_total` populated for every fixture week (hard); rank correlation with realised points is reported against both 05 §8 baselines.
-- A9 **Retrospective:** the 05 §12 "evaluation of the evaluator" unit tests pass (a perfectly calibrated synthetic forecaster scores Brier = uncertainty; CRPS of the true distribution beats a misspecified one); running the 1a Skills' Lane 1 dry runs on fixture week `N` and `ff_analyze_retrospective(N)` on week `N+1` yields `regret`, `followed`, and `brier.p_win` for every logged call; `n < 30` → `sample_size_caveats[]` non-empty.
+- A9 **Retrospective (revised round 1, OBJ-05):** the 05 §12 "evaluation of the evaluator" unit tests pass (a perfectly calibrated synthetic forecaster scores Brier = uncertainty; CRPS of the true distribution beats a misspecified one); `src/domain/reclog/metrics.ts` is at 100 % lines + branches (T10); running the 1a Skills' Lane 1 dry runs on fixture week `N` and `ff_analyze_retrospective(N)` on week `N+1` yields `regret`, `followed`, `metrics.per_player` (CRPS/pinball/coverage), `swap_regret` and `brier.p_active` for the logged calls; `brier.p_win`, `p_win_given_bid` and `p_role_holds` read `"n too small (k of 30)"` and `sample_size_caveats[]` names each; `n_by_metric[]` matches the §2.1 table's shape; `parameter_changes_proposed` is **absent** from the v1 output schema (schema test).
 - A10 **Skills Lane 1:** `check:skills` green for the 1a Skills, including the fixture dry run (plan 09 §5.1 item 7) and the pairwise trigger-collision check.
 - A11a **Skills Lane 2 (manual, tokens):** SS-1..4, KD-1..3, RT-1..3 pass the plan 09 §5.2 bar on the fixture YAML league; trigger evals: all positives trigger, no negatives, on both model classes.
 - A13 **Process/lifecycle:** plan 05 §4.2 green on ubuntu and once on macOS.
@@ -171,13 +191,13 @@ Phase 1 is one product — `v0.1.0` is tagged when **both** halves are green —
 
 **Acceptance (hard unless marked).**
 - C1 **Projection backtest (05 §1 evaluation):** on ≥ 2 held-out seasons, `v2` beats trailing-4 on CRPS and within-position Spearman, the gain is not concentrated in weeks 1–3, and 80 % interval coverage is within ±5 points of nominal.
-- C2 **Start/sit:** regret below the consensus-free baselines (last-week points, `v1-trailing` mean) on the held-out seasons; `P(win)` calibrated within ±5 points per decile; "did it matter" share reported.
+- C2 **Start/sit:** regret below the consensus-free baselines (last-week points, `v1-trailing` mean) on the held-out seasons; `P(win)` calibrated within ±5 points per decile (the first place `P(win)` has n — §2.1); "did it matter" share reported; **`objective: pwin` vs `objective: mean` regret with `basis: player_sim` decides the v2 default** (plan 07 C11, round 1 OBJ-04).
 - C3 **`P(win)` vs Yahoo:** Brier below Yahoo's `win_probability` on every replayed fixture week for which the pre-week Yahoo value was snapshotted (needs the scoreboard snapshot — tension T11).
 - C4 **Waivers:** the usage detector beats the points detector on precision at equal recall in ≥ 2 seasons; `P(win | bid)` calibrated within ±10 points where the league's claim history allows (soft where `n < 30`).
 - C5 **Cascade:** beneficiary-share MAE below next-man-up and top-beneficiary hit rate above it on the historical absence set.
 - C6 **K/DEF:** beats "last week's score" clearly and matches "lowest implied total" (05 §8 eval); the share of DEF variance explained by `rare_c` reported.
 - C7 **News calibration:** `calibration_state.table_n ≥ 200` claims [A-5]; news-augmented `P(active)` Brier ≤ designation-only.
-- C8 **Retrospective attribution** populated (opportunity / efficiency / TD / matchup-weather / availability) for every projection-backed call; parameter changes are *proposed* and applied only by a human-run `ff tune --apply` (never automatically — 05 §12.5's own warning).
+- C8 **Retrospective attribution** populated (opportunity / efficiency / TD / matchup-weather / availability) for every projection-backed call; **`parameter_changes_proposed[]` enters E13's schema here** (round 1, OBJ-05 — held-out seasons exist to test a proposal against) and changes are *proposed* and applied only by a human-run `ff tune --apply` (never automatically — 05 §12.5's own warning).
 - C9 The 05 §18 "does not predict" list is re-checked with the product's own numbers and the results written to `docs/evals/` (a recurring pre-season job in plan 06 §1.4 from now on).
 
 **Exit gate.** C1–C3, C5–C6, C8 hard; C4, C7 soft with numbers. Tag `v0.3.0` (candidate for `v1.0.0` once W or a season of use has passed).
@@ -269,5 +289,6 @@ Errors found in plan 01–06 while cross-reading: none that change a decision. T
 | A-4 | 50 hand-labelled news items and 0.8 precision are enough to trust `rules_v1` | first labelling pass |
 | A-5 | 200 claims make the source × claim table meaningful | 05 §10 evaluation |
 | A-6 | The per-turn fixed-cost ceilings (plan 07 §5.1 [A-4]: `core` ≤ 40 000 chars, `full` ≤ 70 000, Skills listing ≤ 4 500) are the right order of magnitude *(added round 1, OBJ-08)* | the first fixture-mode measurement in Phase 1a; constants in `tests/mcp/size.test.ts` |
+| A-7 | The per-week n estimates in §2.1 (player-weeks, designations, swaps per week for one 12-team league) *(added round 1, OBJ-05)* | E13's `n_by_metric[]` on the first logged weeks; the table's "reaches n by" column is corrected from the real counts |
 | U | Yahoo approval latency and whether write is ever granted (03 §F.18) | the application |
 | U | Claude Desktop elicitation (HANDOFF) | Phase W W6 |
