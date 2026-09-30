@@ -66,10 +66,7 @@ const TEAMS: readonly [string, TeamRef, TeamRef][] = [
   ["Team B", TEAM_B, TEAM_A],
 ];
 
-function starterPoints(
-  rec: LineupRecommendation,
-  truth: ReadonlyMap<string, number>,
-): number {
+function starterPoints(rec: LineupRecommendation, truth: ReadonlyMap<string, number>): number {
   return rec.recommended_lineup
     .filter((s) => s.slot !== "BN" && s.slot !== "IR")
     .reduce((s, x) => s + (truth.get(x.player_key) ?? 0), 0);
@@ -84,7 +81,8 @@ export async function replayLineups(data: FixtureData, lg: FixtureLeague): Promi
     const nowMs = beforeWeek(data, week);
     const clock = fixedClock(nowMs);
     const rosters = new Map<string, Awaited<ReturnType<typeof lg.provider.getRoster>>["value"]>();
-    for (const [, me] of TEAMS) rosters.set(me.team_key, (await lg.provider.getRoster(me, week)).value);
+    for (const [, me] of TEAMS)
+      rosters.set(me.team_key, (await lg.provider.getRoster(me, week)).value);
     const players = new Map<string, LineupPlayer[]>();
     for (const [key, roster] of rosters) {
       const out = projectPlayers({
@@ -123,8 +121,7 @@ export async function replayLineups(data: FixtureData, lg: FixtureLeague): Promi
       outputs.push(mean, pwin);
       const lw = week > 1 ? sum(bestLineup(lg.slots, withMeans(last), nowMs)) : null;
       const d = pwin.mode_basis.mu_m - pwin.mode_basis.mu_o;
-      const consistent =
-        pwin.mode === "protect" ? d > 0 : pwin.mode === "chase" ? d < 0 : true;
+      const consistent = pwin.mode === "protect" ? d > 0 : pwin.mode === "chase" ? d < 0 : true;
       rows.push({
         team: label,
         week,
@@ -208,8 +205,15 @@ export function replayKdef(data: FixtureData, settings: ScoringSettings): KdefRe
         if (u.position !== pos) return;
         const played =
           u.subject.kind === "defense"
-            ? data.defense.some((d) => d.season === 2026 && d.week === week && d.nfl_team === u.nfl_team)
-            : data.lines.some((l) => l.season === 2026 && l.week === week && l.gsis_id === (u.subject.kind === "player" ? u.subject.gsis_id : ""));
+            ? data.defense.some(
+                (d) => d.season === 2026 && d.week === week && d.nfl_team === u.nfl_team,
+              )
+            : data.lines.some(
+                (l) =>
+                  l.season === 2026 &&
+                  l.week === week &&
+                  l.gsis_id === (u.subject.kind === "player" ? u.subject.gsis_id : ""),
+              );
         if (!played) return;
         const w = all.players[i]?.weeks[0];
         model.push(w?.dist.mean ?? 0);
@@ -293,11 +297,7 @@ export function writeDocSection(name: string, body: string): void {
 }
 
 /** Every `basis` value and every `delta_pwin` value anywhere in a result tree. */
-export function walk(
-  v: unknown,
-  visit: (key: string, value: unknown) => void,
-  depth = 0,
-): void {
+export function walk(v: unknown, visit: (key: string, value: unknown) => void, depth = 0): void {
   if (depth > 40 || typeof v !== "object" || v === null) return;
   if (Array.isArray(v)) {
     for (const x of v) walk(x, visit, depth + 1);
