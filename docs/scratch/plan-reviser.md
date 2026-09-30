@@ -31,6 +31,32 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 | L | `docs/plan/changelog.md` `## Round 1` | [x] | 96714c1 |
 | F | Final reply: SHAs per group, run URLs, landing table, could-not-apply, choices, xref fixes | [x] | (this commit) |
 
+## RESUME HERE — ROUND 2 (assigned 2026-09-30 after round 1 closed at 8c39191)
+
+Spec: `docs/plan/adversarial-log.md` § "Round 2 — defence" (§D.0 verified facts, §D.1 OBJ-24…30, §D.2 additions), on origin at 0cb7ddb. Same brief, same owned paths, same standard. Commit subjects `docs(plan): round-2 revisions — <OBJ-nn: topic>`. Round 3 diffs against 8c39191.
+
+| # | Ruling | Status | Commit |
+|---|---|---|---|
+| R2-0 | Round 2 RESUME HERE pushed | [~] | — |
+| R2-R | Read round-2 objections + defence in full | [ ] | — |
+| OBJ-24 | plan 02: client sets → *session conditions* (no-reach vs reach); every "cannot" re-qualified; D.2 rule reworded; S12/README rule → any session with a file/shell-capable tool; doctor #13 heuristic over `claude_desktop_config.json`'s other `mcpServers`; Chad's multi-server setup as the motivating case | [ ] | — |
+| OBJ-25 | Keychain = removes the refresh token from disk/backups; in a reach session a hurdle (`node -e`), never a proof; "so a Bash cat yields nothing" deleted; signed helper + user presence priced as a Phase W item; re-audit plan 02 for cannot/never/yields nothing (D.2 item 3) | [ ] | — |
+| OBJ-26 | plan 10 §5 D0 + §0: submit the application now (before plan review); Ph7 "starts on plan approval, does not wait for Yahoo"; D0 paragraph with both ends of L (wk 9 / wk 13 from a wk-5 approval; 1b +1–3 wks; pessimistic = playoffs-only even with an immediate grant); the 1a-minimum cut vs 1a-full as Chad's choice | [ ] | — |
+| OBJ-27 | per-source dataset files `<cache>/ds/<source>.sqlite`, fresh + fsync + atomic rename; server ATTACHes read-only, re-attaches on version change; main store never receives a dataset write; derived tables stay in main under OBJ-11 rules; plans 01 D4/D8/§5.1/§5.5, 03 L9/§1, 05 store row, 06 J3/§2, 10 A4a; sweep plan 06 jobs + plan 03 lifecycle | [ ] | — |
+| OBJ-28 | ceilings token-derived, downward-only (core ≤ 20 000 chars ≈ 5k tokens, full ≤ 35 000, Skills ≤ 4 500; shrink-or-move rule); §6.3 sentence → server-level `instructions` (DiscoverResult.instructions; legacy initialize via dual-era); ≤ 40-char pointer in every description; smoke/check:skills assert exactly-once + pointer; size test reports tokens; modification: `instructions` forwarding is [U] per client → rule also carried by `ff://docs/tool-outputs` and every Skill guardrail — "the pointer is the guarantee, the instructions field is the economy" | [ ] | — |
+| OBJ-29 | E5 under manual: full nflverse K/DEF universe, `availability: "unknown"` said plainly; D0/Ph9 list what X1 loses beside what it keeps; real file `<config>/league.yaml` (0600), never in the checkout (.gitignore already has `*league.yaml` / `!fixtures/manual/*.yaml`); A-12 names the weekly re-edit as X1's running cost | [ ] | — |
+| OBJ-30 | plan 04 §2 pin-time rule verbatim addition: "…and the pinned line has had a release in the last 6 months or is the maintainer's declared LTS; otherwise pin the current line and accept its tree, recording the count." | [ ] | — |
+| R2-D2 | plan 05 §0 rule: every latency/size bound names the fixture/dataset size it is measured on and the test that measures it; the post-OBJ-24/25 re-audit of plan 02 | [ ] | — |
+| R2-L | changelog: fix round-1 summary counts (18 concede + 4 concede-modified + 1 justified); add `## Round 2` | [ ] | — |
+| R2-C | consistency sweep + final docs/secrets proof after the last push | [ ] | — |
+| R2-F | reply: SHAs per ruling, run URLs, objection → file § table, forced choices | [ ] | — |
+
+### Round 2 — could not apply
+(none yet)
+
+### Round 2 — choices I had to make
+(none yet)
+
 ### Could not apply
 (none — every ruling in §D.1 and every T1–T13 resolution was applied as written; where the defence was silent on wording the minimum was written and listed under choices)
 
