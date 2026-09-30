@@ -23,23 +23,19 @@ read-only, a locally-run open-source tool, low cached request volume.
 Record the submission date in the decisions table; the plan 10 Ph8 clock
 starts then.
 
-**The pre-build program is complete (2026-09-30).** Research, the refined
-plan, the three-round adversarial review, the changelog, the README and
-supporting docs, and the docs-only CI are all on `main` and verified.
-**Nothing further happens until Chad has reviewed the package and says
-go** (decision 2026-09-30). Read in this order: the Executive summary
-below → `README.md` → `docs/plan/00-index.md` → `docs/plan/changelog.md`
-→ `docs/plan/10-phasing-and-acceptance.md` §0 and §5.
-
-**On Chad's go, the first build session:** `git pull --rebase`; re-read
-this file; confirm the answers to the decisions below (especially the
-1a-minimum vs 1a-full cut and whether the application has been
-submitted — record its date); then start **Phase 0** and **Phase 1a**
-per `docs/plan/10-*` §3.0/§3.1a (Yahoo-free: needs no approval from
-Yahoo). Standing rules: two agents at a time, file-ownership partition,
-saved verbatim briefs + roster, explicit-path staging, push at every
-checkpoint, `qa`-style tests with every unit, CI verified after every
-push.
+**BUILD IN PROGRESS (from 2026-09-30) on branch `build/phase-1a`.** Chad
+approved development; there will be no Yahoo application (decisions table),
+so the scope is Phase 0 remainder + **Phase 1a-full** on
+`ManualLeagueProvider` + nflverse, then the QA/penetration-test loop with
+remediation, then merge to `main`. The build runs as a sequence of
+workflows (foundation → modules → integration → QA/pentest/remediate →
+merge); the orchestrator verifies each at source before the next.
+Agents follow `CLAUDE.md` (repo root): commit only via
+`scripts/dev/commit-paths.sh`, Node via `scripts/dev/with-node.sh`, heavy
+jobs via `scripts/dev/heavy-lock.sh`. A fresh session: `git fetch`, check
+out `build/phase-1a`, read `CLAUDE.md` and this file, then
+`gh run list --branch build/phase-1a` and continue from the last green
+workflow stage recorded in the log below.
 
 ## Executive summary (2026-09-30)
 
@@ -133,6 +129,14 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 2026-09-29 | Stack default: Node/TypeScript + official MCP SDK | matches Chad's other local MCP servers; deviations must be justified in the plan |
 | 2026-09-29 | Concurrency capped at two agents | Chad's credit-efficiency rule (2026-09-24) |
 | 2026-09-29 | Orchestration artefacts (roster, verbatim briefs, program) are committed in `docs/scratch/` | resumability after usage-limit cutoffs |
+| 2026-09-30 | **Development approved — build begins** (Chad: "Let's go ahead and begin development"; thorough testing, QA + penetration testing with remediation). Supersedes the review gate below | Chad's instruction |
+| 2026-09-30 | **No Yahoo API application** — Chad has no business-entity details to supply and will not apply. Plan 10's Ph8 decision point is treated as **fired**: fallback **X1** (`ManualLeagueProvider`) is the path for Chad's league; **Phase 1b is deferred indefinitely** (the `FantasyPlatform` seam stays; `YahooProvider`, OAuth and token storage are **not built** now — so no Yahoo credential exists anywhere) | Chad's decision; plan 10 §0 Ph8/Ph9. Note: Yahoo's form asks about "personal or single league use", so an individual may be able to apply later — free, optional |
+| 2026-09-30 | **Scope: 1a-full** (not 1a-minimum) — `ManualLeagueProvider`, weather and `retro` are essential once Yahoo is out | follows from the row above |
+| 2026-09-30 | **Personal use, open source, no purchases or subscriptions** — non-commercial sources (Sleeper, Open-Meteo) are acceptable; no paid projection feed; outside contributors may be approved later (a PR workflow + the branch ruleset become relevant then) | Chad's instruction (plan 10 §5 D1/D2 = no) |
+| 2026-09-30 | **Credentials: none requested or needed.** Chad must never send his Yahoo password; the build needs no keys (nflverse, Open-Meteo, NWS are keyless) | orchestrator; Chad's security requirement |
+| 2026-09-30 | **Runtime dependency added: `yaml` 2.9.1** (ISC, zero dependencies, no install scripts) for the hand-edited `<config>/league.yaml`; **`fast-xml-parser` deferred** (only Phase 1b parses XML). Plan 04 §2 carries the rows | rejected: JSON (no comments, error-prone by hand); a hand-rolled YAML subset parser (a parser is attack surface) |
+| 2026-09-30 | **Secret defences in depth**: gitleaks CI + GitHub push protection (existing), plus a local zero-dependency scanner (`scripts/dev/scan-secrets.mjs`) run by `.githooks/pre-commit` and by `scripts/dev/commit-paths.sh`; a local-only identifier deny-list at `~/.config/fantasy-football-mcp-dev/scan-denylist.txt` (never in the repo) | Chad's "absolutely rigorous" security requirement |
+| 2026-09-30 | **Build branch `build/phase-1a`**; merged to `main` only when the full gate (lint, typecheck, tests + coverage, build, process, smoke, supply-chain, pack, docs, secrets) is green and the QA/pentest loop is dry. Node 24.21 via fnm (`.nvmrc` = 24); global default untouched | plan 04 §5; OBJ-09 |
 | 2026-09-30 | **No development or testing until Chad has reviewed the completed research + planning package** (refined plan, adversarial log + changelog, README/docs, executive summary) and approves | Chad's explicit instruction; the orchestrator reports completion and stops |
 | 2026-09-30 | **Read-only is acceptable as the product** (Chad): thorough reads of free agents, roster, adds/drops, league activity, stats + intelligent move recommendations are sufficient. Write access is a bonus if Yahoo ever grants it, not a requirement | Yahoo's "write access is not available at this time"; the plan's Phase 1–3 are read-only by design, Phase W stays conditional and low priority |
 
