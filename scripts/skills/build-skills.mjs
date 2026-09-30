@@ -8,13 +8,16 @@
 //
 // Usage: node scripts/skills/build-skills.mjs [--check] [--root <repo root>]
 // Exit:  0 up to date / written · 1 stale (--check) or a structural error · 2 usage error.
+import { randomBytes } from "node:crypto";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
+  rmSync,
   writeFileSync,
-  lstatSync,
 } from "node:fs";
 import path from "node:path";
 import {
@@ -32,6 +35,9 @@ import {
   readManifest,
   readPackageVersion,
 } from "./_lib.mjs";
+
+/** The temp-file names `writeAtomic` uses: `<target>.<pid>.<12 hex>.tmp`. */
+export const TEMP_FILE_RE = /\.\d+\.[0-9a-f]{12}\.tmp$/;
 
 /** Shared reference file names: lowercase kebab-case Markdown. */
 export const SHARED_NAME_RE = /^[a-z0-9][a-z0-9-]*\.md$/;
@@ -172,6 +178,23 @@ export function stampMetadata(text, meta) {
 }
 
 /**
+ * Write `text` to `file` through a sibling temp file and a rename, so a concurrent reader (another
+ * build, the checker, an editor) sees the old bytes or the new bytes, never a torn file.
+ * @param {string} file
+ * @param {string} text
+ */
+export function writeAtomic(file, text) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${String(process.pid)}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync(tmp, text, { flag: "wx" });
+    renameSync(tmp, file);
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+}
+
+/**
  * Compute every output of the build, and (unless `check`) write the changed ones. Nothing is
  * written when any error is found (all-or-nothing).
  * @param {{ root?: string, check?: boolean }} [opts]
@@ -239,7 +262,19 @@ export function buildSkills(opts = {}) {
     if (existsSync(refDir)) {
       for (const name of readdirSync(refDir).sort()) {
         if (shared.files.has(name)) continue;
-        const st = lstatSync(path.join(refDir, name));
+        if (TEMP_FILE_RE.test(name)) {
+          // another build's write in flight; a leftover one (a crashed build) fails --check
+          if (opts.check)
+            errors.push(`skills/${skill}/references/${name}: leftover temp file — delete it`);
+          continue;
+        }
+        /** @type {import("node:fs").Stats} */
+        let st;
+        try {
+          st = lstatSync(path.join(refDir, name));
+        } catch {
+          continue; // vanished between readdir and lstat (a concurrent rename)
+        }
         if (
           !st.isFile() ||
           st.isSymbolicLink() ||
@@ -256,10 +291,7 @@ export function buildSkills(opts = {}) {
 
   const changed = writes.map((w) => path.relative(root, w.file).split(path.sep).join("/"));
   if (!opts.check && errors.length === 0) {
-    for (const w of writes) {
-      mkdirSync(path.dirname(w.file), { recursive: true });
-      writeFileSync(w.file, w.text);
-    }
+    for (const w of writes) writeAtomic(w.file, w.text);
   }
   return { changed, errors, skills: listed.skills };
 }
