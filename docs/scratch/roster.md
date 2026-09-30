@@ -16,8 +16,8 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | architecture-planner-core | a45fab2bbf0065893 | 3 | ✅ done (SHAs verified; SDK v2 2.2.0 = npm `latest` and `node:sqlite` on Node 22.23 checked live — the latter still prints ExperimentalWarning) | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | `c5ea355` | — |
 | product-planner | a47f1502e3ab64907 | 4 | ✅ done (SHAs verified; identifier scan clean; 13 tensions + 10 open decisions in plan 10 §4–§5) | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | `b830114` | — |
 | ci-bootstrap | afe971bb2e5796cc9 | 4 | ✅ done (orchestrator verified: `docs` + `secrets` green on `f3a0a48`; full-history scan green; 20 files tracked) | `.github/**`, `.gitleaks.toml`, `scripts/**`, `docs/scratch/ci-bootstrap.md` | `f3a0a48` | — |
-| devils-advocate | a2ed55e691cda6d2a | 5 | ⛔ round 2 delivered (`1ab4db5`: 23/23 round-1 closed, 7 new, 0 blocking); defence pushed; **waiting on `plan-reviser`** before round 3 (expected closing round) | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | `101510f` | resume the same ID via SendMessage once round-2 revisions are on `main` |
-| plan-reviser | a4ae16bdc0e7b6482 | 5 | 🟢 running (round-2 revisions, resumed via SendMessage) | `docs/plan/01-*`…`10-*`, `docs/plan/changelog.md`, `.github/workflows/docs.yml` (OBJ-12 only), `docs/scratch/plan-reviser.md` | `8c39191` | `docs/scratch/plan-reviser.md` §RESUME HERE |
+| devils-advocate | a2ed55e691cda6d2a | 5 | 🟢 running (round 3 — expected closing — resumed via SendMessage on `b904a6f`) | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | `101510f` | `docs/scratch/devils-advocate.md` §RESUME HERE |
+| plan-reviser | a4ae16bdc0e7b6482 | 5 | ✅ round 2 done (orchestrator verified: 11 SHAs on origin, CI green on `b904a6f`, no main-store dataset write survives, changelog counts fixed) | `docs/plan/01-*`…`10-*`, `docs/plan/changelog.md`, `.github/workflows/docs.yml` (OBJ-12 only), `docs/scratch/plan-reviser.md` | `b904a6f` | resume the same ID via SendMessage if round 3 yields rulings |
 | docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md`, `docs/scratch/docs-writer.md` | — | brief: `docs/scratch/briefs/docs-writer.md` |
 
 ## Cutoff procedure
@@ -105,3 +105,9 @@ only if the ID is gone.
   in the 2026-07-28 spec before ruling; defence pushed (`0cb7ddb`): 7/7
   conceded (OBJ-28 modified). `plan-reviser` resumed for round-2
   revisions; advocate parked for round 3 (expected closing).
+- 2026-09-30 — `plan-reviser` round-2 revisions ✅ (`c8a7696`…`b904a6f`,
+  seven ruling commits + two D.2 commits + changelog). Orchestrator
+  verified SHAs, CI (green on `295dfc0` and `b904a6f`), identifiers, the
+  no-main-store-dataset-write sweep, the `instructions` move with its [U]
+  caveat, and the changelog counts.
+- 2026-09-30 — `devils-advocate` resumed for **round 3** on `b904a6f`.
