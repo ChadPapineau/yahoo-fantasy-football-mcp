@@ -503,3 +503,53 @@ Count: 0 blocking · 5 significant · 2 marginal.
 ---
 
 _Round 2 ends here. Orchestrator: append `## Round 2 — defence` below this line._
+
+---
+
+## Round 2 — defence
+
+**Author:** orchestrator · **Date:** 2026-09-30 · Plan revision that answers this defence: the `plan-reviser` commits `docs(plan): round-2 revisions — …`, diffed against `8c39191`.
+
+Verdict-table acknowledgement: 22 conceded-by-defence, 1 withdrawn, 0 pressed — accepted. The changelog's summary line is wrong as the advocate says (18 concede + 4 concede-modified + 1 justified); the reviser corrects it.
+
+### D.0 Facts verified before ruling (primary sources, 2026-09-30)
+
+| Fact | Source | Effect |
+|---|---|---|
+| The 2026-07-28 `DiscoverResult` carries `instructions`: "Optional natural-language guidance for LLMs on how to use this server effectively"; `server/discover` is **optional for clients** to call; legacy clients receive `instructions` in the `initialize` result the SDK's dual-era serving answers | modelcontextprotocol.io/specification/2026-07-28/server/discover (fetched by the orchestrator) | OBJ-28's move is sound; **whether a given client surfaces `instructions` to the model is [U] per client**, so the per-tool pointer and the Skills' own rule remain |
+| `docs`/`secrets` green on `8c39191` and on every intermediate reviser push | GitHub Actions runs | the round-1 `docs.yml` change holds |
+
+### D.1 Rulings
+
+#### OBJ-24 — **CONCEDE**
+The unit is the session. Plan 02 §0's two sets become **session conditions**: *no-reach sessions* — no tool in the session can read the user's files or run a shell as the user (Claude Desktop chat / claude.ai with only this server and other reach-less servers) — vs *reach sessions* — any tool can (Claude Code always; Desktop chat whenever a filesystem/shell-capable server is configured). Every claim that named a client set now names the session condition; the D.2 rule becomes "every *cannot* names the session condition for which it holds". S12 and the README rule extend to "writes are unsupported in any session where another MCP server or tool gives the model file or shell access". Doctor #13 gains the heuristic the advocate proposes — parse `claude_desktop_config.json`'s other `mcpServers` entries and warn when any exist while `FF_WRITE_ENABLED=1` — labelled a heuristic (it cannot know what those servers do). Chad's own setup (other local MCP servers) is named in plan 02 as the motivating case.
+
+#### OBJ-25 — **CONCEDE**
+Reworded in plan 02 S3/§3.3/§8 #5 and plan 10 §3.4 (a)/W10: the Keychain `SecretSource` **removes the refresh token from disk and backups** (Time Machine, iCloud, `grep`, accidental commits) — that is its benefit; in a reach session it is a **hurdle** (`node -e` or `security find-generic-password` instead of `cat`), the same standing as the TTY check, never a proof. It stays a Phase W prerequisite for the backup benefit. A stronger mechanism — a separately signed helper with its own code identity and a user-presence prompt per read — is **priced as a Phase W item and never assumed**. The sentence "so a `Bash` `cat` yields nothing" is deleted.
+
+#### OBJ-26 — **CONCEDE** (the staked objection; and the one action the plan cannot take itself)
+(a) HANDOFF "Things Chad needs to know" item 4 and plan 10 §5 D0 now say plainly: **submit the Yahoo application now, before reviewing the plan; it costs nothing, commits to nothing, and the Ph8 clock starts at submission** — with the framing already written there. The orchestrator has told Chad this directly twice and repeats it in the executive summary; the plan records that the application is **not development** and is therefore outside the 2026-09-30 "no development until review" decision. (b) Ph7 "starts now" → "**starts on plan approval and does not wait for Yahoo**". (c) The D0 paragraph carries **both ends of L** — from an approval in week 5, 1a lands week 9 (optimistic) to week 13 (pessimistic); 1b follows in 1–3 weeks; under the pessimistic end even an immediate Yahoo grant yields a playoffs-only product — and names the **1a-minimum cut** that reaches the optimistic end: store + `schedules`/`injuries`/`stats_player_week` + crosswalk + engine + E1/E2/E5 + `start-sit`/`stream-kdef` + the recommendation log, with `ManualLeagueProvider`, weather, `retro` and the remaining P0 tools following as 1a-full. Chad chooses the cut at approval time; the plan presents it as a choice, not a default.
+
+#### OBJ-27 — **CONCEDE**
+The advocate is right that "swapping contents" is a row copy under the main writer lock, and that the round-1 test could not pass on real data. New layout (plans 01 D4/D8/§5.1/§5.5, 03 L9/§1, 05 `store` row, 06 J3/§2, 10 A4a): datasets live in **per-source database files** `<cache>/ds/<source>.sqlite` that `ff refresh` writes fresh (staging file → `fsync` → atomic `rename()`); the server `ATTACH`es each **read-only** and re-attaches when `refresh_log` (or the file's inode/mtime) shows a new version — the swap is a `DETACH`/`ATTACH` pair. **The main store never receives a dataset write.** Small *derived* tables that must live in the main store (the crosswalk's persisted pairs, `league_settings`, `points_cache`) are written under OBJ-11's rules (best-effort or `STORE_BUSY`), and the crosswalk rebuild writes only its delta. Plan 01 §5.1's rationale is amended to "one store file plus immutable per-source dataset files". Plan 05's test asserts re-attach latency (< 50 ms is now a claim about `ATTACH`, not a copy) **and** that a query in flight against the old file completes; the test names the dataset size it runs on (see D.2).
+
+#### OBJ-28 — **CONCEDE-MODIFIED**
+(a) Ceilings are token-derived and **downward-only**: `core` ≤ 20 000 chars (≈ 5k tokens), `full` ≤ 35 000, Skills listing ≤ 4 500; calibrated on the first measurement, then the rule "a new tool that would breach the ceiling shrinks a schema or moves to `full`". (b) The plan 02 §6.3 sentence moves to the server-level **`instructions`** field (2026-07-28 `DiscoverResult.instructions`, verified — D.0; legacy `initialize` result via the SDK's dual-era serving); every tool description keeps a ≤ 40-char pointer; `smoke`/`check:skills` assert the sentence appears exactly once in `server/discover`/`initialize` and the pointer in every description. (c) `tests/mcp/size.test.ts` reports tokens for one model's tokenizer as well as chars. *Modification:* because a client is **not required** to call `server/discover` and whether it forwards `instructions` to the model is [U] per client, the rule is also carried by the `ff://docs/tool-outputs` resource and by every Skill's guardrail — the pointer is the guarantee, the instructions field is the economy.
+
+#### OBJ-29 — **CONCEDE**
+E5 under `manual`: ranks the full K/DEF universe from nflverse with `availability: "unknown"` and says so; the D0/Ph9 wording lists what X1 **loses** (live FA pool, opponent rosters, game-day inactives) beside what it keeps; the real file lives at `<config>/league.yaml` (0600), never in the checkout — `.gitignore` gains `*league.yaml` with `!fixtures/manual/*.yaml` (orchestrator's edit, this commit); A-12 names the weekly re-edit as X1's running cost.
+
+#### OBJ-30 — **CONCEDE**
+Plan 04 §2's pin-time rule gains the maintenance criterion verbatim: "…and the pinned line has had a release in the last 6 months or is the maintainer's declared LTS; otherwise pin the current line and accept its tree, recording the count."
+
+### D.2 What the defended position should strengthen beyond what was attacked
+
+1. **Performance claims carry their data size.** The `< 50 ms` swap was asserted against no dataset. New rule in plan 05 §0: every latency/size bound in the plan names the fixture or dataset size it is measured on, and the test that measures it.
+2. **The highest-value action was inside the plan's phases instead of in front of them.** The HANDOFF's `▶ NEXT STEP` for Chad now leads with the application, ahead of the plan review.
+3. **The session-condition rule generalises the round-1 client rule** — and it applies to *every* security sentence, including the ones added in round 1 (OBJ-25 was the round-1 rewrite violating its own rule). The reviser re-audits plan 02 for "cannot"/"never"/"yields nothing" after applying OBJ-24/25.
+
+### D.3 What the advocate should check in round 3
+
+Diff against `8c39191`: the per-source dataset files (no main-store dataset writes anywhere — including plan 06's jobs and plan 03's lifecycle), the session-condition rewrite of plan 02 with the re-audit, the instructions-field move with its [U] fallback, the D0 paragraph's two ends of L and the 1a-minimum cut, and the corrected changelog counts. If nothing structural remains, write `## Closing verdict`.
+
+_Round 2 defence ends here. The advocate opens `## Round 3 — verdicts and closing` once the round-2 revisions are on `main`._
