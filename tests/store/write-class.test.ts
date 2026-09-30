@@ -5,7 +5,13 @@
 // The lock is held by a SECOND process (tests/store/helpers/lock-holder.mjs).
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isBusyError, WriteExecutor } from "../../src/store/sqlite.js";
+import {
+  BEST_EFFORT_POLL_MS,
+  isBusyError,
+  REQUIRED_POLL_MS,
+  REQUIRED_STALL_RESERVE_MS,
+  WriteExecutor,
+} from "../../src/store/sqlite.js";
 import {
   BUSY_TIMEOUT_MS,
   REQUIRED_WRITE_BUDGET_MS,
@@ -140,7 +146,7 @@ describe("required writes under a foreign writer lock", () => {
     expect(err).toBeInstanceOf(StoreBusyError);
     expect((err as StoreBusyError).ffCode).toBe("STORE_BUSY");
     expect((err as StoreBusyError).table).toBe("recommendation_log");
-    expect(dt).toBeLessThanOrEqual(REQUIRED_WRITE_BUDGET_MS + 50);
+    expect(dt).toBeLessThanOrEqual(REQUIRED_WRITE_BUDGET_MS);
     expect(dt).toBeGreaterThan(REQUIRED_WRITE_BUDGET_MS / 2);
     expect((err as StoreBusyError).waitedMs).toBeLessThanOrEqual(REQUIRED_WRITE_BUDGET_MS);
     expect(
@@ -371,6 +377,39 @@ describe("WriteExecutor unit", () => {
         return n;
       }),
     ).resolves.toBe(3);
+  });
+  it("STORE_BUSY lands inside the budget while other work stalls the event loop (A4a margin)", async () => {
+    // A concurrent best-effort write blocks the loop for up to BUSY_TIMEOUT_MS + a poll. Reserving
+    // only REQUIRED_POLL_MS let the last yield wake past the budget (A4a measured 982 of 1,000 ms
+    // and its test allowed +50). Stall the loop BUSY_TIMEOUT_MS at the circuit breaker's cadence,
+    // the last stall just before the budget runs out, where the final yield sits.
+    const w = new WriteExecutor(REQUIRED_WRITE_BUDGET_MS);
+    const t0 = performance.now();
+    const stalls = [300, 650, REQUIRED_WRITE_BUDGET_MS - 70].map((at) =>
+      setTimeout(() => {
+        const e = performance.now() + BUSY_TIMEOUT_MS;
+        while (performance.now() < e);
+      }, at),
+    );
+    let tries = 0;
+    try {
+      await expect(
+        w.required("recommendation_log", () => {
+          tries += 1;
+          throw busy;
+        }),
+      ).rejects.toBeInstanceOf(StoreBusyError);
+    } finally {
+      for (const h of stalls) clearTimeout(h);
+    }
+    const dt = performance.now() - t0;
+    expect(dt).toBeLessThanOrEqual(REQUIRED_WRITE_BUDGET_MS);
+    expect(dt).toBeGreaterThan(REQUIRED_WRITE_BUDGET_MS / 2); // it still retried for most of it
+    expect(tries).toBeGreaterThan(5);
+  });
+  it("reserves at least one poll plus the store's own stall before each yield", () => {
+    expect(REQUIRED_STALL_RESERVE_MS).toBe(REQUIRED_POLL_MS + BUSY_TIMEOUT_MS + BEST_EFFORT_POLL_MS);
+    expect(REQUIRED_STALL_RESERVE_MS).toBeLessThan(REQUIRED_WRITE_BUDGET_MS / 2);
   });
   it("gives up without overrunning a small budget", async () => {
     const w = new WriteExecutor(30);
