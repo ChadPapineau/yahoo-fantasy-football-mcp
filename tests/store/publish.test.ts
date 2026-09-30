@@ -9,8 +9,13 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DS_INJURIES, DS_GAMES } from "../../src/store/datasets/tables.js";
 import { errorCode, stagingPath, sweepDebris } from "../../src/store/publisher.js";
-import type { DatasetPublisher, DatasetWriter, PublishStats } from "../../src/store/types.js";
-import { injuryRows, publishTables, row, SEASON } from "./helpers/datasets.js";
+import {
+  PUBLISH_ALREADY_CURRENT,
+  type DatasetPublisher,
+  type DatasetWriter,
+  type PublishStats,
+} from "../../src/store/types.js";
+import { gamesRows, injuryRows, publishTables, row, SEASON } from "./helpers/datasets.js";
 import { openPublisher, openStore, tempCache, type TempCache } from "./helpers/env.js";
 import { run } from "./helpers/spawn.js";
 
@@ -447,5 +452,114 @@ describe("recordUnchanged and lifecycle", () => {
   it("the publisher creates a missing store and dataset dir privately", () => {
     expect(statSync(t.storePath).mode & 0o777).toBe(0o600);
     expect(statSync(t.datasetDir).mode & 0o777).toBe(0o700);
+  });
+});
+
+describe("single-flight: skipIfCurrent re-checks 'unchanged' under the job lock (plan 01 §5.7)", () => {
+  const rows = (): { n: number; ok: number } => {
+    const db = new DatabaseSync(t.storePath, { readOnly: true });
+    const r = db
+      .prepare("SELECT COUNT(*) AS n, COALESCE(SUM(ok), 0) AS ok FROM refresh_log")
+      .get() as { n: number; ok: number };
+    db.close();
+    return { n: r.n, ok: r.ok };
+  };
+  const jobLocks = (): number => {
+    const db = new DatabaseSync(t.storePath, { readOnly: true });
+    const r = db.prepare("SELECT COUNT(*) AS n FROM job_lock").get() as { n: number };
+    db.close();
+    return r.n;
+  };
+
+  it("a second publish of the current version is refused as already_current: no fill, same file, checked_at advanced, lock released", async () => {
+    expect((await pub.publish("nflverse:injuries", "v1", null, fillWith("first"))).ok).toBe(true);
+    const before = statSync(INJ());
+    t.clock.advance(60_000);
+    let filled = 0;
+    const out = await pub.publish(
+      "nflverse:injuries",
+      "v1",
+      null,
+      (w) => {
+        filled++;
+        return fillWith("second")(w);
+      },
+      { skipIfCurrent: true },
+    );
+    expect(out).toEqual({ ok: false, error: PUBLISH_ALREADY_CURRENT });
+    expect(filled).toBe(0);
+    const after = statSync(INJ());
+    expect([after.ino, after.mtimeMs]).toEqual([before.ino, before.mtimeMs]);
+    expect(tags(INJ())).toEqual(["first"]);
+    expect(rows()).toEqual({ n: 1, ok: 1 }); // no second row, and no failure row
+    expect(log().latest?.checked_at).toBe(t.clock.nowIso());
+    expect(jobLocks()).toBe(0);
+    expect(tmpFiles()).toEqual([]);
+    // the lock really was released: the next (new) version publishes
+    expect(
+      (await pub.publish("nflverse:injuries", "v2", null, fillWith("v2"), { skipIfCurrent: true }))
+        .ok,
+    ).toBe(true);
+    expect(tags(INJ())).toEqual(["v2"]);
+  });
+
+  it("without the option (or false) the same version republishes — the --force path is unchanged", async () => {
+    await pub.publish("nflverse:injuries", "v1", null, fillWith("first"));
+    expect((await pub.publish("nflverse:injuries", "v1", null, fillWith("again"))).ok).toBe(true);
+    expect(
+      (
+        await pub.publish("nflverse:injuries", "v1", null, fillWith("forced"), {
+          skipIfCurrent: false,
+        })
+      ).ok,
+    ).toBe(true);
+    expect(tags(INJ())).toEqual(["forced"]);
+    expect(rows()).toEqual({ n: 3, ok: 3 });
+  });
+
+  it("publishes when nothing is current, when another version is, when only a failed row carries it, and when the file is gone", async () => {
+    const opt = { skipIfCurrent: true } as const;
+    expect((await pub.publish("nflverse:injuries", "v1", null, fillWith("a"), opt)).ok).toBe(true);
+    expect((await pub.publish("nflverse:injuries", "v2", null, fillWith("b"), opt)).ok).toBe(true);
+    // a failed publish of v3 leaves v2 current; v3 is not "already current"
+    const failed = await pub.publish("nflverse:injuries", "v3", null, () =>
+      Promise.reject(new Error("boom")),
+    );
+    expect(failed.ok).toBe(false);
+    expect((await pub.publish("nflverse:injuries", "v3", null, fillWith("c"), opt)).ok).toBe(true);
+    // the current version's file deleted under us: republished (repair), not skipped
+    const { rmSync } = await import("node:fs");
+    rmSync(INJ());
+    expect((await pub.publish("nflverse:injuries", "v3", null, fillWith("d"), opt)).ok).toBe(true);
+    expect(tags(INJ())).toEqual(["d"]);
+    // another source's current version never counts
+    const games = gamesRows();
+    const sched = await pub.publish(
+      "nflverse:schedules",
+      "v3",
+      null,
+      (w) => {
+        for (const g of games) {
+          w.createTable(g.spec);
+          w.insert(g.spec.name, g.rows);
+        }
+        return Promise.resolve({
+          ...stats(1),
+          tables: games.map((g) => ({ name: g.spec.name, rows: g.rows.length })),
+        });
+      },
+      opt,
+    );
+    expect(sched.ok).toBe(true);
+  });
+
+  it("a version that differs only by case or whitespace is not the current one", async () => {
+    await pub.publish("nflverse:injuries", "v1", null, fillWith("a"));
+    for (const v of ["V1", "v1 ", " v1", "v1​"]) {
+      const out = await pub.publish("nflverse:injuries", v, null, fillWith(v), {
+        skipIfCurrent: true,
+      });
+      expect(out.ok, JSON.stringify(v)).toBe(true);
+    }
   });
 });

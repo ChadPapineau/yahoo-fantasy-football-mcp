@@ -2,7 +2,7 @@
 // §5.7 "retry 3× with jitter inside one run, then stop and report"; plan 06 §1.2 per-job pipeline,
 // §2 season awareness + per-job lock; plan 05 §4.1 "network error on refresh" row; OBJ-22/OBJ-27).
 // version() → (release unchanged → recordUnchanged) → fetch → assertSchema → publisher.publish(fill
-// via source.publish) → outcome. Pure orchestration over injected HttpGet/Clock/Rng/publisher/temp
+// via source.publish; the unchanged check re-made under the job lock) → outcome. Pure orchestration over injected HttpGet/Clock/Rng/publisher/temp
 // area: no Date.now, no Math.random, no process globals. Never throws: every path returns a result.
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -13,7 +13,12 @@ import type { IsoInstant, Week } from "../domain/league/types.js";
 import { HttpError, isNetworkFailure, isTransientNetworkError } from "../http/errors.js";
 import { createRateLimiter, limitDownload, limitGet } from "../http/limiter.js";
 import { abortableSleep, type Sleep } from "../http/sleep.js";
-import type { DatasetPublisher, PublishOutcome, PublishStats } from "../store/types.js";
+import {
+  PUBLISH_ALREADY_CURRENT,
+  type DatasetPublisher,
+  type PublishOutcome,
+  type PublishStats,
+} from "../store/types.js";
 import type {
   DataSource,
   HttpDownload,
@@ -362,13 +367,23 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
 
       let outcome: PublishOutcome;
       try {
-        outcome = await deps.publisher.publish(id, v.version, v.released_at, (w) =>
-          source.publish(files, w),
+        outcome = await deps.publisher.publish(
+          id,
+          v.version,
+          v.released_at,
+          (w) => source.publish(files, w),
+          // the "unchanged" check above ran without the job lock: re-made under it (single-flight)
+          { skipIfCurrent: source.versioning === "release" && req.force !== true },
         );
       } catch {
         return await fail("publish", "the publisher failed");
       }
       if (!outcome.ok) {
+        if (outcome.error === PUBLISH_ALREADY_CURRENT) {
+          // another refresh published this release while we fetched; its check time was recorded
+          deps.log?.info("refresh.unchanged", { source: id, version: v.version });
+          return { status: "unchanged", source: id, version: v, attempts };
+        }
         if (outcome.error.startsWith(JOB_LOCKED_ERROR)) {
           deps.log?.info("refresh.skipped", { source: id, reason: "locked" });
           return { status: "skipped", source: id, reason: "locked" };
