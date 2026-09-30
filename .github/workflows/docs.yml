@@ -1,6 +1,8 @@
 # docs — validates the documents on every change: every ```mermaid block must render, every internal
-# Markdown link must resolve. Spec: docs/plan/04-repo-structure-and-ci.md §4.2 (the `skills` and
-# `docs-current` jobs arrive with `skills/` and `package.json`); docs/plan/06-automation-inventory.md
+# Markdown link must resolve, and the Skills pass Lane 1 (`skills` job: build-skills --check +
+# check-skills, plan 09 §5.1 items 1–6; the fixture dry run, item 7, is tests/e2e in ci.yml's
+# `process` job). Spec: docs/plan/04-repo-structure-and-ci.md §4.2 (`docs-current` arrives later);
+# docs/plan/06-automation-inventory.md
 # §1.1. Both checkers are dependency-free (scripts/README.md) and each job first proves its checker
 # can FAIL, on scripts/docs-check-selftest/, before running it on the tree.
 #
@@ -47,6 +49,14 @@ on:
       - "scripts/puppeteer-config.json"
       - "scripts/docs-check-selftest/**"
       - ".github/workflows/docs.yml"
+      # the skills job (JSON-only eval edits must trigger it too)
+      - "skills/**"
+      - "scripts/skills/**"
+      - "src/mcp/envelope.ts"
+      - "src/mcp/errors.ts"
+      - "src/mcp/registry.ts"
+      - "package.json"
+      - "tests/smoke/expected-tools.json"
   pull_request:
     paths:
       - "**/*.md"
@@ -57,6 +67,14 @@ on:
       - "scripts/puppeteer-config.json"
       - "scripts/docs-check-selftest/**"
       - ".github/workflows/docs.yml"
+      # the skills job (JSON-only eval edits must trigger it too)
+      - "skills/**"
+      - "scripts/skills/**"
+      - "src/mcp/envelope.ts"
+      - "src/mcp/errors.ts"
+      - "src/mcp/registry.ts"
+      - "package.json"
+      - "tests/smoke/expected-tools.json"
   workflow_dispatch:
 
 permissions:
@@ -148,3 +166,26 @@ jobs:
 
       - name: Check every internal link in the tree
         run: node scripts/check-links.mjs
+
+  skills:
+    name: skills
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Assert Node >= 22
+        run: |
+          node --version
+          node -e 'const major = Number(process.versions.node.split(".")[0]); if (major < 22) { console.error("Node >= 22 required, found " + process.version); process.exit(1); }'
+
+      # built-ins only (scripts/skills/*.mjs) — no npm ci; the negative self-test is tests/skills/**,
+      # which ci.yml's test job runs
+      - name: Built Skills are up to date (build-skills --check)
+        run: node scripts/skills/build-skills.mjs --check
+
+      - name: Lane 1 structural check (check-skills)
+        run: node scripts/skills/check-skills.mjs

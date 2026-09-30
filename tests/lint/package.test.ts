@@ -91,6 +91,13 @@ describe("package.json", () => {
     for (const s of banned) expect(pkg.scripts?.[s], s).toBeUndefined();
   });
 
+  it("`npm test` and coverage run the unit project; process suites are their own script", () => {
+    expect(pkg.scripts?.test).toBe("vitest run --project unit");
+    expect(pkg.scripts?.["test:coverage"]).toBe("vitest run --project unit --coverage");
+    expect(pkg.scripts?.["test:process"]).toBe("vitest run --project process");
+    expect(pkg.scripts?.["check:skills"]).toContain("--check");
+  });
+
   it("defines the scaffold scripts", () => {
     for (const s of [
       "build",
@@ -105,6 +112,10 @@ describe("package.json", () => {
       "check:runtime-tree",
       "check:coverage",
       "pack:scan",
+      "test:process",
+      "smoke",
+      "build:skills",
+      "check:skills",
     ]) {
       expect(pkg.scripts?.[s], s).toBeTypeOf("string");
     }
