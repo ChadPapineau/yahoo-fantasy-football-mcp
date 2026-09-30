@@ -120,6 +120,12 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
    having been approved through the new form yet**. Approval for a
    personal, single-league tool is therefore an open risk, not a formality.
    A legacy app that still works would be valuable — check before applying.
+   **Resolved 2026-09-30: Chad has no existing Yahoo developer app.** The
+   application is the only path; recommended framing: personal use, one
+   user, one league, read-only, locally-run open-source tool, low cached
+   request volume. Until approval, all Yahoo-layer work is built and
+   tested against recorded, anonymized fixtures; the analytics layer
+   needs no Yahoo access.
 5. **Two public repos contain real Yahoo credentials/tokens in their git
    history** (`carterfawson/fantasy-football-mcp` and
    `derekrbreese/fantasy-football-mcp-public`; verified by the orchestrator
