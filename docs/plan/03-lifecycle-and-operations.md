@@ -38,7 +38,7 @@ Order matters: **nothing on the startup path touches the network**, because clie
 6. `serveStdio(...)` (SDK v2, dual era). Log one `info` line: version, node, store path, auth state, tools registered.
 7. Start the parent watchdog (§1.3) — a `setInterval(…, 5000).unref()` so it never keeps the loop alive on its own.
 
-Total startup target: **< 300 ms** on a warm disk (a test asserts < 1 s without network).
+Total startup target: **< 300 ms** on a warm disk (a test asserts < 1 s without network — plan 05 §4.2, on a fresh store with the plan 05 §3.2 fixture dataset files, ≤ 300 KB each, attached; plan 05 T10's data-size rule, round 2).
 
 ### 1.2 Steady state
 
