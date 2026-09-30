@@ -28,7 +28,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 | 13 | D.2 items (Yahoo-dependency header tag ×10 here; cannot-rule G2; FF_TOOLSET default G4; re-tag sweep in C) | [x] | a472362 |
 | 14 | T1–T13 per plan 10 §4 + log §1.3 additions (T2 in G7; T8/T9 in G9; rest here) | [x] | ce8843d |
 | C | Consistency pass (xrefs, decisions tables, assumptions tables; Mermaid proven by the final docs run) | [x] | 6a7c567 |
-| L | `docs/plan/changelog.md` `## Round 1` | [ ] | — |
+| L | `docs/plan/changelog.md` `## Round 1` | [x] | 96714c1 |
 | F | Final reply: SHAs per group, run URLs, landing table, could-not-apply, choices, xref fixes | [ ] | — |
 
 ### Could not apply
@@ -58,4 +58,4 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 - Plan 07 C3 "34 read tools (19 P0 + 15 P1)" was a miscount: the P1 list (C3, D1, D4–D6, E4, E6–E11, E15, G2) is 14. After OBJ-21 (E15, G2 → later; E10 → P2): v1 = 31 (19 P0 + 11 P1 + 1 P2); Phase 2 tools/list = 30 under `FF_TOOLSET=full`. Plan 10 B10/B12 said 34 → fix to 30 (G4).
 
 ### Notes
-- WIP patch (if any): `docs/scratch/plan-reviser.wip.patch` — retired in the final commit.
+- WIP patch: none was ever needed — every group was committed and pushed within its own working window (14 topic commits + consistency + changelog, each followed by a scratch commit), so no `.wip.patch` exists to retire.
