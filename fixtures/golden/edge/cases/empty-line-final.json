@@ -1,0 +1,23 @@
+{
+  "name": "empty-line-final",
+  "case": "Empty stat line, final week",
+  "source": "plan 08 §8; research 05 §15",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {}
+      },
+      "expected": {
+        "points": 0,
+        "points_exact": 0,
+        "complete": true,
+        "unmapped": [],
+        "ignored": [],
+        "contributions": 0
+      }
+    }
+  ]
+}

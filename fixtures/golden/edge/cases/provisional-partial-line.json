@@ -1,0 +1,40 @@
+{
+  "name": "provisional-partial-line",
+  "case": "Provisional week with a scoring category absent: complete = false; final week: true",
+  "source": "plan 08 §4.5, P10",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": true,
+        "values": {
+          "pass_yd": 100
+        }
+      },
+      "expected": {
+        "points": 4,
+        "points_exact": 4,
+        "complete": false,
+        "unmapped": [],
+        "ignored": []
+      }
+    },
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {
+          "pass_yd": 100
+        }
+      },
+      "expected": {
+        "points": 4,
+        "points_exact": 4,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    }
+  ]
+}

@@ -25,6 +25,7 @@ export {
   deriveBrackets,
   FAMILY_SCALAR,
   familyKind,
+  familyScalar,
   parseBinCanonical,
   slugFamily,
 } from "./brackets.js";

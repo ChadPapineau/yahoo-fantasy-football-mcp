@@ -4,7 +4,7 @@
 // bonuses, several entries sum), §4.4 / E4 (negative floor + verified-only rounding), §4.5 (missing
 // vs unknown; `complete`), §5 / E5 / E8 (distribution over SCORED SAMPLES, never the scaled mean;
 // `basis` stamped on the Dist).
-import { bracketize, FAMILY_SCALAR } from "./brackets.js";
+import { bracketize, familyScalar } from "./brackets.js";
 import { ScoringError } from "./errors.js";
 import { at, denoise, MAX_ABS_MODIFIER, MAX_ABS_STAT, stableSum } from "./numeric.js";
 import { unmappedIds } from "./settings.js";
@@ -101,7 +101,7 @@ function compile(settings: ScoringSettings): Compiled {
       if (family.members.length === 0)
         throw badSettings("bracket family has no members", [family.family]);
       const modifiers = family.members.map((m) => modifierOf.get(m.canonical) ?? null);
-      const scalar = family.kind === "indicator" ? (FAMILY_SCALAR[family.family] ?? null) : null;
+      const scalar = family.kind === "indicator" ? familyScalar(family.family) : null;
       for (const m of family.members) {
         members.add(m.canonical);
         consumed.add(m.canonical);

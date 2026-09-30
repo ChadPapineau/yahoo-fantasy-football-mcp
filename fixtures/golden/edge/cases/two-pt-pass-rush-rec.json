@@ -1,0 +1,24 @@
+{
+  "name": "two-pt-pass-rush-rec",
+  "case": "2-pt conversions by pass/rush/rec sum into one canonical two_pt [U-1]",
+  "source": "plan 08 §8, §3.2",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "nflverse_player": {
+        "position": "QB",
+        "passing_yards": 0,
+        "passing_2pt_conversions": 1,
+        "rushing_2pt_conversions": 1,
+        "receiving_2pt_conversions": 0
+      },
+      "expected": {
+        "points": 4,
+        "points_exact": 4,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    }
+  ]
+}
