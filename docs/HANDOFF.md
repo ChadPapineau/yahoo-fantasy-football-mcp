@@ -44,7 +44,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | phase | status | artefacts |
 |---|---|---|
 | 0 — repo setup | ✅ done | `.gitignore`, `.env.example`, `main` pushed, description + 14 topics applied via `gh`, tooling inventory (`docs/research/00-*`) |
-| 1 — research (waves 1–3) | 🟢 01–05 ✅ verified · 06 running (`skills-mcp-researcher`) | `docs/research/01-*` … `06-*` |
+| 1 — research (waves 1–3) | ✅ 01–06 all verified by the orchestrator (SHAs on origin, identifier scan, one load-bearing claim per doc checked at source) | `docs/research/01-*` … `06-*` |
 | 2 — plan | 🟢 core planner running (`docs/plan/01-*`…`06-*`); product planner ⚪ waits for 06 + core plan | `docs/plan/` |
 | 3 — adversarial review | ⚪ | `docs/plan/adversarial-log.md`, changelog |
 | docs — README, LICENSE, SECURITY.md | ⚪ | root + `docs/README.md` |
@@ -59,6 +59,18 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 2026-09-29 | Stack default: Node/TypeScript + official MCP SDK | matches Chad's other local MCP servers; deviations must be justified in the plan |
 | 2026-09-29 | Concurrency capped at two agents | Chad's credit-efficiency rule (2026-09-24) |
 | 2026-09-29 | Orchestration artefacts (roster, verbatim briefs, program) are committed in `docs/scratch/` | resumability after usage-limit cutoffs |
+
+## Confirmation-gate facts (verified 2026-09-29)
+
+- MCP spec current revision is **2026-07-28**; elicitation is a
+  client-offered feature (modelcontextprotocol.io/specification/latest).
+- Claude Code supports form-mode elicitation (doc 06 §A.3, v2.1.76+ —
+  relayed, not re-verified). **Claude Desktop: unverified** —
+  `anthropics/claude-code#41110` ("MCP elicitation support in Claude
+  Desktop app") is closed `completed` with only a bot comment; no positive
+  evidence either way. The plan therefore treats elicitation as an
+  optional layer over the two-step `prepare_*`/`commit_*` token gate, which
+  works on every client, and never as the sole confirmation mechanism.
 
 ## Yahoo terms the plan must honor (verified on sports.yahoo.com/developer, 2026-09-29)
 
