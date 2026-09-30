@@ -6,21 +6,21 @@
 version: 1
 
 league:
-  key: example                # league key manual.l.example
+  key: example # league key manual.l.example
   name: Example League
   season: 2026
   num_teams: 12
   scoring_type: head
   start_week: 1
   end_week: 17
-  lineup_lock: per_game       # each player locks at his own kickoff
+  lineup_lock: per_game # each player locks at his own kickoff
   playoffs:
     start_week: 15
     num_teams: 6
 
 scoring:
   preset: half_ppr
-  overrides:                  # the validation league's values, stated explicitly
+  overrides: # the validation league's values, stated explicitly
     pass_td: 4
     rush_td: 6
     rec_td: 6

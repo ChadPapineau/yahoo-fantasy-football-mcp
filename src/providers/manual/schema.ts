@@ -261,5 +261,21 @@ function reasonOf(issue: z.core.$ZodIssue): string {
  * Never the input value, never an unknown key's name (a key is file content too).
  */
 export function issuesOf(error: z.ZodError): LeagueFileIssue[] {
-  return error.issues.slice(0, 50).map((i) => ({ path: formatPath(i.path), reason: reasonOf(i) }));
+  const out: LeagueFileIssue[] = [];
+  const walk = (issues: readonly z.core.$ZodIssue[], prefix: readonly PropertyKey[]): void => {
+    for (const i of issues) {
+      if (out.length >= 50) return;
+      const at = [...prefix, ...i.path];
+      // A roster entry is a player OR a defence: report the branch the entry came closest to
+      // (fewest issues), so `position: LB` reads as a bad position rather than "matches no shape".
+      if (i.code === "invalid_union" && i.errors.length > 0) {
+        const best = i.errors.reduce((a, b) => (b.length < a.length ? b : a));
+        walk(best, at);
+        continue;
+      }
+      out.push({ path: formatPath(at), reason: reasonOf(i) });
+    }
+  };
+  walk(error.issues, []);
+  return out;
 }
