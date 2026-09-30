@@ -284,3 +284,266 @@ Other ids exist in the game-wide universe (e.g. `0` = GP, `81` = Rush 1st Downs,
   A single normaliser that (a) converts `{count, "0".."n"}` to arrays, (b) merges lists of single-key objects into one object, and (c) coerces numerics, makes the rest of the API tractable. Alternatively parse the XML directly — it is regular and self-describing; the JSON saves nothing.
 - **Error shapes** [V-probe S-PROBE]: JSON `{"error":{"lang":"en-US","description":"Please provide valid credentials. OAuth oauth_problem=\"...\", realm=\"yahooapis.com\""}}`; XML `<yahoo:error xmlns:yahoo='http://yahooapis.com/v1/base.rng' xml:lang='en-US'><yahoo:description>...</yahoo:description></yahoo:error>`. yfpy additionally recognises a "data not found" description for empty resources and raises `YahooFantasySportsDataNotFound` [V-community S-YFPY `query.py`].
 - **Status codes**: `200` GET/PUT success; `201` POST success [V-community S-SPILCHEN]; `401` auth (`token_rejected`, `additional_authorization_required`, `unable_to_determine_oauth_type`) [V-probe/V-community]; `403` app not authorized [V-community S-ISS-YFPY84]; `999` rate-limited [V-community S-YFPY `query.py:435-437`]; `400` for malformed write XML and the body shape of write errors [U].
+
+---
+
+## C. Write surface
+
+**Precondition for all of §C:** the app must hold Read/Write Fantasy permission — "select either Read or Read/Write access for Fantasy Sports" [V-official S-DOCS] — and today "The Yahoo Fantasy Sports API currently provides read access only. Write access is not available at this time." [V-official S-ACCESS]. Everything below is therefore **design-time knowledge** until Yahoo grants write access on application. What a read-only app receives on a PUT/POST (expected 401/403, exact body): [U].
+
+### C.1 Lineup changes — `PUT team/{team_key}/roster`
+
+- Operation and URI: "You can use this API to edit your lineup by PUTting up new positions for the players on a roster" — `PUT https://fantasysports.yahooapis.com/fantasy/v2/team/{team_key}/roster` [V-official S-DOCS Roster Resource, "HTTP Operations Supported: GET, PUT"].
+- Request header `Content-Type: application/xml`; success is `200` [V-community S-SPILCHEN `yhandler.py` `put()`].
+- **Request body** — the official page describes PUT in prose only; the body below is what the Python wrapper sends and is consistent with Yahoo's transaction XML [V-community S-SPILCHEN `team.py` `_construct_change_roster_xml`]:
+
+```xml
+<?xml version="1.0"?>
+<fantasy_content>
+  <roster>
+    <coverage_type>week</coverage_type>
+    <week>{week}</week>
+    <players>
+      <player>
+        <player_key>{game_id}.p.{player_id}</player_key>
+        <position>{slot}</position>
+      </player>
+      <!-- one <player> per player whose slot changes -->
+    </players>
+  </roster>
+</fantasy_content>
+```
+
+  For daily sports `coverage_type` is `date` with `<date>YYYY-MM-DD</date>`. The wrapper sends only the players being moved (a partial list) [V-community]; whether Yahoo also accepts/requires the full roster: [U]. A swap (starter ↔ bench) is two `<player>` entries in one PUT.
+- `{slot}` values are the league's `roster_positions` names: in NFL `QB, WR, RB, TE, W/R/T, K, DEF, BN, IR` [V-official S-DOCS settings + roster samples]. Eligibility is per player `eligible_positions` [V-official]; flex `W/R/T` accepts WR/RB/TE and the roster marks it with `is_flex=1` [V-official sample field].
+- **IR / IL moves** (Yahoo product rules, [V-official S-HELP-28136]): eligible designations are "IR (Injured Reserve), NFI-R (Non-Football Injury (Reserve)), NFI-A (Non-Football Injury (Active)), O (Out) and Physically Unable to Perform (PUP)"; ineligible are "D (Doubtful), NA (Not Active), P (Probable), Q (Questionable), CEL (Commissioner's Exempt List) and SUSP (Suspended)". A player cannot be added straight into IR unless the commissioner enables it (`allow_add_to_dl_extra_pos` in settings is the likely flag [V-official field; mapping U]); activating from IR requires an open active slot; once an IR'd player is activated in real life "you can't complete any transaction that adds a player until you activate the once 'out' player on your fantasy team". API mapping: the player's `status` field (§B.4) must be in the eligible set for `<position>IR</position>` to succeed; the API's enforcement and its error text: [U].
+- **Locked players**: by default a player locks at "The start of the player's real-life game" [V-official S-HELP-6775]; a league may instead use weekly lineups (league metadata `weekly_deadline` [V-official field; value semantics U]). The roster response carries `is_editable` at roster level [V-official sample] and per player [V-community S-YFPY `Player.is_editable`]; `edit_key` on the league is the currently editable week [V-official field]. A PUT that touches a locked player is rejected [product behaviour; API error shape U].
+- **Errors**: wrappers raise on any non-200 and surface the response body [V-community S-SPILCHEN]. Auth errors use the `<yahoo:error>` envelope (§B.6) [V-probe]; validation-error bodies for illegal moves (wrong slot, locked player, IR-ineligible, roster limit): [U].
+
+### C.2 Add / drop / waiver claims — `POST league/{league_key}/transactions`, `PUT|DELETE transaction/{key}`
+
+All XML in this subsection is Yahoo's own, quoted from the reference [V-official S-DOCS, Transactions Collection "POST" and Transaction Resource "PUT"/"DELETE"]. Success for POST is `201` [V-community S-SPILCHEN].
+
+**Add a free agent**
+```xml
+<fantasy_content>
+  <transaction>
+    <type>add</type>
+    <player>
+      <player_key>{player_key}</player_key>
+      <transaction_data>
+        <type>add</type>
+        <destination_team_key>{team_key}</destination_team_key>
+      </transaction_data>
+    </player>
+  </transaction>
+</fantasy_content>
+```
+
+**Drop**
+```xml
+<fantasy_content>
+  <transaction>
+    <type>drop</type>
+    <player>
+      <player_key>{player_key}</player_key>
+      <transaction_data>
+        <type>drop</type>
+        <source_team_key>{team_key}</source_team_key>
+      </transaction_data>
+    </player>
+  </transaction>
+</fantasy_content>
+```
+
+**Add + drop in one transaction** — `<type>add/drop</type>` with a `<players>` list holding one `add` player (`destination_team_key`) and one `drop` player (`source_team_key`) [V-official].
+
+**Waiver claim (with FAAB bid)** — the same POST against a player whose league status is `W`: "the players will not be immediately added to your team, but rather, you will be returned back a waiver claim that will be processed at some point in the future. Various league rules will control in which conditions you will actually receive [the player]". In a FAAB league add `<faab_bid>` at transaction level:
+```xml
+<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <type>add/drop</type>
+    <faab_bid>25</faab_bid>
+    <players>
+      <player>
+        <player_key>{player_key_to_add}</player_key>
+        <transaction_data>
+          <type>add</type>
+          <destination_team_key>{team_key}</destination_team_key>
+        </transaction_data>
+      </player>
+      <player>
+        <player_key>{player_key_to_drop}</player_key>
+        <transaction_data>
+          <type>drop</type>
+          <source_team_key>{team_key}</source_team_key>
+        </transaction_data>
+      </player>
+    </players>
+  </transaction>
+</fantasy_content>
+```
+  Note: Yahoo's own FAAB sample writes `destination_team_key` inside the *drop* player's `transaction_data`, which contradicts its plain drop sample and the wrapper (`source_team_key` for drops) [V-official S-DOCS vs S-SPILCHEN `_construct_transaction_player_xml`]. Treat the sample as a documentation typo and use `source_team_key`; confirm live [U].
+
+**Edit a pending claim's priority or bid** — `PUT transaction/{claim_key}`; "You can only PUT to Transactions of the types waiver or pending_trade":
+```xml
+<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <transaction_key>{game}.l.{league}.w.c.{claim_id}</transaction_key>
+    <type>waiver</type>
+    <waiver_priority>1</waiver_priority>
+    <faab_bid>20</faab_bid>
+  </transaction>
+</fantasy_content>
+```
+  Whether both fields may be sent in a league that uses only one of the mechanisms: [U].
+
+**Cancel a claim or a proposed trade** — `DELETE transaction/{key}`: "you may cancel any pending waiver claim or proposed trade ... You can only DELETE transactions of the types waiver or pending_trade if the pending trade has not yet been accepted" [V-official].
+
+**Discovering pending items** — `league/{league_key}/transactions;types=waiver,pending_trade;team_key={team_key}`; "if you don't have the transaction_key for a waiver claim or pending trade, the only way to discover these transactions is to filter the league Transactions collection by a particular type (waiver or pending_trade) and by a particular [team_key]" [V-official]. Waiver claim keys look like `461.l.1000.w.c.2_6461` (documentation example) — the claim id is not a plain integer.
+
+**Team-level counters** relevant to add/drop limits: `number_of_moves`, `number_of_trades`, `roster_adds {coverage_type=week, coverage_value, value}` (adds this week) on the Team resource [V-official sample]; `faab_balance` [V-community S-YFPY].
+
+### C.3 Trades
+
+- **Propose** — `POST league/{league_key}/transactions` [V-official]:
+```xml
+<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <type>pending_trade</type>
+    <trader_team_key>{my_team_key}</trader_team_key>
+    <tradee_team_key>{their_team_key}</tradee_team_key>
+    <trade_note>{free text}</trade_note>
+    <players>
+      <player>
+        <player_key>{my_player}</player_key>
+        <transaction_data>
+          <type>pending_trade</type>
+          <source_team_key>{my_team_key}</source_team_key>
+          <destination_team_key>{their_team_key}</destination_team_key>
+        </transaction_data>
+      </player>
+      <player>
+        <player_key>{their_player}</player_key>
+        <transaction_data>
+          <type>pending_trade</type>
+          <source_team_key>{their_team_key}</source_team_key>
+          <destination_team_key>{my_team_key}</destination_team_key>
+        </transaction_data>
+      </player>
+    </players>
+  </transaction>
+</fantasy_content>
+```
+  Multi-player trades are more `<player>` entries. The response is a `pending_trade` transaction with key `{game}.l.{league}.pt.{id}` [V-official key format].
+- **Respond** — `PUT transaction/{pt_key}` with `<type>pending_trade</type>` and `<action>` [V-official, each with its own sample]:
+  - `accept` (+ optional `<trade_note>`) — by the tradee;
+  - `reject` (+ `<trade_note>`) — by the tradee;
+  - `allow` / `disallow` — "you're the commissioner of a league that has the commissioner approve trades";
+  - `vote_against` + `<voter_team_key>{team_key}</voter_team_key>` — "a league that allows managers to vote against trades".
+  Which of these apply is governed by `trade_ratify_type` (sample value `vote`; the commissioner and no-review values [U]) and `trade_reject_time` (days) in settings [V-official fields].
+- **Cancel** — `DELETE transaction/{pt_key}` while not yet accepted [V-official].
+- **Not available** [V-official negative — no XML element or action documented]: counter-offers (propose a new trade instead), draft-pick trades (settings expose `can_trade_draft_picks` [V-community S-SPILCHEN sample] but the trade XML only carries `<player>` elements — [U] whether picks are accepted via an undocumented element), commissioner "process now"/veto beyond `disallow`, and any trade-block or trade-value endpoint.
+
+### C.4 Which operations need `fspt-w`
+
+| Operation | Verb | Permission |
+|---|---|---|
+| Every read in §B | GET | Read (`fspt-r`) [V-official "Read or Read/Write"] |
+| Set lineup (`team/{key}/roster`) | PUT | Read/Write (`fspt-w`) |
+| Add / drop / add-drop / waiver claim / propose trade (`league/{key}/transactions`) | POST | Read/Write |
+| Edit claim, accept/reject/allow/disallow/vote on trade (`transaction/{key}`) | PUT | Read/Write |
+| Cancel claim or trade (`transaction/{key}`) | DELETE | Read/Write |
+
+The official docs distinguish only "Read" from "Read/Write"; that every non-GET verb requires the latter is the only consistent reading [V-official at that granularity]. Because write access is "not available at this time" [V-official S-ACCESS], the product must be **fully useful read-only** and treat every write tool as a capability that appears only when the granted scope includes it (§G).
+
+---
+
+## D. Limits and behaviour
+
+### D.1 Rate limits and throttling
+
+- **Documented numbers: none.** The reference contains no rate-limit section (0 hits for "rate limit"/"throttle" in S-DOCS text); the Fantasy API Terms of Use URL returns 404 [V-official negative]. The portal's only statement: "If individual usage is excessive over the course of short periods of time or impacts performance, we may temporarily throttle or limit access." [V-official S-PORTAL]. The portal also imposes an **attribution requirement** — "Developers using the Yahoo Fantasy Sports API must provide clear attribution by including 'Fantasy data provided by Yahoo Fantasy' within their products and applications which link back to Yahoo Fantasy" — and forbids automated account creation and "reverse engineering" [V-official S-PORTAL]; those are product obligations, not limits.
+- **Observed by the community** [V-community]:
+  - Throttling returns **HTTP status `999`**: "when you exceed Yahoo's allowed data request limits, they throw a request status code of 999" [S-YFPY `query.py:435-437`].
+  - The body is an HTML/plain "Request denied" page, which crashes naive JSON parsing, and the block is "for a short period of time based on the app ID we have registered on their developer portal" [S-ISS-WAD81] — i.e. **the limit is per client id, shared by all of the app's users**.
+  - Rapid sequential calls (two seasons of weekly scoreboards) produced `RemoteDisconnected` (connection dropped) rather than a status code [S-ISS-YFPY51, unanswered by the maintainer].
+  - No one has published the threshold, window, or block duration; "I haven't been able to find any documentation with Yahoo on rate limits" [S-ISS-YFPY51]. `429` was not reported for this API [V-community negative].
+  - yfpy's policy: on non-2xx, retry up to 3 times with `sleep(0.3 × attempt)`; on `401` re-authenticate first [S-YFPY `query.py`].
+- Design consequences: a **single global limiter per client id** in the server (not per user); treat `999`, `429`, `5xx`, connection resets and non-XML/JSON bodies as retryable with exponential backoff and jitter; cache every GET for at least the response's `refresh_rate` (60 s, §D.2); batch `player_keys` in 25s and use `out=`/chained sub-resources to cut call counts (e.g. one `team/{key}/roster;week=N/players;out=stats,ownership,percent_owned` call instead of four).
+
+### D.2 Data freshness, finalisation, roster lock
+
+- **Response-level hint**: every league/team/player/transaction sample carries `refresh_rate="60"` [V-official S-DOCS] — Yahoo's own statement that the payload is good for 60 s. Poll no faster.
+- **Live games**: the site scores live and the API's `team_points`/`player_points` reflect live stats during games [V-community — every live-scoreboard wrapper relies on it]; update cadence within the 60-s window: [U].
+- **Official finalisation** [V-official S-HELP-6868, verbatim]: "All official player scoring, live data corrections and league standings are normally updated by 8:00am Pacific Time the morning after the game(s)." For football, "official stat corrections can be applied up until the first real life game in the next matchup week", and "If stat corrections aren't received by 11:59 p.m. P.T. at the end of the Game Week, they won't be applied as that week's Head-to-Head is no longer active." → A week's `player_points`, `team_points` and matchup `winner_team_key` are **provisional until the next week's first kickoff (typically Thursday night)**; cache invalidation must respect that.
+- `league_update_timestamp` (epoch) is present in league metadata [V-official field]; what it tracks (settings change vs data refresh): [U].
+- **Roster lock** [V-official S-HELP-6775 for the product rule]: default deadline for moving players is "The start of the player's real-life game" (per-player lock); private leagues may choose a weekly lineup lock. The API mirrors this through `is_editable` on the roster and player [V-official / V-community], `edit_key` (current editable week) and `weekly_deadline` on the league [V-official fields]. Waivers: sample `waiver_rule=gametime` means dropped players and players whose game has started go through waivers [V-official value; rule semantics are Yahoo product knowledge]; claims process after `waiver_time` days [V-official field; the overnight processing hour: U].
+- **Bye weeks** are static per player (`bye_weeks.week`); **game weeks** with start/end dates come from `game/nfl/game_weeks` [V-official] — use them to map "current NFL week" without a second data source.
+
+### D.3 Region-locked, deprecated, or changing
+
+- **Access model changed in 2026** (timeline from community reports, dates as stated in the sources): write access removal first reported around 2025-10; the new portal `sports.yahoo.com/developer` launched around 2026-05; the old guide began 308-redirecting around 2026-05-29 [V-probe today]; on **2026-07-22 all Fantasy endpoints started returning 403 for previously authorised apps**; by 2026-08-11 the YDN app-creation form no longer offered a "Fantasy Sports (Read)" permission, so newly created apps get valid OAuth credentials that are not entitled to the Fantasy API [V-community S-ISS-YFPY84, S-ISS-DRB18]. Only the per-client-id application route remains [V-official S-ACCESS].
+- **Docs are partly stale** [V-official text vs V-community reality]: S-DOCS still instructs "follow the New API Key flow on the Yahoo Developer Network (YDN) ... select either Read or Read/Write access for Fantasy Sports" — that option no longer exists. Sample responses are from the 2019 season (game 390) while the URI examples were updated to 2025 (game 461). The "Sample Code" links are PHP gists. `xoauth_yahoo_guid` in the token response is marked deprecated [V-official S-OAUTH-FLOW].
+- **OAuth 1.0a is gone**: "The Yahoo Fantasy Sports API requires Oauth 2.0" [V-official S-DOCS]. The old guide's 2-legged "public requests" for public leagues survive only in the community mirror [S-MIRROR]; whether public-league reads still work with app-only credentials: [U] (the credential-free probe got 401, so at least app credentials are required).
+- **Region**: no region restriction is stated anywhere [U]. Yahoo Fantasy Football is a US/Canada product; the API host answered from a US region (`x-envoy-decorator-operation: ...use1...`) [V-probe].
+- **JSON via `format=json`** is undocumented and could disappear; XML is the documented contract [V-official negative for JSON].
+
+---
+
+## E. Gaps — what the product wants that Yahoo does not provide
+
+Each item is a clean negative against the official resource list (`game, league, team, roster, player, transaction, user` and their sub-resources) [V-official S-DOCS] and the wrappers' models [V-community S-YFPY, S-SPILCHEN]. These feed the other research agents.
+
+| Gap | What Yahoo has instead | Needed from elsewhere |
+|---|---|---|
+| **Player projections** (weekly, ROS, per-stat) | `team_projected_points` per team per week; `win_probability` per matchup | Any per-player projection source; Yahoo's own consensus/"Fantasy Plus" projections are UI-only |
+| Player **news / notes text** | `has_player_notes`, `has_recent_player_notes`, `player_notes_last_timestamp` (flags) | News feed with text |
+| **Injury detail** beyond a designation | `status` (IR/O/Q/D/PUP/...), `status_full`, `injury_note` (body part) | Practice reports, expected return, game-time decisions |
+| **Usage metrics** — snap counts, routes, air yards, red-zone share, target share | `Targets` (78) and `Rush Att` (8) as display-only stats in league context; `player_advanced_stats` exists in yfpy's model with unknown content [U] | Usage/advanced stats provider |
+| **NFL schedule, opponent, matchup difficulty, defensive rankings** | `game/nfl/game_weeks` (dates only), player `editorial_team_key`, `bye_weeks` | Schedule + opponent data |
+| **Depth charts** | `primary_position`, `eligible_positions` only | Depth-chart source |
+| **Betting lines, totals, implied team totals, weather** | nothing | Odds/weather provider |
+| **Rankings / rest-of-season values / trade values** | `sort=OR` / `sort=AR` ordering (overall/actual rank as sort keys) and `draft_analysis` (ADP) — no rank value fields [U] | Expert consensus rankings, trade calculators |
+| **Cross-provider player identity** | Yahoo `player_id`/`player_key`, `editorial_player_key`, name, team, `uniform_number`, headshot | An id crosswalk (name+team+number matching, or a provider that carries Yahoo ids) |
+| **Transaction-history paging** | `count` only, most-recent-N | Local persistence of history if full-season audit is wanted |
+| **League FAAB budget** (starting amount) | `uses_faab`; per-team `faab_balance` [V-community] | Derive: max of `faab_balance` pre-season, or ask the user |
+| **Commissioner tools** (edit settings, force moves, lock/unlock, veto beyond `disallow`) | `commish` transactions are *readable* only | Not available; out of scope |
+| **Draft-room actions** (make a pick, auction bid) | `draftresults` read-only | Not available |
+| **League chat / messages** | `sendbird_channel_url`, `iris_group_chat_id` fields (identifiers only) | Not available |
+| **Push / webhooks / streaming** | none — polling only, `refresh_rate="60"` | Polling scheduler |
+| **Write access** at all, today | "Write access is not available at this time" | Application to Yahoo; product must be read-only-first |
+
+---
+
+## F. Unverified — to confirm with a live token (by name)
+
+1. `redirect_uri` on **refresh** — required or merely tolerated (Yahoo's sample includes it; wrappers always send it).
+2. **Refresh-token longevity** across months of inactivity (no documented expiry).
+3. **localhost/port rules** in the app form beyond the one data point (`https://localhost:5001/...` accepted; `http://` rejected); whether a `127.0.0.1` https URI or a non-default port range is refused.
+4. Behaviour of the **introspection** and **revocation** endpoints for Fantasy tokens.
+5. Exact response of a **read-only app** issuing PUT/POST (expected 401 `additional_authorization_required` or 403).
+6. Whether **`count > 25`** on the players collection is truncated or errors; whether **`start`** works on the transactions collection despite being undocumented.
+7. Whether `team_projected_points` is **populated pre-week** and how it moves mid-week; whether `player_advanced_stats` carries anything for NFL.
+8. The **full `game/nfl/stat_categories` list** (ids beyond the 36 in the settings sample, including bonus and IDP categories) and the wire form of yardage **bonuses** (`bonuses[{target, points}]` vs extra stat ids).
+9. Enumerations: `waiver_type` (beyond `R`), `waiver_rule` (beyond `gametime`, `all`), `trade_ratify_type` (beyond `vote`), `post_draft_players`, matchup `status` (`preevent`/`midevent` besides the sampled `postevent`), transaction `status` values for waivers/trades.
+10. Whether `max_weekly_adds` / `max_adds` (acquisition limits) appear in `settings` at all.
+11. **Roster PUT**: partial vs full player list; the error bodies for locked players, ineligible slots, IR-ineligible status, and whether `allow_add_to_dl_extra_pos` is the "add directly to IR" switch.
+12. The **FAAB sample's `destination_team_key` on the drop** — typo or accepted.
+13. Whether **draft picks** can be included in a trade via an undocumented element.
+14. **Rate-limit numbers**: threshold, window, block duration, and whether `429` ever appears; whether the limit is per client id only or also per user/IP.
+15. **Live update cadence** within the 60-s `refresh_rate` during games; what `league_update_timestamp` tracks; the hour at which waivers process.
+16. Whether **public leagues** are readable with app-only (2-legged) credentials, as the old guide allowed.
+17. Any **region** restriction on token issuance or API access.
+18. **Approval latency** for the access application, and whether write access is ever granted to small/individual products.
+
+---
+
+## G. The three facts that most constrain the architecture
+
+1. **Access is application-gated, per client id, read-only by default, and write is currently unavailable** [V-official S-ACCESS; V-community S-ISS-DRB18/S-ISS-YFPY84]. The product cannot be built on the assumption that a user can "create a Yahoo app and go"; it needs one approved client id owned by the product, a secret held server-side (no PKCE → confidential client), and a read-only-first design where lineup/waiver/trade tools are conditional capabilities.
+2. **There are no player-level projections in the API** — only a team-level weekly projected total and a win probability [V-official negative]. Every start/sit, waiver-target or trade-evaluation feature needs an external projection/news source and an id crosswalk keyed on name + team + number (Yahoo ids are Yahoo-only).
+3. **The league is fully self-describing from one call, and the data has a 60-second freshness contract with an undocumented, per-app rate limit.** `league/{key}/settings` yields `stat_modifiers`, `stat_categories` and `roster_positions` (a scoring engine and slot model with zero hard-coding) [V-official]; every response says `refresh_rate="60"`; throttling is HTTP `999` "Request denied" against the client id, shared by all users [V-community]. So: one global limiter, a 60-s cache keyed by URI, XML parsing (JSON is an undocumented transliteration), 25-per-page player paging, and weekly results treated as provisional until the next week's first kickoff.
