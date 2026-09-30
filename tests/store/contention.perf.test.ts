@@ -124,7 +124,7 @@ describe("A4a contention: a 3-s foreign writer lock", () => {
       expect(rec.e).toBeInstanceOf(StoreBusyError);
       expect((rec.e as StoreBusyError).ffCode).toBe("STORE_BUSY");
     }
-    expect(rec.ms, diag).toBeLessThanOrEqual(REQUIRED_WRITE_BUDGET_MS + 50);
+    expect(rec.ms, diag).toBeLessThanOrEqual(REQUIRED_WRITE_BUDGET_MS); // plan 05 §2: "≤ 1 s", literally
 
     // after the lock: writes go through again, nothing was silently dropped from the log
     await holder.waitFor(/^RELEASED$/, 10_000);

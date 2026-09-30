@@ -191,6 +191,14 @@ export const REQUIRED_POLL_MS = 20;
 /** How long a BEST-EFFORT write sleeps between non-blocking tries inside its BUSY_TIMEOUT_MS window. */
 export const BEST_EFFORT_POLL_MS = 10;
 
+/**
+ * The least wall clock a REQUIRED write reserves for one yield: its poll plus the longest
+ * synchronous stall this store itself can put on the event loop meanwhile (a best-effort write's
+ * BUSY_TIMEOUT_MS window plus one poll's overshoot). Observed longer yields raise it (see
+ * `required`), so STORE_BUSY lands within REQUIRED_WRITE_BUDGET_MS, not just after it.
+ */
+export const REQUIRED_STALL_RESERVE_MS = REQUIRED_POLL_MS + BUSY_TIMEOUT_MS + BEST_EFFORT_POLL_MS;
+
 const pauseCell = new Int32Array(new SharedArrayBuffer(4));
 /** Blocks this thread for about `ms` (a best-effort write's short wait is synchronous by design). */
 function blockFor(ms: number): void {
@@ -206,8 +214,9 @@ function blockFor(ms: number): void {
  * 36777995749: p95 551 ms). The bound is now the deadline plus one poll's overshoot, never a sum
  * of overshoots (plan 01 §5.3: "never a longer stall"). Required writes poll the lock
  * WITHOUT blocking (busy_timeout 0 for the attempt), yielding to the event loop for
- * REQUIRED_POLL_MS between tries, until the next try would overrun REQUIRED_WRITE_BUDGET_MS, then
- * reject with StoreBusyError (plan 03 §1.2). Decision recorded: polling instead of 100 ms blocking
+ * REQUIRED_POLL_MS between tries, until the next yield could overrun REQUIRED_WRITE_BUDGET_MS (it
+ * reserves the longest yield seen, at least REQUIRED_STALL_RESERVE_MS), then reject with
+ * StoreBusyError (plan 03 §1.2). Decision recorded: polling instead of 100 ms blocking
  * steps keeps tool reads flowing while a required write waits (plan 05 §2 p95 < 300 ms).
  */
 export class WriteExecutor {
@@ -261,7 +270,13 @@ export class WriteExecutor {
 
   async required<T>(table: StoreTable, fn: () => T): Promise<T> {
     const start = monoMs();
-    let longest = 0;
+    let longestTry = 0;
+    // A yield is not REQUIRED_POLL_MS of wall clock: the event loop runs other work first, and a
+    // concurrent best-effort write blocks it synchronously for up to REQUIRED_STALL_RESERVE_MS.
+    // Before sleeping, reserve the longest yield seen so far (never less than that floor), so
+    // the LAST yield still wakes inside the budget (A4a: the 3-s-lock run measured 982 ms of a
+    // 1,000 ms budget when only REQUIRED_POLL_MS was reserved).
+    let longestYield = REQUIRED_STALL_RESERVE_MS;
     for (;;) {
       const t0 = monoMs();
       try {
@@ -270,11 +285,12 @@ export class WriteExecutor {
         if (!isBusyError(e)) throw e;
       }
       const now = monoMs();
-      longest = Math.max(longest, now - t0);
+      longestTry = Math.max(longestTry, now - t0);
       const waited = now - start;
-      if (waited + REQUIRED_POLL_MS + longest > this.budgetMs)
+      if (waited + longestYield + longestTry > this.budgetMs)
         throw new StoreBusyError(table, Math.round(waited));
       await sleep(REQUIRED_POLL_MS);
+      longestYield = Math.max(longestYield, monoMs() - now);
     }
   }
 }
