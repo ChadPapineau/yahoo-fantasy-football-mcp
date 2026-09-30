@@ -6,36 +6,28 @@ Agent: yahoo-api-specialist. Brief: `docs/scratch/briefs/yahoo-api-specialist.md
 
 ## RESUME HERE
 
-**Status:** 2026-09-29 — research complete for A–E; writing `docs/research/03-yahoo-api.md`.
+**Status:** COMPLETE 2026-09-29. Deliverable `docs/research/03-yahoo-api.md` (549 lines) pushed.
 
 **Done**
-- Repo oriented; scratch doc pushed (`5d7618d`).
-- All primary sources fetched and grepped (see Source log). Key facts nailed down:
-  gated access (manual approval, read-only default), OIDC discovery (no PKCE
-  advertised), 1-h access token, refresh rotation, 401/403 shapes, full official
-  reference incl. players filters, roster PUT, transaction POST/PUT/DELETE XML,
-  NFL stat_id table + modifiers from the official settings sample, projections =
-  team-level `team_projected_points` only, `refresh_rate="60"`, 25/page cap
-  (community), 999/"Request denied" (community), IR eligibility (help.yahoo.com).
+- `docs/research/03-yahoo-api.md`: capability matrix (25 rows) + A auth + B read surface
+  (incl. NFL stat_id table from Yahoo's own settings sample, JSON-shape rules) + C write
+  surface (all XML from the reference; roster PUT body from wrapper source) + D limits /
+  freshness / deprecations + E gaps + F unverified list (18 items) + G the three
+  architecture constraints. Commits `422ad0f` (matrix, A, B) and `8e19974` (C–G).
+- No `.wip.patch` was needed (work landed as complete sections); nothing to retire.
 
-**Not done**
-- `docs/research/03-yahoo-api.md` not yet written (next).
+**Not done / open for the orchestrator**
+- 18 items in §F need a live token (none can be closed without an approved client id).
+- `docs/scratch/` is gitignored (`.gitignore:83`); this file is force-tracked by
+  explicit path. `program.md`, `roster.md`, `briefs/*` remain untracked on origin
+  unless someone decides the push rule beats the ignore rule.
+- The brief's `edwarddistel/yahoo-fantasy-sports-api` does not exist (404); the Node
+  wrapper is `whatadewitt/yahoo-fantasy-sports-api` and was used instead.
 
-**Next concrete step**
-- Write 03-yahoo-api.md: matrix + A + B, commit/push; then C + D + E + unverified
-  list, commit/push; retire any wip.patch; final reply with SHAs.
-
-**Blockers / findings for the orchestrator**
-- `docs/scratch/` is **gitignored** (`.gitignore:83`, pattern `scratch/`). This file
-  is force-added by explicit path (`git add -f`); `.gitignore` untouched.
-  `program.md`, `roster.md`, `briefs/*` are therefore NOT on origin.
-- The brief's third wrapper `edwarddistel/yahoo-fantasy-sports-api` does not exist
-  (404); the Node wrapper is `whatadewitt/yahoo-fantasy-sports-api` (npm
-  `yahoo-fantasy`). Used that instead.
-- **Architecture-critical:** Yahoo stopped self-serve provisioning of the Fantasy
-  API in summer 2026; access is by application with human review, read-only by
-  default; write (`fspt-w`) "not available at this time". The product cannot
-  assume write access.
+**Next concrete step (for whoever continues)**
+- When an approved client id exists: run the §F checklist top to bottom with one
+  read-only token, in a throwaway public league, and move each item from [U] to
+  [V-live] in 03-yahoo-api.md. Do not test writes until write scope is granted.
 
 ## Rules I am operating under (from the brief)
 - No Yahoo app, no authenticated calls, no real league/team/user identifiers.
