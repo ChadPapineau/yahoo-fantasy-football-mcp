@@ -7,9 +7,9 @@
     {
       "id": "SS-1",
       "phase": "1a",
-      "prompt": "Should I start Ja'Marr Chase or Deebo Samuel Sr. at flex?",
+      "prompt": "Should I start Jaxon Smith-Njigba or Keenan Allen at flex?",
       "fixture_variant": "ss-1-favourite-floor",
-      "setup": "Week 4, no slot locked. The league file has this week's opponent (Team B) and their roster; Team A is the projected favourite (mu_m > mu_o). Deebo Samuel Sr. is the higher-floor option.",
+      "setup": "Week 4, no slot locked. The variant adds { week: 4, team: 2 } to opponents, so Team B's roster is this week's opponent; Team A is the projected favourite (mu_m > mu_o). Jaxon Smith-Njigba (W/R/T) and Keenan Allen (BN) are the pair; Keenan Allen is the higher-floor option.",
       "expectations": [
         {
           "kind": "tool_order",
@@ -35,7 +35,7 @@
       "phase": "1a",
       "prompt": "Kenneth Walker III or Derrick Henry at RB2?",
       "fixture_variant": "ss-2-underdog",
-      "setup": "Team A is a 9-point projected underdog against Team B (opponent roster present). Derrick Henry has the higher ceiling (p90), Kenneth Walker III the higher mean by less than one point.",
+      "setup": "Team B is this week's opponent (opponents week 4) and Team A is a 9-point projected underdog. Derrick Henry (RB) has the higher ceiling (p90); Kenneth Walker III (BN) the higher mean by less than one point.",
       "expectations": [
         { "kind": "tool_used", "tool": "ff_analyze_lineup" },
         { "kind": "regex", "pattern": "underdog|behind|chase", "flags": "i" },
@@ -82,15 +82,15 @@
     {
       "id": "SS-5",
       "phase": "1a",
-      "prompt": "Deebo Samuel Sr. is inactive, who do I put in?",
+      "prompt": "Jaxon Smith-Njigba is inactive, who do I put in?",
       "fixture_variant": "two-slots-locked",
-      "setup": "Two slots (the QB and one WR) have locked; Deebo Samuel Sr. (W/R/T) and the bench options play later games. There is no game-day availability source under the manual league.",
+      "setup": "Two slots (the QB and one WR) have locked; Jaxon Smith-Njigba (W/R/T) and the bench receiver Keenan Allen play later games. There is no game-day availability source under the manual league.",
       "expectations": [
         { "kind": "tool_args", "tool": "ff_analyze_lineup", "args": { "only_unlocked": true } },
         { "kind": "regex", "pattern": "unlocked|actionable|still open", "flags": "i" },
         {
           "kind": "rubric",
-          "text": "Offers only replacements whose slots are still unlocked; says there is no game-day availability source in this version and makes the swap conditional on the fantasy app showing Samuel as Out or Inactive; never suggests moving a locked player."
+          "text": "Offers only replacements whose slots are still unlocked; says there is no game-day availability source in this version and makes the swap conditional on the fantasy app showing Smith-Njigba as Out or Inactive; never suggests moving a locked player."
         }
       ]
     },
