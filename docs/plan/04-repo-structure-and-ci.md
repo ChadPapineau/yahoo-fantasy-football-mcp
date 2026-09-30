@@ -88,7 +88,7 @@ yahoo-fantasy-football-mcp/
 │   │   ├── weather/             # open-meteo, nws
 │   │   └── odds/                # the-odds-api (optional)
 │   ├── store/
-│   │   ├── db.ts                # DatabaseSync open, pragmas, busy_timeout
+│   │   ├── db.ts                # DatabaseSync open, pragmas, busy_timeout; ATTACH/re-attach of ds/<source>.sqlite (read-only)
 │   │   ├── migrations/          # 001_init.ts …
 │   │   └── repos/               # one repository per table family
 │   ├── auth/

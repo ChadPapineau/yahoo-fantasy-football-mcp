@@ -48,7 +48,7 @@ flowchart LR
       SRC["Data sources"]
     end
     TOK["tokens.json 0600, gate_key 0600, client_secret 0600"]
-    DB["store.sqlite (cache, datasets, journal, log)"]
+    DB["store.sqlite (cache, journal, log) plus ds/ dataset files (read-only)"]
     OVR["crosswalk overrides file (repo)"]
     NOTIF["macOS notification (diff summary + one-time code); no pending file"]
   end
