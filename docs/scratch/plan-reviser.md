@@ -17,7 +17,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 | 2 | OBJ-01 / plan 02 (§0 rule, §1, §4.2 per-client column, §8 #2/#5, S3/S6) + "cannot"/"never" audit (S5, §7 qualified; §6.2 "no code path" waits for G7) | [x] | d5f7934 |
 | 3 | OBJ-18 / plan 09 (`live` → `start-sit` branch; 12 Skills) + xrefs in 07/10 | [x] | 22b5553 |
 | 4 | OBJ-08 + OBJ-21 / plans 07, 10 (+01, 03, 05, 09) (`FF_TOOLSET`, outputSchema, E15/E10/G2, ledger, Skill desc ≤350) | [x] | 1403118 |
-| 5 | OBJ-09 / plans 01, 03, 04 (Node >= 24.15, RC cite, CI matrix, fnm) | [ ] | — |
+| 5 | OBJ-09 / plans 01, 03, 04, 06 (Node >= 24.15, RC cite, CI matrix, fnm) | [x] | b5c8968 |
 | 6 | OBJ-14 / plans 02, 04 (fast-xml-parser flags, allow-list tree, pin-time rule) | [ ] | — |
 | 7 | OBJ-06/07/15 / plans 01, 02, 07 (untrusted_fields labelling, wrappers, structuredContent, rec-log source) | [ ] | — |
 | 8 | OBJ-04/05 / plans 07, 10 (Dist.basis, A7, mean default, delta_pwin, E13, n≥30 table, params → Phase 3) | [ ] | — |
