@@ -36,7 +36,7 @@ yahoo-fantasy-football-mcp/
 ├── eslint.config.js             # flat config (§3)
 ├── .prettierrc                  # 100 cols, double quotes, trailing commas
 ├── .gitleaks.toml               # custom rules (§4.3)
-├── .gitignore                   # exists today — untouched by this plan
+├── .gitignore                   # exists today; round 2 (OBJ-29) added `*league.yaml` + `!fixtures/manual/*.yaml` — the real manual-league file lives in <config>/, never here
 ├── .env.example                 # exists today — untouched by this plan
 ├── README.md                    # docs-writer's file (attribution + logo live here)
 ├── CHANGELOG.md                 # Keep a Changelog; CI checks a tag has an entry
@@ -111,6 +111,7 @@ yahoo-fantasy-football-mcp/
 │   └── evals/                   # 10-question read-only eval (plan 05 §6), run manually
 ├── fixtures/                    # ANONYMISED only (plan 05 §3) — placeholder ids 461.l.1000…
 │   ├── yahoo/                   # raw XML per endpoint, scrubbed
+│   ├── manual/                  # league.yaml with PLACEHOLDER names only — the .gitignore exception (round 2, OBJ-29)
 │   ├── nflverse/                # tiny parquet/csv.gz excerpts (≤ 50 rows) for schema tests
 │   ├── news/                    # RSS samples incl. injection attempts
 │   └── golden/                  # scoring-engine expected outputs
