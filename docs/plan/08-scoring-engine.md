@@ -2,6 +2,7 @@
 
 **Author:** `product-planner` · **Date:** 2026-09-29 · **Brief:** `docs/scratch/briefs/product-planner.md`
 **Inputs (cited, not restated):** plan 01 §1.1 (module map), §5.2 (settings cache row), §8 (seam: `ScoringSettings`, `stat_map.ts`), §8.1 (placement, memo, golden fixture paths); plan 05 §2 (`domain/scoring` assertions), §7 (100 % coverage module); plan 07 (tools that call the engine: A2, B2, E1, E15); `docs/research/05-strategy-and-analytics.md` §15 (the spec this plan implements), §1 step 9 and §19.1 (projections through the engine), §8 (K/DST models); `03-yahoo-api.md` §B.5 (stat ids; the official sample's 36 ids), §B.6 (scalars are strings), §D.2 (provisional weeks), §F.8 (bonus wire form [U]); `04-data-sources.md` B1 (`stats_player_week` columns), B2 (ffopportunity), A #5 (RZ/GL derivation).
+**Yahoo-dependency:** **`none`** — the engine scores nflverse lines in Phase 1a; Yahoo `player_points` is only the golden target for `match` (Phase 1b). *(tag added round 1, D.2 item 1: what survives a Yahoo denial is visible at a glance.)*
 
 **Legend** as in plan 01: **[V-05 §x]** etc. cite the research; **[A-n]** assumed (listed in §11); **[U]** unverified, needs a live token or the first golden run.
 

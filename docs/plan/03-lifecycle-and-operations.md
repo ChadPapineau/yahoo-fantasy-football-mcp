@@ -2,6 +2,7 @@
 
 **Author:** `architecture-planner-core` · **Date:** 2026-09-29 · **Brief:** `docs/scratch/briefs/architecture-planner-core.md`
 **Inputs:** plan 01 (process model, store), plan 02 (auth, token store, gate); `docs/research/03-yahoo-api.md` §A; `02-prior-art-lessons.md` §3.5, §3.8, §4 #1; MCP specification 2026-07-28 *stdio* page (read 2026-09-29); Node.js `node:sqlite` docs (read 2026-09-29). Legend as in plan 01.
+**Yahoo-dependency:** `read` — §2 auth UI, §5 online doctor rows 14–16, §6 token expiry, doctor #13. **`none`** — §1 lifecycle, ports, §3 config, §4 launch config, §7 migrations, §8 uninstall, doctor rows 1–12 and 19–22. *(tag added round 1, D.2 item 1: what survives a Yahoo denial is visible at a glance.)*
 
 This plan exists because of four failures Chad has personally hit with local MCP servers (brief fact 10): **stdio disconnects without a clean process exit; port conflicts for auth/setup UIs; relative paths in launch config; token expiry mid-session with no recovery path.** Each has a named section, a mechanism, and a test in plan 05.
 

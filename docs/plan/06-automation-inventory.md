@@ -2,6 +2,7 @@
 
 **Author:** `architecture-planner-core` · **Date:** 2026-09-29 · **Brief:** `docs/scratch/briefs/architecture-planner-core.md`
 **Inputs:** plans 01 (refresh model D8, data classes §5.2, freshness §5.4), 02 (journal §4.5, supply chain §7), 03 (doctor §5, launchd, uninstall), 04 (CI jobs), 05 (fixtures, smoke, evals); `docs/research/04-data-sources.md` §E (freshness map) and §B (cadences); `03-yahoo-api.md` §D.2 (finalisation clock). Legend as in plan 01.
+**Yahoo-dependency:** `read` — §1.3 credentialed jobs (snapshots, transactions append, token check, pre-kickoff check, journal reconcile). **`none`** — §1.1 CI, §1.2 data refreshes, §2 launchd design, §4 build order steps 1–3. *(tag added round 1, D.2 item 1: what survives a Yahoo denial is visible at a glance.)*
 
 **Principle:** every job here runs **without a model** — it is a CLI subcommand or a CI workflow whose output is a table, a diff, a notification, or a red build. Anything that needs Yahoo credentials runs **only on Chad's Mac** (the repo is public; CI never holds Yahoo credentials — a standing rule, not a limitation to work around). Jobs are **idempotent and season-aware**: each checks `ds_schedules` (or the calendar when no schedule is loaded) and exits 0 in seconds when there is nothing to do, so a plist can run year-round.
 
