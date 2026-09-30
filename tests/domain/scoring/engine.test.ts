@@ -408,6 +408,14 @@ describe("negative floor and rounding (plan 08 §4.4, E4, P8/P9)", () => {
     });
     expect(floorApplies(noneScope)).toBe(false);
     expect(score(lineOf("O", neg), noneScope).points).toBe(-2.6);
+    const negOnScoped = sampleSettings({
+      set: {
+        uses_negative_points: true,
+        negative_floor: { scope: "player_week_total", verified: true },
+      },
+    });
+    expect(floorApplies(negOnScoped)).toBe(false);
+    expect(score(lineOf("O", neg), negOnScoped).points).toBe(-2.6);
     const perStat = sampleSettings({
       set: { uses_negative_points: false, negative_floor: { scope: "per_stat", verified: true } },
     });
