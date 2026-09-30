@@ -8,51 +8,50 @@ docs/scratch/roster.md, docs/scratch/program.md, docs/scratch/briefs/*, docs/pla
 
 ## RESUME HERE
 
-**Status:** READING DONE 2026-09-29 (all research docs, mcp-builder refs, MCP spec 2026-07-28 pages,
-SDK README, npm registry). Verifying three last facts (SDK v2 legacy-client compat, `node:sqlite`
-stability, client elicitation support), then writing plan files 01 → 06 in order.
-
-**Next step:** write `docs/plan/06-automation-inventory.md`; commit + push; close RESUME HERE; final reply with SHAs.
-If resuming cold: the "Working notes" below hold every verified fact and every decision taken so
-far — do not re-derive them.
+**Status: COMPLETE 2026-09-29.** All six plan files written, committed and pushed to `origin/main`.
+Nothing is in flight; no `.wip.patch` exists. If a later agent revises a plan file, start from the
+pushed versions below — do not re-derive.
 
 **Plan-file status:**
 
-| File | Status |
-|---|---|
-| `docs/plan/01-system-architecture.md` | **written, pushed** |
-| `docs/plan/02-security-architecture.md` | **written, pushed** |
-| `docs/plan/03-lifecycle-and-operations.md` | **written, pushed** |
-| `docs/plan/04-repo-structure-and-ci.md` | **written, pushed** |
-| `docs/plan/05-testing-strategy.md` | **written, pushed** |
-| `docs/plan/06-automation-inventory.md` | not started |
+| File | Status | Commit |
+|---|---|---|
+| `docs/plan/01-system-architecture.md` | pushed | `c5bb839` |
+| `docs/plan/02-security-architecture.md` | pushed (Mermaid `;` hardening in the final commit) | `9d8af24` |
+| `docs/plan/03-lifecycle-and-operations.md` | pushed | `d137945` |
+| `docs/plan/04-repo-structure-and-ci.md` | pushed | `dc10430` |
+| `docs/plan/05-testing-strategy.md` | pushed | `f3fa827` |
+| `docs/plan/06-automation-inventory.md` | pushed | final commit (see `git log`) |
 
-**Decisions taken so far (provisional until written into the plan files):**
-- Transport: stdio only in v1; Streamable HTTP + remote install = clean negative (needs an OAuth AS
-  + public https callback; single-user tool). Spec 2026-07-28 says stdio servers take credentials
-  from the environment, not the authorization spec.
-- OAuth default = `oob` (no listener, no port, no self-signed cert; the Yahoo callback must match
-  the app registration so a port cannot float — which kills the "fallback port range" idea for the
-  https path; the https-localhost path is optional/opt-in with a FIXED port).
-- Store = SQLite via `node:sqlite` (no native addon → no postinstall; verify stability) in
-  `~/.cache/<app>/`; tokens in `~/.config/<app>/` 0700/0600 atomic+lockfile; client secret via env
-  or a separate 0600 file, never in the token file.
-- Confirmation gate = `prepare_*`/`commit_*` with HMAC token bound to the diff + a precondition
-  hash (compare-and-set at commit); human confirmation via elicitation where the client supports
-  it; fallback = out-of-band one-time code (macOS notification) or CLI `confirm <id>`.
-- SDK: **v2 `@modelcontextprotocol/server` 2.2.0 exact-pinned** — `serveStdio` serves both the
-  legacy `initialize` era and 2026-07-28 by default (docs/protocol-versions.md); tool handlers return
-  `inputRequired({ inputRequests: { k: inputRequired.elicit({...}) } })`, the legacy shim converts it
-  to `elicitation/create` for old clients; `createRequestStateCodec({ key, ttlSeconds })` = HMAC-SHA256
-  `mint`/`verify`; `acceptedContent(ctx.mcpReq.inputResponses, key, schema)` on re-entry.
-- Verified 2026-09-29: `node:sqlite` = "Stability: 1.2 - Release candidate", unflagged since 22.13.0,
-  sync-only. `hyparquet` 1.31.x = pure JS, MIT, zero deps, no install scripts. Inspector has `--cli`
-  + `docs/cli-smoke-testing.md`. Claude Code: form+URL elicitation on 2026-07-28 connections
-  (CLI 2.1.76+); Claude Desktop/Cowork: declares elicitation but open bugs drop/cancel it
-  (anthropics/claude-ai-mcp#1046, #153; anthropics/claude-code#56243, #41110) — search-result
-  snippets, pages not opened.
+**Findings for the orchestrator (things the brief did not anticipate):**
 
-**Open questions for the orchestrator:** none yet.
+1. **The MCP spec moved under the brief.** The latest published revision is **2026-07-28** (stateless,
+   no `initialize`; MRTR replaces server-initiated elicitation; Logging/Roots/Sampling deprecated;
+   `ttlMs`/`cacheScope` mandatory on list results; Streamable HTTP lost sessions and the GET stream).
+   The house reference `node_mcp_server.md` is written against SDK **v1** (`@modelcontextprotocol/sdk`);
+   the TypeScript SDK **v2** (`@modelcontextprotocol/server` 2.2.0, published 2026-09-28, Node >=20,
+   Zod 4) is "the stable release line" and its `serveStdio` serves both eras by default. Plan 01 D2
+   pins v2 with v1 >=1.31.0 as the fallback. The product planner should use v2 API names
+   (`registerTool` with `annotations`/`outputSchema`, `inputRequired(...)`, `acceptedContent(...)`).
+2. **Claude Desktop cannot be relied on for elicitation today** (open issues: dropped / immediately
+   cancelled), Claude Code can (form + URL on 2026-07-28 connections). The confirmation gate therefore
+   has three human channels (elicitation → out-of-band code via macOS notification → `ff confirm`
+   CLI); the fallback is load-bearing, not theoretical. Search-snippet evidence only — verify in the
+   Desktop smoke.
+3. **The https-localhost callback port cannot float** (the callback must match the Yahoo app
+   registration), which kills the brief's "fallback port range" idea for that path and is the
+   decisive reason `oob` is the default login. The listener stays as an opt-in with a fixed port and an
+   exact conflict message.
+4. **`node:sqlite`** ("Stability: 1.2 - Release candidate", unflagged since 22.13, sync-only) makes a
+   zero-native-addon store possible and forces refreshes into a separate `ff refresh` process
+   scheduled by launchd (plan 01 D8) — the MCP server never loads datasets.
+5. **A prepare/commit token alone proves the model saw the diff, not that a human agreed** — the
+   model can copy it. Plan 02 §4.2 says this plainly and builds the human channel separately.
+6. Remote install from claude.ai is a **clean negative** (plan 01 §3.3).
+
+**Open questions for Chad (mirrors of HANDOFF items, not new asks):** whether his other local MCP
+servers use `~/.config` on macOS (plan 01 A-3); whether he prefers `oob` after trying it; branch
+ruleset application (plan 04 §5); the Yahoo access application.
 
 ## Working notes
 
