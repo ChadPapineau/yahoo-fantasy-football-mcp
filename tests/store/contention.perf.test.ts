@@ -111,6 +111,7 @@ describe("A4a contention: a 3-s foreign writer lock", () => {
 
     const p95 = percentile(latencies, 95);
     const diag = `p95=${p95.toFixed(1)}ms max=${Math.max(...latencies).toFixed(1)}ms run=${(doneAt - lockedAt).toFixed(0)}ms record=${rec.ms.toFixed(0)}ms`;
+    process.stdout.write(`A4a contention: ${diag}\n`); // the measurement, in every CI log
     // the whole run happened inside the lock window (so "every write a miss" is meaningful)
     expect(holder.out, diag).not.toContain("RELEASED");
     expect(errors, diag).toEqual([]);

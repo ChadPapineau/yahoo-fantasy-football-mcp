@@ -12,6 +12,7 @@ import {
   StoreBusyError,
   type Store,
 } from "../../src/store/types.js";
+import { storeInternalsOf } from "../../src/store/store.js";
 import { openStore, tempCache, type TempCache } from "./helpers/env.js";
 import { RULES, SLOTS, recordInput, roster, scoring } from "./helpers/records.js";
 import { run, type Child } from "./helpers/spawn.js";
@@ -85,6 +86,34 @@ describe("best-effort writes under a foreign writer lock", () => {
     expect(s.stats().cache_misses_busy).toBe(6);
     // reads keep working (WAL)
     expect(s.repos.pointsCache.get("h", "00-0034857", 2026, 3)).toBeNull();
+  });
+
+  it("the wait is bounded by the wall clock, not by SQLite's busy handler (macOS CI stall)", async () => {
+    // SQLite's handler sums its INTENDED sleeps, so where short sleeps overshoot it stalled the
+    // stdio loop ~5x its busy_timeout (A4a contention, macOS CI p95 551 ms). Raising the
+    // connection's busy_timeout to 5 s must not lengthen a best-effort write's wait at all.
+    const db = storeInternalsOf(s)?.db;
+    if (db === undefined) throw new Error("no store internals");
+    db.exec("PRAGMA busy_timeout = 5000");
+    await holdLock(3000);
+    const t0 = performance.now();
+    expect(s.repos.pointsCache.put("h", "00-0034857", 2026, 3, 10)).toEqual({
+      written: false,
+      reason: "busy",
+    });
+    const dt = performance.now() - t0;
+    expect(dt).toBeGreaterThanOrEqual(BUSY_TIMEOUT_MS - 5); // it did wait its window
+    expect(dt).toBeLessThan(BUSY_TIMEOUT_MS * 5);
+  });
+
+  it("a lock released inside the window lets the best-effort write through (it polls)", async () => {
+    const h = await holdLock(40);
+    const t0 = performance.now();
+    expect(s.repos.pointsCache.put("h", "00-0034857", 2026, 3, 11)).toEqual({ written: true });
+    expect(performance.now() - t0).toBeLessThan(BUSY_TIMEOUT_MS * 5);
+    await h.waitFor(/^RELEASED$/);
+    expect(s.repos.pointsCache.get("h", "00-0034857", 2026, 3)).toBe(11);
+    expect(s.stats().cache_misses_busy).toBe(0);
   });
 
   it("writes again once the lock is gone", async () => {

@@ -188,9 +188,23 @@ const monoMs = (): number => performance.now();
 /** How often a REQUIRED write re-tries a busy lock (each try is non-blocking; the loop runs between). */
 export const REQUIRED_POLL_MS = 20;
 
+/** How long a BEST-EFFORT write sleeps between non-blocking tries inside its BUSY_TIMEOUT_MS window. */
+export const BEST_EFFORT_POLL_MS = 10;
+
+const pauseCell = new Int32Array(new SharedArrayBuffer(4));
+/** Blocks this thread for about `ms` (a best-effort write's short wait is synchronous by design). */
+function blockFor(ms: number): void {
+  Atomics.wait(pauseCell, 0, 0, ms);
+}
+
 /**
- * The write-class executor (plan 01 §5.3). Best-effort writes wait at most the connection's
- * `busy_timeout` once and turn a busy lock into a counted miss; required writes poll the lock
+ * The write-class executor (plan 01 §5.3). Best-effort writes wait at most BUSY_TIMEOUT_MS of WALL
+ * CLOCK and turn a busy lock into a counted miss: non-blocking tries with short sleeps until a
+ * monotonic deadline, not SQLite's busy handler — that one sums its INTENDED sleeps (1, 2, 5, 10,
+ * … ms), so on a host whose short sleeps overshoot (timer coalescing on a loaded macOS VM) a
+ * "100 ms" busy_timeout stalled the stdio loop ~500 ms (the A4a contention test, macOS CI run
+ * 36777995749: p95 551 ms). The bound is now the deadline plus one poll's overshoot, never a sum
+ * of overshoots (plan 01 §5.3: "never a longer stall"). Required writes poll the lock
  * WITHOUT blocking (busy_timeout 0 for the attempt), yielding to the event loop for
  * REQUIRED_POLL_MS between tries, until the next try would overrun REQUIRED_WRITE_BUDGET_MS, then
  * reject with StoreBusyError (plan 03 §1.2). Decision recorded: polling instead of 100 ms blocking
@@ -214,14 +228,23 @@ export class WriteExecutor {
       this.misses += 1;
       return { written: false, reason: "busy" };
     }
-    try {
-      fn();
-      return { written: true };
-    } catch (e) {
-      if (!isBusyError(e)) throw e;
-      this.misses += 1;
-      this.busyUntil = monoMs() + BEST_EFFORT_BACKOFF_MS;
-      return { written: false, reason: "busy" };
+    // every best-effort body is one autocommit statement: a busy try has no effect, so re-trying
+    // it is safe. Without a connection (a unit-test executor) there is nothing to poll: one try.
+    const deadline = monoMs() + (this.db === null ? 0 : BUSY_TIMEOUT_MS);
+    for (;;) {
+      try {
+        this.tryNow(fn);
+        return { written: true };
+      } catch (e) {
+        if (!isBusyError(e)) throw e;
+      }
+      const left = deadline - monoMs();
+      if (left <= 0) {
+        this.misses += 1;
+        this.busyUntil = monoMs() + BEST_EFFORT_BACKOFF_MS;
+        return { written: false, reason: "busy" };
+      }
+      blockFor(Math.min(left, BEST_EFFORT_POLL_MS));
     }
   }
 
