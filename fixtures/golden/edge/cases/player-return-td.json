@@ -1,0 +1,25 @@
+{
+  "name": "player-return-td",
+  "case": "A player with a return TD counts under ret_td_off only; dst_ret_td untouched",
+  "source": "plan 08 §8, §4.3",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {
+          "ret_td_off": 1,
+          "dst_ret_td": 1
+        }
+      },
+      "expected": {
+        "points": 6,
+        "points_exact": 6,
+        "complete": true,
+        "unmapped": [],
+        "ignored": ["dst_ret_td"]
+      }
+    }
+  ]
+}

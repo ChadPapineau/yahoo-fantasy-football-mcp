@@ -1,0 +1,45 @@
+{
+  "name": "fractional-modifiers",
+  "case": "Fractional modifiers over three-digit yardage: exact, no float drift",
+  "source": "plan 08 §8, §4.4, A-3",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {
+          "pass_yd": 312,
+          "rush_yd": 123,
+          "rec_yd": 7,
+          "rec": 3
+        }
+      },
+      "expected": {
+        "points": 26.98,
+        "points_exact": 26.98,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    },
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {
+          "pass_yd": 333,
+          "rush_yd": 111,
+          "rec_yd": 101
+        }
+      },
+      "expected": {
+        "points": 34.52,
+        "points_exact": 34.52,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "name": "empty-line-provisional",
+  "case": "Empty stat line, provisional week",
+  "source": "plan 08 §8; research 03 §D.2",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": true,
+        "values": {}
+      },
+      "expected": {
+        "points": 0,
+        "points_exact": 0,
+        "complete": false,
+        "unmapped": [],
+        "ignored": [],
+        "contributions": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,224 @@
+{
+  "$comment": "Yahoo's official league-settings sample (research 03 §B.5) as a provider draft: display names + ids + position types + modifiers; canonicals are resolved by the registry. Placeholder data, no real league.",
+  "platform": "yahoo",
+  "uses_fractional_points": true,
+  "uses_negative_points": true,
+  "rules": [
+    {
+      "platform_id": "4",
+      "name": "Passing Yards",
+      "position_types": ["O"],
+      "modifier": 0.04
+    },
+    {
+      "platform_id": "5",
+      "name": "Passing Touchdowns",
+      "position_types": ["O"],
+      "modifier": 4
+    },
+    {
+      "platform_id": "6",
+      "name": "Interceptions",
+      "position_types": ["O"],
+      "modifier": -1
+    },
+    {
+      "platform_id": "8",
+      "name": "Rushing Attempts",
+      "position_types": ["O"],
+      "modifier": null
+    },
+    {
+      "platform_id": "9",
+      "name": "Rushing Yards",
+      "position_types": ["O"],
+      "modifier": 0.1
+    },
+    {
+      "platform_id": "10",
+      "name": "Rushing Touchdowns",
+      "position_types": ["O"],
+      "modifier": 6
+    },
+    {
+      "platform_id": "78",
+      "name": "Targets",
+      "position_types": ["O"],
+      "modifier": null
+    },
+    {
+      "platform_id": "11",
+      "name": "Receptions",
+      "position_types": ["O"],
+      "modifier": 0.5
+    },
+    {
+      "platform_id": "12",
+      "name": "Receiving Yards",
+      "position_types": ["O"],
+      "modifier": 0.1
+    },
+    {
+      "platform_id": "13",
+      "name": "Receiving Touchdowns",
+      "position_types": ["O"],
+      "modifier": 6
+    },
+    {
+      "platform_id": "15",
+      "name": "Return Touchdowns",
+      "position_types": ["O"],
+      "modifier": 6
+    },
+    {
+      "platform_id": "16",
+      "name": "2-Point Conversions",
+      "position_types": ["O"],
+      "modifier": 2
+    },
+    {
+      "platform_id": "18",
+      "name": "Fumbles Lost",
+      "position_types": ["O"],
+      "modifier": -2
+    },
+    {
+      "platform_id": "57",
+      "name": "Offensive Fumble Return TD",
+      "position_types": ["O"],
+      "modifier": 6
+    },
+    {
+      "platform_id": "19",
+      "name": "Field Goals 0-19 Yards",
+      "position_types": ["K"],
+      "modifier": 3
+    },
+    {
+      "platform_id": "20",
+      "name": "Field Goals 20-29 Yards",
+      "position_types": ["K"],
+      "modifier": 3
+    },
+    {
+      "platform_id": "21",
+      "name": "Field Goals 30-39 Yards",
+      "position_types": ["K"],
+      "modifier": 3
+    },
+    {
+      "platform_id": "22",
+      "name": "Field Goals 40-49 Yards",
+      "position_types": ["K"],
+      "modifier": 4
+    },
+    {
+      "platform_id": "23",
+      "name": "Field Goals 50+ Yards",
+      "position_types": ["K"],
+      "modifier": 5
+    },
+    {
+      "platform_id": "29",
+      "name": "Point After Attempt Made",
+      "position_types": ["K"],
+      "modifier": 1
+    },
+    {
+      "platform_id": "31",
+      "name": "Points Allowed",
+      "position_types": ["DT"],
+      "modifier": null
+    },
+    {
+      "platform_id": "32",
+      "name": "Sack",
+      "position_types": ["DT"],
+      "modifier": 1
+    },
+    {
+      "platform_id": "33",
+      "name": "Interception",
+      "position_types": ["DT"],
+      "modifier": 2
+    },
+    {
+      "platform_id": "34",
+      "name": "Fumble Recovery",
+      "position_types": ["DT"],
+      "modifier": 2
+    },
+    {
+      "platform_id": "35",
+      "name": "Touchdown",
+      "position_types": ["DT"],
+      "modifier": 6
+    },
+    {
+      "platform_id": "36",
+      "name": "Safety",
+      "position_types": ["DT"],
+      "modifier": 2
+    },
+    {
+      "platform_id": "37",
+      "name": "Block Kick",
+      "position_types": ["DT"],
+      "modifier": 2
+    },
+    {
+      "platform_id": "49",
+      "name": "Kickoff and Punt Return Touchdowns",
+      "position_types": ["DT"],
+      "modifier": 6
+    },
+    {
+      "platform_id": "82",
+      "name": "Extra Point Returned",
+      "position_types": ["DT"],
+      "modifier": 2
+    },
+    {
+      "platform_id": "50",
+      "name": "Points Allowed 0",
+      "position_types": ["DT"],
+      "modifier": 10
+    },
+    {
+      "platform_id": "51",
+      "name": "Points Allowed 1-6",
+      "position_types": ["DT"],
+      "modifier": 7
+    },
+    {
+      "platform_id": "52",
+      "name": "Points Allowed 7-13",
+      "position_types": ["DT"],
+      "modifier": 4
+    },
+    {
+      "platform_id": "53",
+      "name": "Points Allowed 14-20",
+      "position_types": ["DT"],
+      "modifier": 1
+    },
+    {
+      "platform_id": "54",
+      "name": "Points Allowed 21-27",
+      "position_types": ["DT"],
+      "modifier": 0
+    },
+    {
+      "platform_id": "55",
+      "name": "Points Allowed 28-34",
+      "position_types": ["DT"],
+      "modifier": -1
+    },
+    {
+      "platform_id": "56",
+      "name": "Points Allowed 35+",
+      "position_types": ["DT"],
+      "modifier": -4
+    }
+  ]
+}

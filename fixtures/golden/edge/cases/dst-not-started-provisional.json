@@ -1,0 +1,82 @@
+{
+  "name": "dst-not-started-provisional",
+  "case": "DST whose game has not started, provisional: family not present, complete = false",
+  "source": "plan 08 §8, §4.1",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "line": {
+        "position_type": "DT",
+        "provisional": true,
+        "values": {}
+      },
+      "expected": {
+        "points": 0,
+        "points_exact": 0,
+        "complete": false,
+        "unmapped": [],
+        "ignored": []
+      }
+    },
+    {
+      "line": {
+        "position_type": "DT",
+        "provisional": true,
+        "values": {
+          "dst_sack": 0,
+          "dst_int": 0,
+          "dst_fum_rec": 0,
+          "dst_td": 0,
+          "dst_safety": 0,
+          "dst_blk": 0,
+          "dst_ret_td": 0,
+          "dst_xpr": 0,
+          "dst_pa_0": 0,
+          "dst_pa_1_6": 0,
+          "dst_pa_7_13": 0,
+          "dst_pa_14_20": 0,
+          "dst_pa_21_27": 0,
+          "dst_pa_28_34": 0,
+          "dst_pa_35p": 0
+        }
+      },
+      "expected": {
+        "points": 0,
+        "points_exact": 0,
+        "complete": false,
+        "unmapped": [],
+        "ignored": []
+      }
+    },
+    {
+      "line": {
+        "position_type": "DT",
+        "provisional": false,
+        "values": {
+          "dst_sack": 0,
+          "dst_int": 0,
+          "dst_fum_rec": 0,
+          "dst_td": 0,
+          "dst_safety": 0,
+          "dst_blk": 0,
+          "dst_ret_td": 0,
+          "dst_xpr": 0,
+          "dst_pa_0": 0,
+          "dst_pa_1_6": 0,
+          "dst_pa_7_13": 0,
+          "dst_pa_14_20": 0,
+          "dst_pa_21_27": 0,
+          "dst_pa_28_34": 0,
+          "dst_pa_35p": 0
+        }
+      },
+      "expected": {
+        "points": 0,
+        "points_exact": 0,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    }
+  ]
+}

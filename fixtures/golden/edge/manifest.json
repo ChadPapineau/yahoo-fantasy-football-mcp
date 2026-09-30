@@ -1,0 +1,32 @@
+{
+  "$comment": "sha256 of every plan 08 §8 edge fixture (tests/domain/scoring/edge.test.ts). Regenerate ONLY with a reviewed fixture change: a changed expectation must be deliberate.",
+  "files": {
+    "cases/bonus-as-extra-stat-id.json": "92e9f664129e3bc6d677f5d8f7b4cf2a9e255136a026b7fbd787626f9cd49ec7",
+    "cases/bye-week-final.json": "7b58b2c943d5e669ce9f04c41064745243323a682a794e8e48dc63bceada5d31",
+    "cases/categories-order-differs.json": "ab000c9ba539fe4bda5e5b59bffbd826c0a0dfc1b57f2d90459f7f7a07949d57",
+    "cases/dst-not-started-provisional.json": "de3da157818bdd4d77ccef479bbb0f425cc08bc957322b079870de13c97c7ecf",
+    "cases/dst-points-allowed-scalar-boundaries.json": "dfee67db1aaf35496f32ccfa0c1287adf4ebf8dd1309d9024b698959e4878568",
+    "cases/dst-return-td.json": "cd10c54dfff84afb3fdcdf7c9a03114c794df817bb0d1e53516c61875ece996e",
+    "cases/dst-two-indicators.json": "6d30f1c9fc7e38f39e6f59832a5db2c5884177d3500288cd3ad2a56933dcc9af",
+    "cases/dst-zero-points-allowed.json": "d402bfd43fe21ff6386ce9542d722163dee98c601e5675f4d8d6caee28531c97",
+    "cases/duplicate-canonical.json": "e4b2be1edd55c30ddc5ed1c29df71ae23032f122374a8e550d23847d4447d997",
+    "cases/empty-line-final.json": "74b3575de9a9bc419c48c79b66cf677a3f77538ab82c25ed2ee2c2cbda4713e8",
+    "cases/empty-line-provisional.json": "8fa1a87c909016645c01bf164daf630ad43c314b6f9db60d8ed01133d203e375",
+    "cases/fractional-modifiers.json": "5aad1d330dfabcee6e72c9789dea3cc9f78a91a3003abb601497dfcd0c0d2c22",
+    "cases/ir-player-with-line.json": "578eb3381cc8b1ac2ae7794138ae6d9b37135194ab2b2cf06c6d7fa784836efb",
+    "cases/k-kick-distance-boundary.json": "3bc0d3f46350abfa2e78f19551eae2e1c84b3977ee7a0fe59c61ac258746dafa",
+    "cases/k-three-fgs-count-bins.json": "23687b288a36ca5ec2e1194c62a992f7786290409b7b934be3d79a92f5bfc641",
+    "cases/k-zero-value-distance.json": "74f836b1aac21e97df38ebfaa687c1126e73e6c3639e7bbbad547e899ae5e3d9",
+    "cases/multi-target-bonus.json": "de996c48f3c7046722e9f7dbeb56bc4502568e33d76aff150f83a16d5ae2dd96",
+    "cases/negative-total-no-negative-league.json": "cb7607a28e5703257925e80400e25347e0aa61e0254798ee6fe872bc25532d28",
+    "cases/nflverse-team-defense.json": "3db096aaadda39ecdb418c31416fa08e81634053031ba8ad1150edbfc734ab14",
+    "cases/player-return-td.json": "be6f7cb67f32f9866e535b86449811e41d6c7b19f3cf884dedd9c30e087c6c25",
+    "cases/provisional-partial-line.json": "4f7d6b3952023d6f09a1775daaf8960ae9ee4ceb0dd48359fa872f461df5c049",
+    "cases/qb-sack-fumble-lost.json": "95311ad2ed4ed2d0daa21256e9171b07f4611356994855571e9dd7bb3bbf0f23",
+    "cases/settings-change-mid-season.json": "8b7cb627e08c6d76cf458a0581820fb85b0d437f7aea3fbc0a2bbe168d083673",
+    "cases/two-pt-pass-rush-rec.json": "c9cdd0da9fff8ca6a1e05813e09d0bcce9c9680ea669c32953b78f6f51c32a84",
+    "cases/unknown-stat-ids-in-line.json": "f8dc76f583cb1314194eedc4b6d96ea75dfccbb7b5e526e6753fe6c81e4f8910",
+    "cases/unmapped-settings-id.json": "f3c3ed0c1abffa7a86e6a0386ae853f303065a86f67a09bf487b09585e46006c",
+    "settings/sample-league.json": "5d9ef17e825979c1e189831ecde2aa69fdd2b0851bfccadf99ab50ebf6d63076"
+  }
+}

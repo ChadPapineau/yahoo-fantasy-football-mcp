@@ -1,0 +1,37 @@
+{
+  "name": "k-zero-value-distance",
+  "case": "K with a 0-value distance category: contributes 0, present",
+  "source": "plan 08 §8",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "line": {
+        "position_type": "K",
+        "provisional": false,
+        "values": {
+          "fg_0_19": 0,
+          "fg_20_29": 0,
+          "fg_30_39": 1,
+          "fg_40_49": 0,
+          "fg_50p": 0,
+          "pat_made": 2
+        }
+      },
+      "expected": {
+        "points": 5,
+        "points_exact": 5,
+        "complete": true,
+        "unmapped": [],
+        "ignored": [],
+        "contribution_points": {
+          "fg_0_19": 0,
+          "fg_20_29": 0,
+          "fg_30_39": 3,
+          "fg_40_49": 0,
+          "fg_50p": 0,
+          "pat_made": 2
+        }
+      }
+    }
+  ]
+}

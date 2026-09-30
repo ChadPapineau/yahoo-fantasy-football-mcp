@@ -1,0 +1,27 @@
+{
+  "name": "unknown-stat-ids-in-line",
+  "case": "Unknown stat ids in the line: ignored, listed, no throw",
+  "source": "plan 08 §8",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {
+          "pass_yd": 250,
+          "idp_tackle_solo": 5,
+          "zz_new_stat": 3,
+          "dst_td": 1
+        }
+      },
+      "expected": {
+        "points": 10,
+        "points_exact": 10,
+        "complete": true,
+        "unmapped": [],
+        "ignored": ["dst_td", "idp_tackle_solo", "zz_new_stat"]
+      }
+    }
+  ]
+}

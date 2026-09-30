@@ -1,0 +1,34 @@
+{
+  "name": "unmapped-settings-id",
+  "case": "Settings id with no pattern match (an IDP id in a non-IDP league): unmapped, scores 0",
+  "source": "plan 08 §8",
+  "settings": {
+    "base": "sample-league",
+    "add_rules": [
+      {
+        "platform_id": "999",
+        "name": "Tackle Solo",
+        "position_types": ["D"],
+        "modifier": 1
+      }
+    ]
+  },
+  "checks": [
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {
+          "rush_yd": 100
+        }
+      },
+      "expected": {
+        "points": 10,
+        "points_exact": 10,
+        "complete": true,
+        "unmapped": ["999"],
+        "ignored": []
+      }
+    }
+  ]
+}

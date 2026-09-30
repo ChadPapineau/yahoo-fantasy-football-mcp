@@ -1,0 +1,42 @@
+{
+  "name": "k-kick-distance-boundary",
+  "case": "K kick distance exactly on a bin boundary: bounds are inclusive, parsed from names",
+  "source": "plan 08 §8, §4.1",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "line": {
+        "position_type": "K",
+        "provisional": false,
+        "values": {
+          "pat_made": 1
+        }
+      },
+      "made_list": "40;39;49;50;19",
+      "expected": {
+        "points": 20,
+        "points_exact": 20,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    },
+    {
+      "line": {
+        "position_type": "K",
+        "provisional": false,
+        "values": {
+          "pat_made": 0
+        }
+      },
+      "made_list": "20;29;30",
+      "expected": {
+        "points": 9,
+        "points_exact": 9,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    }
+  ]
+}

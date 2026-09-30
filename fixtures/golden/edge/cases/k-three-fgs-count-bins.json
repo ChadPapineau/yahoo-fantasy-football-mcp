@@ -1,0 +1,29 @@
+{
+  "name": "k-three-fgs-count-bins",
+  "case": "Three FGs: 2 x 40-49 and 1 x 50+ in one game score the sum (count family, never an exclusivity error)",
+  "source": "critic C-09; plan 08 §4.1",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "line": {
+        "position_type": "K",
+        "provisional": false,
+        "values": {
+          "fg_0_19": 0,
+          "fg_20_29": 0,
+          "fg_30_39": 0,
+          "fg_40_49": 2,
+          "fg_50p": 1,
+          "pat_made": 0
+        }
+      },
+      "expected": {
+        "points": 13,
+        "points_exact": 13,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    }
+  ]
+}

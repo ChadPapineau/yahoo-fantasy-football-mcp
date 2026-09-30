@@ -37,7 +37,16 @@ export const FAMILY_SCALAR: Readonly<Record<string, Canonical>> = Object.freeze(
 
 /** A family's kind: the named ones per BRACKET_FAMILY_KIND; every other family counts (linear). */
 export function familyKind(family: string): BracketKind {
-  return (BRACKET_FAMILY_KIND as Readonly<Record<string, BracketKind>>)[family] ?? "count";
+  // a Map, not an object index: a family slugged to "constructor" must not read Object.prototype
+  return KIND_BY_FAMILY.get(family) ?? "count";
+}
+
+const KIND_BY_FAMILY = new Map<string, BracketKind>(Object.entries(BRACKET_FAMILY_KIND));
+const SCALAR_BY_FAMILY = new Map<string, Canonical>(Object.entries(FAMILY_SCALAR));
+
+/** The scalar canonical of a family (`dst_pa` for points allowed), or null — own keys only. */
+export function familyScalar(family: string): Canonical | null {
+  return SCALAR_BY_FAMILY.get(family) ?? null;
 }
 
 /** The longest slug kept, leaving room for a `_<position type>` disambiguating suffix. */

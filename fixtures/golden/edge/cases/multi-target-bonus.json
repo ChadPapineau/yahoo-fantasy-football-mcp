@@ -1,0 +1,86 @@
+{
+  "name": "multi-target-bonus",
+  "case": "Multi-target bonus (100+ and 200+ on rush_yd): both pay when both thresholds are met",
+  "source": "plan 08 §8, §4.2",
+  "settings": {
+    "base": "sample-league",
+    "bonuses": {
+      "9": [
+        {
+          "target": 100,
+          "points": 3
+        },
+        {
+          "target": 200,
+          "points": 5
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {
+          "rush_yd": 205
+        }
+      },
+      "expected": {
+        "points": 28.5,
+        "points_exact": 28.5,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    },
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {
+          "rush_yd": 150
+        }
+      },
+      "expected": {
+        "points": 18,
+        "points_exact": 18,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    },
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {
+          "rush_yd": 99
+        }
+      },
+      "expected": {
+        "points": 9.9,
+        "points_exact": 9.9,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    },
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {
+          "rush_yd": 200
+        }
+      },
+      "expected": {
+        "points": 28,
+        "points_exact": 28,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    }
+  ]
+}

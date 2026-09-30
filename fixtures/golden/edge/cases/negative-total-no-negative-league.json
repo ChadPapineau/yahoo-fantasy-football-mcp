@@ -1,0 +1,35 @@
+{
+  "name": "negative-total-no-negative-league",
+  "case": "Negative total in a uses_negative_points = 0 league: floored at 0 at the player-week level, verified: false",
+  "source": "plan 08 §8, E4, A-2",
+  "settings": {
+    "base": "sample-league",
+    "set": {
+      "uses_negative_points": false
+    }
+  },
+  "checks": [
+    {
+      "line": {
+        "position_type": "O",
+        "provisional": false,
+        "values": {
+          "pass_yd": 10,
+          "pass_int": 3,
+          "fum_lost": 1
+        }
+      },
+      "expected": {
+        "points": 0,
+        "points_exact": -4.6,
+        "complete": true,
+        "unmapped": [],
+        "ignored": [],
+        "negative_floor": {
+          "scope": "player_week_total",
+          "verified": false
+        }
+      }
+    }
+  ]
+}
