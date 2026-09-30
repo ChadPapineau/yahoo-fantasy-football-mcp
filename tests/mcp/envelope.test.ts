@@ -605,6 +605,11 @@ describe("fitToBudget (20 000 chars; explicit truncation, never silent)", () => 
     expect(env.data.players).toHaveLength(400);
   });
 
+  it("names the budget actually applied (analytics: 10 000)", () => {
+    const r = fitToBudget(listEnv(100), ANALYTICS_BUDGET_CHARS, "players");
+    expect(r.ok && r.envelope.warnings.at(-1)).toMatch(/fit the 10000-character budget/);
+  });
+
   it("truncates without a page object too", () => {
     const r = fitToBudget(listEnv(400, 150, false), RESULT_BUDGET_CHARS, "players");
     expect(r.ok && r.envelope.truncated && r.envelope.page === undefined).toBe(true);

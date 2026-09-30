@@ -526,7 +526,7 @@ export function fitToBudget<D>(env: Envelope<D>, budget: number, listKey?: strin
   let n = total;
   while (n > 0) {
     n = Math.floor(n / 2);
-    const candidate = withList(env, listKey, list.slice(0, n), total);
+    const candidate = withList(env, listKey, list.slice(0, n), total, budget);
     const s = serializeEnvelope(candidate).length;
     if (s <= budget) return { ok: true, envelope: candidate };
   }
@@ -538,9 +538,10 @@ function withList<D>(
   listKey: string,
   items: unknown[],
   total: number,
+  budget: number,
 ): Envelope<D> {
   const data = { ...(env.data as Record<string, unknown>), [listKey]: items } as D;
-  const warning = `result truncated to ${String(items.length)} of ${String(total)} ${listKey} to fit the ${String(RESULT_BUDGET_CHARS)}-character budget; request a smaller limit, page with offset, or filter`;
+  const warning = `result truncated to ${String(items.length)} of ${String(total)} ${listKey} to fit the ${String(budget)}-character budget; request a smaller limit, page with offset, or filter`;
   const warnings = [...env.warnings, warning];
   if (env.page === undefined) return { ...env, data, truncated: true, warnings };
   const page: PageInfo = {
