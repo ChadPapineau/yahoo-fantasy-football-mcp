@@ -64,6 +64,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 2026-09-29 | Stack default: Node/TypeScript + official MCP SDK | matches Chad's other local MCP servers; deviations must be justified in the plan |
 | 2026-09-29 | Concurrency capped at two agents | Chad's credit-efficiency rule (2026-09-24) |
 | 2026-09-29 | Orchestration artefacts (roster, verbatim briefs, program) are committed in `docs/scratch/` | resumability after usage-limit cutoffs |
+| 2026-09-30 | **No development or testing until Chad has reviewed the completed research + planning package** (refined plan, adversarial log + changelog, README/docs, executive summary) and approves | Chad's explicit instruction; the orchestrator reports completion and stops |
 | 2026-09-30 | **Read-only is acceptable as the product** (Chad): thorough reads of free agents, roster, adds/drops, league activity, stats + intelligent move recommendations are sufficient. Write access is a bonus if Yahoo ever grants it, not a requirement | Yahoo's "write access is not available at this time"; the plan's Phase 1–3 are read-only by design, Phase W stays conditional and low priority |
 
 ## Stack facts checked by the orchestrator (2026-09-29)
