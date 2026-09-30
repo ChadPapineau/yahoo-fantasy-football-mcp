@@ -117,7 +117,7 @@ Shutdown is **idempotent and single-flight** (`shutdown()` returns the same prom
 
 ## 3. Config precedence
 
-`env` > `<config>/config.json` (optional, 0600 not required — no secrets allowed in it; `doctor` rejects a `client_secret` key there) > defaults. Keys: `YAHOO_CLIENT_ID` (required), `YAHOO_CLIENT_SECRET` | `YAHOO_CLIENT_SECRET_FILE`, `FF_CONFIG_DIR`, `FF_CACHE_DIR`, `FF_LEAGUE_KEYS`, `FF_WRITE_ENABLED`, `FF_TOOLSET` (`core` default | `full`; plan 07 C3), `FF_AUTH_PORT`, `FF_LOG_LEVEL`, `ODDS_API_KEY` (optional), `FF_WEATHER_SOURCE` (`open-meteo` | `nws`). Every key is documented once, in `src/config/schema.ts` (zod) from which the README table is generated (plan 04 §6).
+`env` > `<config>/config.json` (optional, 0600 not required — no secrets allowed in it; `doctor` rejects a `client_secret` key there) > defaults. Keys: `YAHOO_CLIENT_ID` (required), `YAHOO_CLIENT_SECRET` | `YAHOO_CLIENT_SECRET_FILE`, `FF_CONFIG_DIR`, `FF_CACHE_DIR`, `FF_LEAGUE_KEYS`, `FF_WRITE_ENABLED`, `FF_TOOLSET` (`core` default | `full`; plan 07 C3), `FF_AUTH_PORT`, `FF_LOG_LEVEL`, `ODDS_API_KEY` (optional), `FF_WEATHER_SOURCE` (`open-meteo` | `nws`). When `ManualLeagueProvider` is the platform, the league file is `<config>/league.yaml` (0600; real names; never in the checkout — round 2, OBJ-29). Every key is documented once, in `src/config/schema.ts` (zod) from which the README table is generated (plan 04 §6).
 
 ---
 
@@ -165,7 +165,7 @@ Offline checks run always; `--online` adds the network ones; `--fix` repairs mod
 | 1 | Node version | **≥ 24.15.0** — the line on which `node:sqlite` is a release candidate [V-node v24.x, 2026-09-30]; the v22 line is "active development" and prints `ExperimentalWarning` at every start (observed on 22.23.2, HANDOFF) *(revised round 1, OBJ-09)*. The message hedges the LTS label: "Node 24 (the LTS line per nodejs.org's schedule at build time — **[A-7]**)" | install/switch — Chad runs Node 22 via `fnm` today: `fnm install 24 && fnm use 24` (the README quickstart carries this line); the config's `command` must point at the 24 binary |
 | 2 | Launch config paths | `command` and `args[0]` absolute, exist, executable; `command` is Node ≥ 24.15; `args` contains `serve` | prints the corrected snippet from `print-config` |
 | 3 | Client config secrecy | no `YAHOO_CLIENT_SECRET` value in a client config that is group/other-readable | recommend `YAHOO_CLIENT_SECRET_FILE` |
-| 4 | Config dir | exists, mode 0700, owned by the user | `--fix` chmods |
+| 4 | Config dir | exists, mode 0700, owned by the user; `league.yaml` 0600 if present (round 2, OBJ-29) | `--fix` chmods |
 | 5 | Token file | exists, mode 0600, parses, `version` current; reports `expires_at`, `refreshed_at` age, `provisioning.state` + evidence | "run `ff auth`" (exit 3) |
 | 6 | Client secret | env or file present; file mode 0600; not empty; no trailing newline (Yahoo's Basic-auth gotcha [V-03 §A.3]) | strip / chmod |
 | 7 | Gate key | present and 0600 if any journal rows exist | regenerate (voids pending prepared writes — said explicitly) |
@@ -218,7 +218,7 @@ The server process never exits on an auth problem; auth problems are tool result
 `ff uninstall` (interactive; `--yes` for scripts):
 1. `launchctl bootout gui/$UID/<label>` for each of our plists and delete them from `~/Library/LaunchAgents/`.
 2. Delete `~/.cache/fantasy-football-mcp/` (store, `ds/` dataset files, temp downloads) — asks first because the journal and recommendation log live there; offers `--export-journal <path>` (JSON) before deletion.
-3. Ask before deleting `~/.config/fantasy-football-mcp/` (tokens, gate key, client secret file, auth cert — there is no pending-confirmation file; plan 02 §4.2 channel 2 keeps the code only in the notification and its hash in the store).
+3. Ask before deleting `~/.config/fantasy-football-mcp/` (tokens, gate key, client secret file, auth cert, the manual league file `league.yaml` — there is no pending-confirmation file; plan 02 §4.2 channel 2 keeps the code only in the notification and its hash in the store).
 4. Print, and do **not** edit: the `mcpServers.fantasy-football` entry to remove from the Claude Desktop config; the `claude mcp remove fantasy-football` command; the Yahoo account page where the app's consent can be revoked (revocation is only possible at Yahoo [V-03 §A.2]); a note that Time Machine may hold copies of the token file.
 5. `npm uninstall -g fantasy-football-mcp` if globally installed (printed, not run).
 
