@@ -9,8 +9,9 @@
 // ample. Zones are IANA names. `roof_default` is the venue's physical roof: `outdoors` (open-air,
 // incl. canopies), `dome` (fixed roof), `closed` (retractable — assumed closed when unknown, since a
 // retractable roof is closed exactly in the weather that would matter). Where nflverse's own `roof`
-// disagrees (it says `dome` for the open-air MCG, Stade de France and Allianz Arena), the game row's
-// `roof` still wins in the reader (COALESCE); this table only fills a missing value.
+// disagrees (it says `dome` for the open-air MCG, Stade de France and Allianz Arena), the physical
+// roof wins for open-air and fixed-roof venues (the store reader's gameRoof and the weather sources'
+// needsWeather); only a retractable venue's game row carries its own state.
 import type { VenueInfo } from "../domain/analytics/types.js";
 import type { DatasetRow } from "../store/types.js";
 

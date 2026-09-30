@@ -18,6 +18,7 @@ import {
   sourceTempDir,
   versionString,
 } from "../../../src/sources/nflverse/release.js";
+import { HttpError } from "../../../src/http/errors.js";
 import { REL, makeCtx, type Ctx } from "./helpers/harness.js";
 
 const open: Ctx[] = [];
@@ -148,6 +149,28 @@ describe("releaseVersion", () => {
     }
     const big = ctxFor([2026], new Map([[url, new Uint8Array(4096)]]));
     await expect(releaseVersion("schedules", big.ctx)).resolves.toBeNull();
+  });
+
+  it("re-throws a transient network failure (the runner retries it); a permanent one is null", async () => {
+    const url = `${REL}/schedules/timestamp.txt`;
+    for (const kind of ["dns", "reset", "timeout", "http_5xx", "rate_limited"] as const) {
+      const e = new HttpError({
+        kind,
+        host: "github.com",
+        status: kind === "http_5xx" ? 503 : null,
+      });
+      const c = ctxFor([2026], new Map([[url, e]]));
+      await expect(releaseVersion("schedules", c.ctx)).rejects.toBe(e);
+    }
+    for (const kind of ["tls", "http_4xx", "too_large", "redirect_refused"] as const) {
+      const e = new HttpError({
+        kind,
+        host: "github.com",
+        status: kind === "http_4xx" ? 404 : null,
+      });
+      const c = ctxFor([2026], new Map([[url, e]]));
+      await expect(releaseVersion("schedules", c.ctx)).resolves.toBeNull();
+    }
   });
 
   it("fails loudly on a garbled or non-UTF-8 stamp", async () => {
