@@ -313,6 +313,10 @@ describe("plan 08 §7 properties", () => {
 
   it("P9 negative floor: max(0, exact) when negatives are off, exact when on", () => {
     const off = sampleSettings({ set: { uses_negative_points: false } });
+    // negatives allowed: no floor even when a scope is set (P9 "with true, points = points_exact")
+    const on = sampleSettings({
+      set: { negative_floor: { scope: "player_week_total", verified: true } },
+    });
     fc.assert(
       fc.property(
         valuesArb(
@@ -321,11 +325,11 @@ describe("plan 08 §7 properties", () => {
         ),
         (values) => {
           const r = score(lineOf("O", values), off);
-          const on = score(lineOf("O", values), S);
+          const onR = score(lineOf("O", values), on);
           return (
             r.points >= 0 &&
             r.points === Math.max(0, r.points_exact) &&
-            on.points === on.points_exact &&
+            onR.points === onR.points_exact &&
             applyPolicy(r.points, off) === r.points
           );
         },
