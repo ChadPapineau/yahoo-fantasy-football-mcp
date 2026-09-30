@@ -152,13 +152,13 @@ describe("parse + schema + normalize units", () => {
       expect.arrayContaining([
         "Example League",
         "manual.l.example",
-        "example",
         "Team A",
         "Team L",
         "Manager A",
         "Manager L",
       ]),
     );
+    expect(n.data.identifiers).not.toContain("example"); // the bare slug would shred log lines
   });
 
   it("the fixture's players agree with the shared fixture roster (name, team, position, gsis id)", async () => {

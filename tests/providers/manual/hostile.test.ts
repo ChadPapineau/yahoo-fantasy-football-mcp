@@ -145,6 +145,15 @@ describe("YAML-level attacks", () => {
     expect(reasons(await invalid(`version: 1\nx: "${CANARY}\n`))).toMatch(/line \d+|YAML error/);
   });
 
+  it("YAML directives (%YAML 1.1 schema switch, %TAG handles) are rejected", async () => {
+    expect(reasons(await invalid(`%YAML 1.1\n---\nversion: 1\nx: ${CANARY}\n`))).toMatch(
+      /directives are not allowed/,
+    );
+    expect(reasons(await invalid(`%TAG !e! tag:${CANARY},2026:\n---\nversion: 1\n`))).toMatch(
+      /directives are not allowed/,
+    );
+  });
+
   it("an empty file, a comment-only file and a non-mapping root are rejected", async () => {
     expect(reasons(await invalid(""))).toMatch(/empty/);
     expect(reasons(await invalid(`# ${CANARY}\n`))).toMatch(/empty/);

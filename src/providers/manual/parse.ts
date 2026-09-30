@@ -102,6 +102,9 @@ function cstIssues(tokens: readonly CST.Token[], lc: LineCounter): LeagueFileIss
       }
       case "alias":
         return [{ path: lineOf(lc, tok.offset), reason: "YAML aliases are not allowed" }];
+      case "directive":
+        // `%YAML 1.1` would switch schemas (merge keys, !!set, !!timestamp); `%TAG` adds handles.
+        return [{ path: lineOf(lc, tok.offset), reason: "YAML directives are not allowed" }];
       default:
         break;
     }
