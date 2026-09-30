@@ -9,10 +9,12 @@ import {
   TOOL_NAME_GRAMMAR,
   advertisedInputSchema,
   advertisedOutputSchema,
+  CALL_LEDGER_MAX,
   compactJsonSchema,
   defineTool,
   envelopeOutline,
   fullDescription,
+  recentCall,
   roundDeep,
   runTool,
   type AnyToolDefinition,
@@ -247,5 +249,48 @@ describe("runTool: budget and self-validation (a bug is INTERNAL + a log line, n
     };
     expect(env.data.x).toBe(1.235);
     expect(env.meta.estimate).toBe(true);
+  });
+});
+
+describe("the call ledger (E12's source_calls week check)", () => {
+  const def = (week?: number): AnyToolDefinition => ({
+    name: "ff_test_tool",
+    family: "ops",
+    description: "t",
+    input: z.strictObject({}),
+    data: null,
+    budget: "list",
+    run: () =>
+      Promise.resolve({ data: { items: [] }, inputs: [], ...(week === undefined ? {} : { week }) }),
+  });
+  const rid = (i: number): string => `r-${i.toString(16).padStart(12, "0")}`;
+
+  it("remembers successful calls per server, with their week, and forgets the oldest past the cap", async () => {
+    const a = fakeServices([]);
+    const b = fakeServices([]);
+    await runTool(def(3), {}, { requestId: rid(1) }, a, OPTIONS, null);
+    await runTool(def(), {}, { requestId: rid(2) }, a, OPTIONS, null);
+    expect(recentCall(a, rid(1))).toEqual({ tool: "ff_test_tool", week: 3 });
+    expect(recentCall(a, rid(2))).toEqual({ tool: "ff_test_tool", week: null });
+    expect(recentCall(b, rid(1))).toBeNull(); // another server's services: another ledger
+    expect(recentCall(a, rid(999_999))).toBeNull();
+    for (let i = 3; i <= CALL_LEDGER_MAX + 2; i++)
+      await runTool(def(4), {}, { requestId: rid(i) }, a, OPTIONS, null);
+    expect(recentCall(a, rid(1))).toBeNull();
+    expect(recentCall(a, rid(2))).toBeNull();
+    expect(recentCall(a, rid(3))).toEqual({ tool: "ff_test_tool", week: 4 });
+    expect(recentCall(a, rid(CALL_LEDGER_MAX + 2))).not.toBeNull();
+  });
+
+  it("a failed call is never remembered", async () => {
+    const svc = fakeServices([]);
+    const failing: AnyToolDefinition = {
+      ...def(3),
+      run: () => Promise.resolve({ data: { blob: "x".repeat(25_000) }, inputs: [], week: 3 }),
+    };
+    await expect(
+      runTool(failing, {}, { requestId: rid(7) }, svc, OPTIONS, null),
+    ).rejects.toBeInstanceOf(FfError);
+    expect(recentCall(svc, rid(7))).toBeNull();
   });
 });

@@ -58,6 +58,48 @@ export interface ToolOutput<D> {
   readonly warnings?: readonly string[];
   /** The array under `data` the budget may halve (list tools, analytics candidate lists). */
   readonly listKey?: string;
+  /**
+   * The week this result is about (the analytics tools' target week). Remembered against the
+   * call's request_id so E12 can refuse a rec logged under a different week than its source call.
+   */
+  readonly week?: number;
+}
+
+// --- the call ledger (E12's source_calls check) ------------------------------------------------------
+
+/** What this server remembers of one successful call. */
+export interface CallRecord {
+  readonly tool: string;
+  /** The week the result was about, or null when the tool names none. */
+  readonly week: number | null;
+}
+
+/** How many recent calls one server remembers (a session's worth; oldest forgotten first). */
+export const CALL_LEDGER_MAX = 1024;
+
+const LEDGERS = new WeakMap<McpServices, Map<string, CallRecord>>();
+
+/** Records a successful call against its request_id (bounded, insertion-ordered). */
+function rememberCall(services: McpServices, requestId: string, rec: CallRecord): void {
+  let ledger = LEDGERS.get(services);
+  if (ledger === undefined) {
+    ledger = new Map();
+    LEDGERS.set(services, ledger);
+  }
+  ledger.set(requestId, rec);
+  while (ledger.size > CALL_LEDGER_MAX) {
+    const oldest = ledger.keys().next();
+    if (oldest.done === true) break;
+    ledger.delete(oldest.value);
+  }
+}
+
+/**
+ * The successful call this server session answered under `requestId`, or null (unknown: another
+ * session, a restart, forgotten, or never issued).
+ */
+export function recentCall(services: McpServices, requestId: string): CallRecord | null {
+  return LEDGERS.get(services)?.get(requestId) ?? null;
 }
 
 /** Per-call context a tool implementation receives. */
@@ -306,6 +348,7 @@ export async function runTool(
       throw new FfError("INTERNAL");
     }
   }
+  rememberCall(services, ctx.requestId, { tool: def.name, week: out.week ?? null });
   return toToolResult(fit.envelope, full !== null);
 }
 

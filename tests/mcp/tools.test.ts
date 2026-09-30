@@ -479,6 +479,71 @@ describe("the recommendation log end to end (E12 → E13/E14; OBJ-15)", () => {
     expect(scored?.followed).not.toBeUndefined();
   });
 
+  it("a rec logged under another week than its source call is refused (week checked server-side)", async () => {
+    const lineup = await ok("ff_analyze_lineup", { week: 3 });
+    const rid = lineup.meta.request_id;
+    const base = { kind: "lineup", rec: lineup.data.rec, alternatives: [] };
+    // the gate's case: a week-3 ff_analyze_lineup result logged as week 4
+    const wrong = await err("ff_record_recommendation", {
+      ...base,
+      week: 4,
+      source_calls: [{ tool: "ff_analyze_lineup", request_id: rid }],
+    });
+    expect(wrong).toMatchObject({ code: "VALIDATION", field: "week" });
+    expect(wrong.reason).toBe("source_call_week_mismatch");
+    // a cited request id that another tool answered
+    const tool = await err("ff_record_recommendation", {
+      ...base,
+      week: 3,
+      source_calls: [
+        { tool: "ff_analyze_lineup", request_id: rid },
+        { tool: "ff_analyze_matchup", request_id: rid },
+      ],
+    });
+    expect(tool).toMatchObject({ code: "VALIDATION", field: "source_calls[1].tool" });
+    expect(tool.reason).toBe("source_call_tool_mismatch");
+    // a week-less source call (a read tool) never blocks; the right week passes
+    const roster = await ok("ff_get_roster", { week: 3 });
+    const right = await ok("ff_record_recommendation", {
+      ...base,
+      week: 3,
+      source_calls: [
+        { tool: "ff_analyze_lineup", request_id: rid },
+        { tool: "ff_get_roster", request_id: roster.meta.request_id },
+      ],
+      client_ref: "week-check-ok",
+    });
+    expect(right.data).toMatchObject({ week: 3, deduplicated: false });
+    expect(right.warnings).toEqual([]);
+    // an id this session never answered (a restart, another client) cannot be checked: warned
+    const unseen = await ok("ff_record_recommendation", {
+      ...base,
+      week: 4,
+      source_calls: [{ tool: "ff_analyze_lineup", request_id: "r-0123456789ab" }],
+      client_ref: "week-check-unseen",
+    });
+    expect(unseen.warnings.join(" ")).toMatch(
+      /1 source_calls were not answered in this server session/,
+    );
+    // every analytics tool remembers its week
+    for (const [name, args, w] of [
+      [
+        "ff_project_players",
+        { players: { team_key: TEAM_A }, horizon: "week", week: 3, n_sims: 1000 },
+        3,
+      ],
+      ["ff_analyze_matchup", { week: 3 }, 3],
+    ] as const) {
+      const r = await ok(name, args);
+      const e = await err("ff_record_recommendation", {
+        ...base,
+        week: w + 1,
+        source_calls: [{ tool: name, request_id: r.meta.request_id }],
+      });
+      expect(e.reason, name).toBe("source_call_week_mismatch");
+    }
+  });
+
   it("an invalid record is VALIDATION naming the field, never INTERNAL", async () => {
     const lineup = await ok("ff_analyze_lineup", { week: 3 });
     const rec = { ...(lineup.data.rec as Record<string, unknown>), as_of: "2030-01-01T00:00:00Z" };
