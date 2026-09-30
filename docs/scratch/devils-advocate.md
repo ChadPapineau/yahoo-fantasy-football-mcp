@@ -9,7 +9,7 @@ Off-limits (owned by `ci-bootstrap`, in flight in the same tree): `.github/**`,
 
 ## RESUME HERE
 
-**Round:** 2 (verdicts + new objections) — **DONE and pushed** (SHA below).
+**Round:** 2 (verdicts + new objections) — **DONE and pushed at 1ab4db5**.
 Round 1: 23 objections (2 blocking) → orchestrator defence `f2abb64` (18 concede,
 4 concede-modified, 1 justified) → reviser applied everything through `8c39191`.
 Round 2 (`## Round 2 — verdicts and objections`): verdict table = 22
@@ -49,7 +49,7 @@ file tells you whose move it is (`objections`/`verdicts` = mine, `defence` =
 orchestrator's).
 
 **Pushed SHAs:** 97f3085 (scratch start) · ebe848d (reading notes) ·
-**52337a3 (round-1 objections, `docs/plan/adversarial-log.md`)**.
+**52337a3** (round-1 objections) · **1ab4db5** (round-2 verdicts + OBJ-24…30).
 
 ## Verification results (2026-09-30, primary sources) — keep for round 2
 
