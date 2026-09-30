@@ -20,6 +20,7 @@ Standard carried over from SOTARA (`docs/12-testing-standards.md` there): **ever
 | T6 | **Model-driven evals: 10 read-only questions over the frozen fixture league**, run manually with the mcp-builder Python harness before a release | `evaluation.md`'s rules (read-only, independent, stable, single verifiable answer) are satisfiable only on frozen data | evals against the live league (answers change weekly) | Nothing |
 | T7 | **Coverage gate: 90 % lines / 85 % branches / 90 % functions globally; 100 % lines + branches for seven named modules** *(six → seven, T10 round 1: the retrospective's metric code)* | §7 | 80 % flat | Nothing downward; upward as the codebase settles |
 | T8 | **Every regression test is mutation-verified** before its finding is closed | SOTARA round-5 lesson | trust the green | Nothing |
+| T9 | **Safety defaults and contention are tested as properties, not assumed**: the XML entity flags carry a mutation check (§2 `xml`), the store carries a 3-s writer-lock contention test and a backup-restore test (§2 `store`), the envelope test walks every output for unlabelled third-party strings, and `defineTool()`'s toolset/schema rules are asserted (§2) *(added round 1: OBJ-10, 11, 14, 07)* | round 1 found a safety default stated backwards (A-9) and a backup that was a torn copy — both would have passed a test written to the wished-for API | trust the library default; trust `cp` | Nothing |
 
 ---
 
