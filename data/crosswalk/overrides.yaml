@@ -1,0 +1,22 @@
+# data/crosswalk/overrides.yaml — manual crosswalk overrides (research 04 §D step 3).
+#
+# The residue the matcher cannot resolve on its own: practice-squad and same-name cases, or a
+# deterministic match that is wrong. An override WINS over every other evidence (exact id,
+# persisted pair, name + team + position match); a conflict with an id match is reported as a
+# diagnostic, never silently ignored. Loaded by src/providers/crosswalk-overrides.ts.
+#
+# Schema (validated strictly; any other key, type or shape rejects the whole file):
+#   version: 1                      # required, the literal 1
+#   overrides:                      # required list (may be empty), at most 2000 rows
+#     - platform: yahoo             # yahoo | manual | sleeper | espn
+#       platform_player_id: "nfl.p.30977"
+#                                   # yahoo: <game>.p.<n> or nfl.p.<n> (compared by <n>);
+#                                   # manual: manual.p.<id>; sleeper/espn: the numeric id
+#       gsis_id: "00-0034857"       # nflverse gsis id, 00-NNNNNNN
+#       note: "why this override exists"   # optional, <= 200 chars, no control characters
+#
+# Rules: one row per platform player; no anchors/aliases needed (alias expansion is capped);
+# keys __proto__ / constructor / prototype are rejected; the file must stay under 256 KiB.
+# Never put a real fantasy league's name, team names or ids here — only public NFL identities.
+version: 1
+overrides: []
