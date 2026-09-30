@@ -9,7 +9,7 @@
       "phase": "1a",
       "prompt": "Which defense should I stream?",
       "fixture_variant": null,
-      "setup": "Base league, week 4; the user's DEF is HOU.",
+      "setup": "Base league, week 4; the user's DEF is DET and their K is Chris Boswell (PIT).",
       "expectations": [
         {
           "kind": "tool_order",

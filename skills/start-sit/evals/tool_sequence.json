@@ -56,7 +56,7 @@
           "args": {
             "week": 4,
             "objective": "mean",
-            "compare": [{ "out": "manual.p.00-0036900", "in": "manual.p.00-0035719" }]
+            "compare": [{ "out": "manual.p.00-0038543", "in": "manual.p.00-0030279" }]
           }
         },
         {
@@ -87,7 +87,7 @@
           "id": "projections",
           "tool": "ff_project_players",
           "args": {
-            "players": { "player_keys": ["manual.p.00-0035719", "manual.p.00-0033090"] },
+            "players": { "player_keys": ["manual.p.00-0030279", "manual.p.00-0033090"] },
             "horizon": "week",
             "week": 4,
             "seed": 20260930

@@ -91,7 +91,7 @@ The role sample size (`rec.confidence.role_games`), every input's `as_of` / `age
 `rec.latest_execution_time`, or the earliest `lock_at` that matters, in Eastern Time. Every action carries one.
 
 ### Manual steps
-This version is read-only, so end with the exact steps the user makes in the fantasy app that hosts the league: one numbered step per change, in the app's words (the page, the slot, the player, the button), each with its deadline. Example: "1. My Team → Week 4 → Edit lineup: move Deebo Samuel Sr. from BN to W/R/T and Ja'Marr Chase to BN — before 13:00 ET Sunday. 2. Save, and check the W/R/T slot shows Deebo Samuel Sr." When the answer is "no move", say "Nothing to change."
+This version is read-only, so end with the exact steps the user makes in the fantasy app that hosts the league: one numbered step per change, in the app's words (the page, the slot, the player, the button), each with its deadline. Example: "1. My Team → Week 4 → Edit lineup: move Keenan Allen from BN to W/R/T and Jaxon Smith-Njigba to BN — before 13:00 ET Sunday. 2. Save, and check the W/R/T slot shows Keenan Allen." When the answer is "no move", say "Nothing to change."
 
 ### Log
 The `log_id` returned by `ff_record_recommendation` (recorded before this answer was shown), or "not logged" and why.
