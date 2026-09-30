@@ -10,6 +10,7 @@ import { NFL_TEAMS, type NflTeam } from "../../config/schema.js";
 import { kickoffMs, opponentOf, teamGame } from "../league/schedule.js";
 import type { PlayerKey, Week } from "../league/types.js";
 import { scoringEngine } from "../scoring/engine.js";
+import { at } from "../scoring/numeric.js";
 import type {
   Canonical,
   Dist,
@@ -169,11 +170,17 @@ interface Loaded {
   readonly injuriesLoaded: Map<Week, boolean>;
   readonly weather: Map<string, WeatherObservation>;
   readonly stamps: (DatasetStamp | null)[];
-  readonly priorSeasonLoaded: boolean;
-  readonly currentSeasonRead: boolean;
 }
 
+/** `r[k]`, or 0 when the stat is absent (the one "absent reads 0" rule of this module). */
+export const statOf = (r: Readonly<Record<Canonical, number>>, k: Canonical): number => r[k] ?? 0;
+
 const gameKey = (season: number, week: Week): string => `${String(season)}:${String(week)}`;
+
+/** The loaded games of one season-week ([] when none). */
+function gamesAt(games: ReadonlyMap<string, NflGame[]>, season: number, week: Week): NflGame[] {
+  return games.get(gameKey(season, week)) ?? [];
+}
 
 function windowWeeks(season: number, firstWeek: Week): { cur: Week[]; prev: Week[] } {
   const cur: Week[] = [];
@@ -181,7 +188,7 @@ function windowWeeks(season: number, firstWeek: Week): { cur: Week[]; prev: Week
   const prev: Week[] = [];
   const need = WINDOW.maxGames - cur.length;
   for (let w = WINDOW.priorSeasonLastWeek - need + 1; w <= WINDOW.priorSeasonLastWeek; w++) {
-    if (need > 0 && w >= 1) prev.push(w);
+    prev.push(w);
   }
   return { cur, prev };
 }
@@ -242,8 +249,6 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
     ),
   ].sort();
   const raw = new Map<string, PlayerWeekLine[]>();
-  let priorSeasonLoaded = false;
-  const currentSeasonRead = cur.length > 0;
   const addLines = (rows: readonly PlayerWeekLine[]): void => {
     for (const r of rows) {
       if (r.week >= first && r.season === season) continue; // never read the as-of week or later
@@ -265,7 +270,6 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
   if (gsisIds.length > 0 && prev.length > 0) {
     const r = req.readers.playerWeeks.lines(gsisIds, season - 1, prev);
     if (r.stamp !== null) {
-      priorSeasonLoaded = true;
       stamps.push(r.stamp);
       addLines(r.rows);
     }
@@ -315,7 +319,6 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
     if (prev.length > 0) {
       const r = req.readers.playerWeeks.defenseLines(NFL_TEAMS, season - 1, prev);
       if (r.stamp !== null) {
-        priorSeasonLoaded = true;
         stamps.push(r.stamp);
         addDef(r.rows);
       }
@@ -340,9 +343,7 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
   const weather = new Map<string, WeatherObservation>();
   const kickerWeeks = req.targets.some((t) => t.subject.kind === "player" && t.position === "K");
   if (kickerWeeks && req.readers.weather !== undefined) {
-    const ids = req.weeks.flatMap((w) =>
-      (games.get(gameKey(season, w)) ?? []).map((g) => g.game_id),
-    );
+    const ids = req.weeks.flatMap((w) => gamesAt(games, season, w).map((g) => g.game_id));
     if (ids.length > 0) {
       const r = req.readers.weather.forGames([...new Set(ids)].sort());
       if (r.stamp !== null) stamps.push(r.stamp);
@@ -357,8 +358,6 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
     injuriesLoaded,
     weather,
     stamps,
-    priorSeasonLoaded,
-    currentSeasonRead,
   };
 }
 
@@ -382,11 +381,12 @@ function weightedMeans(games: readonly WindowGame[]): Weighted {
   const acc: Record<Canonical, number> = {};
   for (const g of games) {
     for (const [k, v] of Object.entries(g.line.values)) {
-      acc[k] = (acc[k] ?? 0) + g.weight * v;
+      acc[k] = statOf(acc, k) + g.weight * v;
     }
   }
   const mean: Record<Canonical, number> = {};
-  for (const [k, s] of Object.entries(acc)) mean[k] = sumW > 0 ? s / sumW : 0;
+  // every weight is > 0, so a stat in `acc` implies sumW > 0
+  for (const [k, s] of Object.entries(acc)) mean[k] = s / sumW;
   return { mean, n: sumW };
 }
 
@@ -401,8 +401,8 @@ function shrink(
   const shrinkage: Shrinkage[] = [];
   for (const k of keys) {
     const kk = shrinkKFor(k);
-    const p = prior[k] ?? 0;
-    const o = obs.mean[k] ?? 0;
+    const p = statOf(prior, k);
+    const o = statOf(obs.mean, k);
     line[k] = (obs.n * o + kk * p) / (obs.n + kk);
     shrinkage.push({ rate: k, n: round(obs.n, 2), k: kk });
   }
@@ -429,7 +429,7 @@ function windowImplied(games: readonly WindowGame[], loaded: Loaded): number {
   let s = 0;
   let w = 0;
   for (const g of games) {
-    const game = teamGame(g.team, loaded.games.get(gameKey(g.season, g.week)) ?? []);
+    const game = teamGame(g.team, gamesAt(loaded.games, g.season, g.week));
     const imp = impliedFor(g.team, game);
     if (imp !== null) {
       s += g.weight * imp;
@@ -462,7 +462,7 @@ function simulatePlayer(
 ): StatLine[] {
   const pt = positionTypeOf(pos);
   const keys = Object.keys(expectation)
-    .filter((k) => (expectation[k] ?? 0) > 0)
+    .filter((k) => statOf(expectation, k) > 0)
     .sort();
   const present = Object.freeze(keys);
   const empty: StatLine = Object.freeze({
@@ -481,7 +481,7 @@ function simulatePlayer(
     }
     const g = gammaMultiplier(rng, cv);
     const values: Record<Canonical, number> = {};
-    for (const k of keys) values[k] = (expectation[k] ?? 0) * g;
+    for (const k of keys) values[k] = statOf(expectation, k) * g;
     out.push({ values, present, position_type: pt, provisional: false, source: SOURCE });
   }
   return out;
@@ -493,8 +493,9 @@ function simulateDefense(
   rng: Rng,
 ): StatLine[] {
   const out: StatLine[] = [];
-  const pa = expectation.dst_pa ?? PRIOR_LINES.DEF.dst_pa ?? 22;
-  const ya = expectation.dst_ya ?? PRIOR_LINES.DEF.dst_ya ?? 330;
+  // both are always present: the DEF prior carries them and shrinkage keeps every prior key
+  const pa = statOf(expectation, "dst_pa");
+  const ya = statOf(expectation, "dst_ya");
   const counts = Object.keys(expectation)
     .filter((k) => k !== "dst_pa" && k !== "dst_ya")
     .sort();
@@ -502,7 +503,7 @@ function simulateDefense(
     const values: Record<Canonical, number> = {};
     values.dst_pa = Math.round(pa * gammaMultiplier(rng, DEF_SIM.pointsAllowedCv));
     values.dst_ya = Math.round(ya * gammaMultiplier(rng, DEF_SIM.yardsAllowedCv));
-    for (const k of counts) values[k] = poissonDraw(rng, expectation[k] ?? 0);
+    for (const k of counts) values[k] = poissonDraw(rng, statOf(expectation, k));
     out.push(lineOf(values, "DT"));
   }
   return out;
@@ -527,7 +528,11 @@ const BASE_ASSUMPTIONS: readonly Assumption[] = Object.freeze([
   ),
 ]);
 
-function bracketExpectation(
+/**
+ * Expected points from a position type's bracket families (indicator: Σ P(member) × points; count:
+ * Σ E[count] × points) — read off scoreSamples' `bracket_probability` (plan 08 §2).
+ */
+export function bracketPoints(
   settings: ScoringSettings,
   pt: PositionType,
   s: ScoreSamplesResult,
@@ -541,7 +546,7 @@ function bracketExpectation(
       const rule = settings.rules.find(
         (r) => r.canonical === m.canonical && r.position_types.includes(pt),
       );
-      if (rule?.modifier != null) total += (probs[i] ?? 0) * rule.modifier;
+      if (rule?.modifier != null) total += at(probs, i) * rule.modifier;
     });
   }
   return total;
@@ -585,8 +590,6 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
         "after the player's first game",
       ),
     );
-  } else if (!loaded.currentSeasonRead && !loaded.priorSeasonLoaded) {
-    assumptions.push(A("no trailing season loaded", "run ff refresh nflverse"));
   }
 
   const weeks: ProjectedWeek[] = [];
@@ -598,7 +601,7 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
 
   for (const [wi, week] of req.weeks.entries()) {
     const nWeek = wi === 0 ? n : ctx.nLater;
-    const weekGames = loaded.games.get(gameKey(req.season, week)) ?? [];
+    const weekGames = gamesAt(loaded.games, req.season, week);
     const game = team === null ? null : teamGame(team, weekGames);
     const rng = req.rng.fork(`projection:${subjectId}:${String(week)}`);
     const pt: PositionType = pos === null ? "O" : positionTypeOf(pos);
@@ -654,8 +657,8 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
       base = { ...sh.line };
       for (const c of ["dst_sack", "dst_int", "dst_fum_rec"]) {
         base[c] =
-          DEF_SIM.ownRateWeight * (sh.line[c] ?? 0) +
-          (1 - DEF_SIM.ownRateWeight) * (oppSh.line[c] ?? 0);
+          DEF_SIM.ownRateWeight * statOf(sh.line, c) +
+          (1 - DEF_SIM.ownRateWeight) * statOf(oppSh.line, c);
       }
       if (oppImplied !== null) base.dst_pa = oppImplied;
       else
@@ -681,7 +684,7 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
           MARKET.maxMultiplier,
         );
         for (const k of Object.keys(expectation)) {
-          if (isMarketScaled(k)) expectation[k] = (expectation[k] ?? 0) * marketMult;
+          if (isMarketScaled(k)) expectation[k] = statOf(expectation, k) * marketMult;
         }
       } else if (!assumptions.some((a) => a.text.startsWith("no betting line"))) {
         assumptions.push(
@@ -697,13 +700,13 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
           wx.wind_mph >= KDEF.windMph &&
           !INDOOR_ROOFS.includes(roof)
         ) {
-          weatherFactor = KDEF.windFactor.fg_50p ?? 1;
+          weatherFactor = statOf(KDEF.windFactor, "fg_50p");
           for (const [k, f] of Object.entries(KDEF.windFactor)) {
-            if (expectation[k] !== undefined) expectation[k] = (expectation[k] ?? 0) * f;
+            if (expectation[k] !== undefined) expectation[k] = statOf(expectation, k) * f;
           }
         }
       }
-      const loadedInj = loaded.injuriesLoaded.get(week) ?? false;
+      const loadedInj = loaded.injuriesLoaded.get(week) === true;
       availability = pActive({
         report:
           t.subject.kind === "player"
@@ -725,7 +728,7 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
       }
     }
     for (const k of Object.keys(expectation)) {
-      const v = expectation[k] ?? 0;
+      const v = statOf(expectation, k);
       expectation[k] = Number.isFinite(v) && v > 0 ? v : 0;
     }
     const p = availability.p ?? 1;
@@ -747,7 +750,7 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
       firstMarket = marketMult;
       firstWeather = weatherFactor;
       if (pos === "DEF") {
-        const br = bracketExpectation(req.settings, "DT", samples);
+        const br = bracketPoints(req.settings, "DT", samples);
         drivers.push({ name: "points_allowed_brackets", contribution: round(br, 3) });
         drivers.push({
           name: "counts_and_rare_events",

@@ -2,6 +2,7 @@
 // §11.1 normal approximation Φ, §1 Evaluation Spearman): all driven by the injected seeded Rng
 // (src/domain/clock.ts), never Math.random. Pure.
 import type { Rng } from "../clock.js";
+import { at } from "../scoring/numeric.js";
 import type { Dist, DistBasis } from "../scoring/types.js";
 import { Z90 } from "./constants.js";
 
@@ -117,8 +118,8 @@ export function quantileSorted(sorted: readonly number[], q: number): number {
   const h = (n - 1) * clamp(q, 0, 1);
   const lo = Math.floor(h);
   const hi = Math.min(lo + 1, n - 1);
-  const a = sorted[lo] ?? 0;
-  const b = sorted[hi] ?? a;
+  const a = at(sorted, lo);
+  const b = at(sorted, hi);
   return a + (h - lo) * (b - a);
 }
 
@@ -177,9 +178,9 @@ export function ranks(xs: readonly number[]): number[] {
   let i = 0;
   while (i < idx.length) {
     let j = i;
-    while (j + 1 < idx.length && idx[j + 1]?.x === idx[i]?.x) j += 1;
+    while (j + 1 < idx.length && at(idx, j + 1).x === at(idx, i).x) j += 1;
     const r = (i + j) / 2 + 1;
-    for (let k = i; k <= j; k++) out[idx[k]?.i ?? 0] = r;
+    for (let k = i; k <= j; k++) out[at(idx, k).i] = r;
     i = j + 1;
   }
   return out;
@@ -197,8 +198,8 @@ export function spearman(a: readonly number[], b: readonly number[]): number | n
   let da = 0;
   let db = 0;
   for (let i = 0; i < n; i++) {
-    const x = (ra[i] ?? 0) - ma;
-    const y = (rb[i] ?? 0) - mb;
+    const x = at(ra, i) - ma;
+    const y = at(rb, i) - mb;
     num += x * y;
     da += x * x;
     db += y * y;
