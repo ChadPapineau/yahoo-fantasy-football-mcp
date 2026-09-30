@@ -128,8 +128,9 @@ Startup < 1 s with no network (fetch stub via env that makes any network call ex
 Using the SDK's client package in-process (an in-memory client ↔ server pair; **[A-1]** that v2 ships such test transports — `docs/testing.md` exists in the SDK repo and is the first thing to read when building this):
 
 - prepare → commit with **elicitation accept** → one write; **decline** → `CONFIRMATION_DENIED`, zero writes; **cancel within 2 s** → OOB code path offered; client without the capability → OOB path directly.
-- **OOB code:** wrong code ×3 → prepared write voided; correct code → one write; the code never appears in any tool result (grep the transcript); the notification payload contains the diff summary.
-- **CLI:** `ff confirm <id>` → one write; `--cancel` → voided.
+- **OOB code:** wrong code ×3 → prepared write voided; correct code → one write; the code never appears in any tool result (grep the transcript); the notification payload contains the diff summary **and the code**; **no file is written under `<config>/`** during the channel (an `fs` spy asserts zero writes — plan 02 §4.2 row 2, revised round 1); the journal row holds `sha256(code)` and never the code.
+- **CLI:** `ff confirm <id>` → one write; `--cancel` → voided; **`ff confirm` and `ff auth` with stdin not a TTY (a pipe) → exit 2 with the message and zero writes** (plan 02 S13); the process test spawns them with `stdio: "pipe"`.
+- **Claude Code detection (plan 02 S12, A-10):** with env `CLAUDECODE=1` and `FF_WRITE_ENABLED=1`, `ff doctor` #13 emits the "unsupported" warning; without the env it does not.
 - **Ticket:** tampered (any byte) → rejected; expired (fake clock +11 min) → `CONFIRMATION_EXPIRED`; replay after `applied` → the original receipt, zero additional writes (`idempotentHint` holds); gate key rotated → pending writes voided with the documented message.
 - **Precondition:** roster changed between prepare and commit (fixture swap) → `PRECONDITION_CHANGED`, zero writes; a locked player (`is_editable=0`) in the diff → prepare refuses.
 - **Legacy era:** the same flow against a client speaking the `initialize` handshake (SDK legacy shim on) [V-sdk input-required.md].

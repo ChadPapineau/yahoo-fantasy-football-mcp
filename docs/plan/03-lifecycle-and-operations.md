@@ -172,7 +172,7 @@ Offline checks run always; `--online` adds the network ones; `--fix` repairs mod
 | 10 | Pending journal | counts of `prepared`, `sent_unknown`; oldest age | `ff confirm --list`; reconciliation |
 | 11 | launchd jobs | plists present in `~/Library/LaunchAgents/`, loaded (`launchctl print gui/$UID/<label>`), last exit status from `refresh_log` | `ff install-launchd` |
 | 12 | `.npmrc` | `ignore-scripts=true`, `save-exact=true` when run from a checkout | — |
-| 13 | Write flag | `FF_WRITE_ENABLED=1` only with provisioning ≥ `provisioned_read`; warns that write capability is unknown until the first write | — |
+| 13 | Write flag | `FF_WRITE_ENABLED=1` only with provisioning ≥ `provisioned_read`; warns that write capability is unknown until the first write; **warns that writes are unsupported when a Claude Code launch is detected** (env `CLAUDECODE` or the client's `clientInfo.name` at connect — plan 02 S12, A-10) and prints the offered `permissions.deny` set (plan 02 §3.4) *(revised round 1, OBJ-01)* | disable the flag, or apply the deny set and move the refresh token to the Keychain `SecretSource` (plan 02 §3.3) |
 | 14 | *(online)* Clock skew | local time vs the `Date` header of an unauthenticated GET to the Yahoo API host (a 401 still carries `Date` [V-03 §B.6 probe]); warn > 60 s, fail > 300 s (token expiry math and HMAC TTLs depend on it) | fix the system clock |
 | 15 | *(online)* Token validity | GET `users;use_login=1/games` with the current access token; if expired, one refresh under the lock (the same code path the server uses — not a second implementation); classify per plan 02 §3.2 | exit 3 / 4 with the exact message |
 | 16 | *(online)* Provisioning | from #15: `provisioned_read`, or `not_provisioned` with the application URL | — |
@@ -211,7 +211,7 @@ The server process never exits on an auth problem; auth problems are tool result
 `ff uninstall` (interactive; `--yes` for scripts):
 1. `launchctl bootout gui/$UID/<label>` for each of our plists and delete them from `~/Library/LaunchAgents/`.
 2. Delete `~/.cache/fantasy-football-mcp/` (store, temp downloads) — asks first because the journal and recommendation log live there; offers `--export-journal <path>` (JSON) before deletion.
-3. Ask before deleting `~/.config/fantasy-football-mcp/` (tokens, gate key, client secret file, pending confirmations, auth cert).
+3. Ask before deleting `~/.config/fantasy-football-mcp/` (tokens, gate key, client secret file, auth cert — there is no pending-confirmation file; plan 02 §4.2 channel 2 keeps the code only in the notification and its hash in the store).
 4. Print, and do **not** edit: the `mcpServers.fantasy-football` entry to remove from the Claude Desktop config; the `claude mcp remove fantasy-football` command; the Yahoo account page where the app's consent can be revoked (revocation is only possible at Yahoo [V-03 §A.2]); a note that Time Machine may hold copies of the token file.
 5. `npm uninstall -g fantasy-football-mcp` if globally installed (printed, not run).
 
