@@ -29,10 +29,10 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 | 14 | T1–T13 per plan 10 §4 + log §1.3 additions (T2 in G7; T8/T9 in G9; rest here) | [x] | ce8843d |
 | C | Consistency pass (xrefs, decisions tables, assumptions tables; Mermaid proven by the final docs run) | [x] | 6a7c567 |
 | L | `docs/plan/changelog.md` `## Round 1` | [x] | 96714c1 |
-| F | Final reply: SHAs per group, run URLs, landing table, could-not-apply, choices, xref fixes | [ ] | — |
+| F | Final reply: SHAs per group, run URLs, landing table, could-not-apply, choices, xref fixes | [x] | (this commit) |
 
 ### Could not apply
-(none yet)
+(none — every ruling in §D.1 and every T1–T13 resolution was applied as written; where the defence was silent on wording the minimum was written and listed under choices)
 
 ### Choices I had to make
 - G10: puppeteer is pinned on the `-p` list too (`-p puppeteer@25.12.0`) so the peer mmdc loads is the version whose Chrome the explicit step installs — the ruling said `puppeteer@<exact pin>`; pinning it only on the browsers-install line would let npm resolve a different peer later. Pin = today's `latest` (25.12.0, the version the advocate read).
@@ -58,4 +58,5 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 - Plan 07 C3 "34 read tools (19 P0 + 15 P1)" was a miscount: the P1 list (C3, D1, D4–D6, E4, E6–E11, E15, G2) is 14. After OBJ-21 (E15, G2 → later; E10 → P2): v1 = 31 (19 P0 + 11 P1 + 1 P2); Phase 2 tools/list = 30 under `FF_TOOLSET=full`. Plan 10 B10/B12 said 34 → fix to 30 (G4).
 
 ### Notes
+- **DONE 2026-09-30.** Plan tree proven green on `b3d9bfe`: docs https://github.com/ChadPapineau/yahoo-fantasy-football-mcp/actions/runs/36673538686 · secrets https://github.com/ChadPapineau/yahoo-fantasy-football-mcp/actions/runs/36673538700. The `docs.yml` change itself was proven on `90d8df6` (row 10). Round 2 (`devils-advocate`) diffs `docs/plan/*` + `.github/workflows/docs.yml` against `7663b6a`.
 - WIP patch: none was ever needed — every group was committed and pushed within its own working window (14 topic commits + consistency + changelog, each followed by a scratch commit), so no `.wip.patch` exists to retire.
