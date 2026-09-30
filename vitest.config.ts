@@ -22,15 +22,22 @@ const gate = JSON.parse(
 const perFile = Object.fromEntries(gate.perFile100.map((g) => [g, { lines: 100, branches: 100 }]));
 
 /**
- * The process-level suites (plan 05 §4.2): spawned servers, the built package, and the pure
- * wall-clock budgets (`perf.test.ts`, A15's analytics share) — which coverage instrumentation
- * slows ~3× and so must not run under `test:coverage`.
+ * The process-level suites (plan 05 §4.2): spawned servers, the built package, and the wall-clock
+ * budgets — `perf.test.ts` (A15's analytics share) and any `*.perf.test.ts` (e.g. A4a's p95 < 300 ms
+ * under a 3-s foreign writer lock, `tests/store/contention.perf.test.ts`). Coverage instrumentation
+ * slows code ~3× and the parallel unit run adds load on top, so a budget measured there fails on
+ * load, not on the code: a test asserting a latency budget is named `*.perf.test.ts` and runs here,
+ * never under `test:coverage` (tests/lint/vitest-projects.test.ts holds the partition).
  */
-const PROCESS_TESTS = [
+export const PROCESS_TESTS = [
   "tests/process/**/*.test.ts",
   "tests/e2e/**/*.test.ts",
   "tests/**/perf.test.ts",
+  "tests/**/*.perf.test.ts",
 ];
+
+/** The unit project's per-test hang detector (see the `unit` project below). */
+export const UNIT_TEST_TIMEOUT_MS = 30_000;
 
 export default defineConfig({
   test: {
@@ -40,10 +47,15 @@ export default defineConfig({
     projects: [
       {
         extends: true,
+        // `unit` is the run the gate instruments (`test:coverage`, ~3× slower) with every fork busy:
+        // CPU-bound property/scale tests that take 1–1.6 s alone took 5–7 s there (load 22–45 on
+        // 12 cores), past vitest's 5 s default. A timeout here is a hang detector, not a budget —
+        // budgets are explicit assertions, and latency budgets live in `process` (above).
         test: {
           name: "unit",
           include: ["tests/**/*.test.ts"],
           exclude: [...PROCESS_TESTS, "**/node_modules/**"],
+          testTimeout: UNIT_TEST_TIMEOUT_MS,
         },
       },
       {

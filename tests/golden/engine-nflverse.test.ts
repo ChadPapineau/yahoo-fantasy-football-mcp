@@ -146,9 +146,13 @@ describe("the three toStatLine(nflverse) copies score identically on every fixtu
       expect(store).toBeDefined();
       if (store === undefined) continue;
       const pt = store.line.position_type;
+      // each translation computed ONCE per row (it was recomputed per scoring rule — ~2 × rules
+      // extra translations per row, which pushed this test past 5 s under a loaded coverage run)
+      const domainLine = statLineFromPlayerWeek(r, { positionType: pt });
+      const sourcesLine = toStatLine(r, { positionType: pt });
       const viaStore = pts(playerRowToStatLine(r));
-      const viaDomain = pts(statLineFromPlayerWeek(r, { positionType: pt }));
-      const viaSources = pts(toStatLine(r, { positionType: pt }));
+      const viaDomain = pts(domainLine);
+      const viaSources = pts(sourcesLine);
       expect(Math.abs(viaStore - pts(store.line)), r.player_id).toBeLessThan(EPS);
       expect(Math.abs(viaDomain - viaStore), `domain ${r.player_id}`).toBeLessThan(EPS);
       expect(Math.abs(viaSources - viaStore), `sources ${r.player_id}`).toBeLessThan(EPS);
@@ -157,8 +161,8 @@ describe("the three toStatLine(nflverse) copies score identically on every fixtu
         if (rule.canonical === null || !rule.position_types.includes(pt)) continue;
         const c = rule.canonical;
         const a = store.line.values[c];
-        expect(toStatLine(r, { positionType: pt }).values[c], `${c} ${r.player_id}`).toBe(a);
-        expect(statLineFromPlayerWeek(r, { positionType: pt }).values[c]).toBe(a);
+        expect(sourcesLine.values[c], `${c} ${r.player_id}`).toBe(a);
+        expect(domainLine.values[c], `${c} ${r.player_id}`).toBe(a);
       }
       compared++;
     }
