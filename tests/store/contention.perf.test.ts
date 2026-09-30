@@ -1,9 +1,12 @@
-// contention.test.ts — plan 10 A4a / plan 05 §2 `store` (round 1 OBJ-11) and §4.1 row "SQLite write
+// contention.perf.test.ts — plan 10 A4a / plan 05 §2 `store` (round 1 OBJ-11) and §4.1 row "SQLite write
 // lock held 3 s by another process": while a second process holds the writer lock for 3 s, the
 // server answers 50 fixture-mode reads (fixture datasets attached, the stats_player_week file
 // ≤ 300 KB) that each miss the points cache and try to fill it — p95 latency < 300 ms measured
 // from each request's arrival, zero errors, every cache write skipped and counted as a miss — and
 // a concurrent ff_record_recommendation (a required write) returns STORE_BUSY within ≤ 1 s.
+// A wall-clock budget, so it runs in the `process` project (uninstrumented, one file at a time),
+// never under coverage — vitest.config.ts PROCESS_TESTS; the busy semantics without a latency
+// budget are covered in the unit run by write-class.test.ts.
 import { statSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
