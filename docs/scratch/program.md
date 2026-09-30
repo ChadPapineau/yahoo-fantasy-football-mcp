@@ -29,6 +29,7 @@ rule, 2026-09-24). Waves start when a slot frees.
 | 3 | `skills-mcp-researcher` | `docs/research/06-skills-and-mcp-design.md`, `docs/scratch/skills-mcp-researcher.md` | waves 1–2 |
 | 3 | `architecture-planner-core` | `docs/plan/01-system-architecture.md`, `02-security-architecture.md`, `03-lifecycle-and-operations.md`, `04-repo-structure-and-ci.md`, `05-testing-strategy.md`, `06-automation-inventory.md`, `docs/scratch/architecture-planner-core.md` | docs 01–04 (not 05/06) |
 | 4 | `product-planner` | `docs/plan/07-tool-catalog.md`, `08-scoring-engine.md`, `09-skills-bundle.md`, `10-phasing-and-acceptance.md`, `docs/scratch/product-planner.md` | plan 01–06, docs 04–06 |
+| 4 | `ci-bootstrap` | `.github/**`, `.gitleaks.toml`, `scripts/**`, `docs/scratch/ci-bootstrap.md` | plan 04 §CI, plan 06 §4 step 1 (docs-only automation; no product code) |
 | 5 | `devils-advocate` (multi-round, orchestrator defends) | `docs/plan/adversarial-log.md` | the whole plan |
 | 6 | `docs-writer` | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` | refined plan |
 
