@@ -91,6 +91,8 @@ describe("layer table (plan 01 §1.1), every import form", () => {
     ["src/domain/probe.ts", `import { x } from "../../tests/x.js"; export const y = x;`],
     ["src/mcp/probe.ts", `import { x } from "../../fixtures/x.js"; export const y = x;`],
     ["src/domain/probe.ts", `import { x } from "../domain/../store/x.js"; export const y = x;`],
+    ["src/domain/probe.ts", `import { x } from "#store/x.js"; export const y = x;`],
+    ["src/domain/probe.ts", `import { x } from "/abs/src/store/x.js"; export const y = x;`],
   ];
   it.each(illegal)("%s: %s -> ff/layer-boundaries", async (file, code) => {
     expect(rules(await lint(file, code))).toContain("ff/layer-boundaries");

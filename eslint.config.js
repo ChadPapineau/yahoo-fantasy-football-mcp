@@ -85,6 +85,8 @@ const layerBoundaries = {
       layer: "src/{{from}} may not import src/{{to}} ('{{spec}}') — plan 01 §1.1.",
       top: "Nothing may import the CLI layer ('{{spec}}') — plan 01 §1.1.",
       outside: "Code under src/ may not import outside src/ ('{{spec}}'): it would not ship.",
+      alias:
+        "Subpath-import aliases ('{{spec}}') are not allowed under src/: use a relative path so the layer table can see the target.",
     },
   },
   create(context) {
@@ -102,6 +104,11 @@ const layerBoundaries = {
      */
     function check(node, spec) {
       if (typeof spec !== "string") return;
+      if (spec.startsWith("#")) {
+        // package.json "imports" aliases would hide the target layer from this rule
+        context.report({ node, messageId: "alias", data: { spec } });
+        return;
+      }
       if (!spec.startsWith(".") && !spec.startsWith("/")) return; // bare specifiers: no-restricted-imports
       const target = toPosix(path.relative(root, path.resolve(path.dirname(file), spec)));
       const toLayer = layerOf(target);
