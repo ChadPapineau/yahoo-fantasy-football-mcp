@@ -46,8 +46,8 @@ Spec: `docs/plan/adversarial-log.md` § "Round 2 — defence" (§D.0 verified fa
 | OBJ-28 | ceilings token-derived, downward-only (core ≤ 20 000 chars ≈ 5k tokens, full ≤ 35 000, Skills ≤ 4 500; shrink-or-move rule); §6.3 sentence → server-level `instructions` (DiscoverResult.instructions; legacy initialize via dual-era); ≤ 40-char pointer in every description; smoke/check:skills assert exactly-once + pointer; size test reports tokens; modification: `instructions` forwarding is [U] per client → rule also carried by `ff://docs/tool-outputs` and every Skill guardrail — "the pointer is the guarantee, the instructions field is the economy" | [x] | c97b151 |
 | OBJ-29 | E5 under manual: full nflverse K/DEF universe, `availability: "unknown"` said plainly; D0/Ph9 list what X1 loses beside what it keeps; real file `<config>/league.yaml` (0600), never in the checkout (.gitignore already has `*league.yaml` / `!fixtures/manual/*.yaml`); A-12 names the weekly re-edit as X1's running cost | [x] | f1b24ac |
 | OBJ-30 | plan 04 §2 pin-time rule verbatim addition: "…and the pinned line has had a release in the last 6 months or is the maintainer's declared LTS; otherwise pin the current line and accept its tree, recording the count." | [x] | 9e265fe |
-| R2-D2 | plan 05 §0 rule: every latency/size bound names the fixture/dataset size it is measured on and the test that measures it; the post-OBJ-24/25 re-audit of plan 02 | [ ] | — |
-| R2-L | changelog: fix round-1 summary counts (18 concede + 4 concede-modified + 1 justified); add `## Round 2` | [ ] | — |
+| R2-D2 | plan 05 §0 rule: every latency/size bound names the fixture/dataset size it is measured on and the test that measures it; the post-OBJ-24/25 re-audit of plan 02 | [x] | 2a03b87 (item 1), c61a284 (item 3) |
+| R2-L | changelog: fix round-1 summary counts (18 concede + 4 concede-modified + 1 justified); add `## Round 2` | [x] | f7906db |
 | R2-C | consistency sweep + final docs/secrets proof after the last push | [ ] | — |
 | R2-F | reply: SHAs per ruling, run URLs, objection → file § table, forced choices | [ ] | — |
 
@@ -55,7 +55,11 @@ Spec: `docs/plan/adversarial-log.md` § "Round 2 — defence" (§D.0 verified fa
 (none yet)
 
 ### Round 2 — choices I had to make
-(none yet)
+- OBJ-26: the 1a-minimum cut's exit gate = the subset of 1a items that apply to its scope (A1a, A3a, A4a, A5a, A6, A7, A8, A10, A13–A15, A17); the defence gave the scope, not the gate.
+- OBJ-27: dataset files written with `journal_mode=DELETE` (single file, no `-wal`/`-shm`) so `rename()` publishes the whole dataset; attach as `file:…?mode=ro`; `refresh_log` gains `file_version`; superseded `ds/` files are pruned by `store prune` once no server holds them open; `ds/` files are not backed up (rebuildable). The plan 05 test's synthetic pbp-sized file (~10 MB, 40 columns) is my choice of the 'named dataset size'.
+- OBJ-28: pointer text `Untrusted fields: see server instructions.` (40 chars); plan 02's new assumption is A-12; plan 07's decision row is C13.
+- OBJ-29: E5 manual mode sets `competition`/`bid`/`drop` to `null` and adds a fixed `warnings[]` line — the defence said 'availability: unknown, said plainly'; the null fields are the minimum that keeps the shape honest.
+- D.2 item 1: the latency test is named `tests/process/latency.test.ts`; the fixture sizes named are plan 05 §3.2's (≤ 300 KB excerpts) and the fixture league.
 
 ### Could not apply
 (none — every ruling in §D.1 and every T1–T13 resolution was applied as written; where the defence was silent on wording the minimum was written and listed under choices)
