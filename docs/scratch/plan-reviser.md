@@ -26,7 +26,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 | 11 | OBJ-13 / plan 04 §5 + R9 + A-4, plan 06 §1.1/§3, plan 10 §1/Z1 | [x] | 1150810 |
 | 12 | OBJ-20 / plan 01 D7 + §5.5, plan 05 sources row (snappy, upload.R:85, codec assertion) | [x] | 866ac36 |
 | 13 | D.2 items (Yahoo-dependency header tag ×10 here; cannot-rule G2; FF_TOOLSET default G4; re-tag sweep in C) | [x] | a472362 |
-| 14 | T1–T13 per plan 10 §4 + log §1.3 additions | [ ] | — |
+| 14 | T1–T13 per plan 10 §4 + log §1.3 additions (T2 in G7; T8/T9 in G9; rest here) | [x] | ce8843d |
 | C | Consistency pass (xrefs, decisions tables, assumptions tables, Mermaid) | [ ] | — |
 | L | `docs/plan/changelog.md` `## Round 1` | [ ] | — |
 | F | Final reply: SHAs per group, run URLs, landing table, could-not-apply, choices, xref fixes | [ ] | — |
