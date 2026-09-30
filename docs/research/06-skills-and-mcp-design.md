@@ -463,3 +463,105 @@ Searches run (2026-09-29): WebSearch `"fantasy football" Claude skill SKILL.md g
 ### D.16 Prompts to expose (one per user-invocable Skill; string args; bodies generated from `SKILL.md`)
 
 `weekly [week]` · `start-sit [week]` · `waivers` · `stream <K|DEF>` · `trade <offer text>` · `injury <player>` · `schedule` · `roster-audit` · `check <player or pasted claim>` · `live` · `draft` · `onboard` · `retro [week]` · `apply <what>`. Each prompt returns the Skill body plus the embedded `yahoo-ff://league/{default}/settings` resource so a non-Claude client gets Step 0 for free.
+
+---
+
+## E. Repo layout and lifecycle (recommendation for `docs/plan/04` and `09`; the architecture planner owns the final layout)
+
+### E.1 Directory layout — the repo root *is* the plugin root during development
+
+```
+/                                   # plugin root == repo root (loadable with `claude --plugin-dir .`)
+├── .claude-plugin/
+│   ├── plugin.json                 # name "yahoo-ff", version = package.json version, description, author, license, keywords,
+│   │                               #   userConfig: { league_key: {type: string, title, description} }  (non-sensitive only)
+│   └── marketplace.json            # self-hosting catalog: { name: "yahoo-fantasy-football-mcp", owner, plugins: [{ name: "yahoo-ff", source: "./", version }] }
+├── .mcp.json                       # { "yahoo-ff": { "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/server.js"],
+│                                   #                 "env": { "YAHOO_FF_HOME": "${CLAUDE_PLUGIN_DATA}", "YAHOO_FF_LEAGUE": "${user_config.league_key}" } } }
+├── skills/                         # BUILT output, committed: one dir per Skill, self-contained
+│   ├── weekly/SKILL.md  references/{tool-outputs.md, orient.md, output-template.md, …}  evals/{trigger_eval.json, evals.json}
+│   ├── start-sit/ … waivers/ … stream-kdef/ … trade/ … injury-cascade/ … schedule-plan/ … roster-audit/
+│   ├── news-check/ … live/ … draft/ … onboard/ … retro/ … apply/
+├── skills-src/                     # SOURCE: per-Skill SKILL.md + references, and _shared/references/*.md stamped into each at build
+├── evals/                          # `claude plugin eval` suite (plugin default dir)
+│   ├── mocks/yahoo-ff/<tool>.md    # one mock per tool, {{file:…}} substitution from fixtures/, `expect:` guards, .replay/ recordings
+│   ├── <case>/{prompt.md, case.yaml, graders/*.md}
+│   └── fixtures/fx-12h/            # anonymized league snapshot (JSON per tool per input), generated + hand-checked, no real ids
+├── src/                            # server (TypeScript); src/skills-runtime.ts serves prompts + playbook tool + docs resource from skills/
+├── dist/                           # built server (committed for plugin installs? see E.4)
+├── scripts/
+│   ├── build-skills.ts             # skills-src → skills (stamps shared references, writes metadata.version/tool_contract)
+│   ├── check-skills.ts             # token-free structural checks (E.3 lane 1)
+│   └── gen-fixtures.ts             # produces fx-12h from anonymization rules (never from a real league in CI)
+├── docs/…, package.json, package-lock.json (exact-pinned SDK, 02 §3.10), README.md
+```
+
+Why this shape: every component path must resolve inside the plugin root (manifest containment rule), so the server binary must live under the same root as the Skills; `${CLAUDE_PLUGIN_ROOT}` changes on update so the token store and caches go to `${CLAUDE_PLUGIN_DATA}` (or the XDG dir the CLI uses when run outside a plugin — the server takes `YAHOO_FF_HOME` and defaults to the OS config dir per 02 §3.4); no `bin/` (claude.ai would refuse the plugin); no root `CLAUDE.md` (not loaded; validator warns). Skills are **built** so that each directory is portable on its own (copy-installable, zip-uploadable with standard fields only) while shared text has one source.
+
+### E.2 Versioning and compatibility
+
+- **One semver** for server + Skills + plugin (`package.json` → `plugin.json.version` → `marketplace.json` entry). The plugin `version` pins users until it changes; users update with `claude plugin update yahoo-ff`.
+- Each built `SKILL.md` carries `metadata: { version: "1.4.0", tool_contract: 3 }`; the server exposes `server_status.tool_contract` and `server_status.version`. `tool_contract` increments whenever a tool's name, arguments or compact output layout changes (which is what Skills depend on). `check-skills.ts` fails CI when any Skill's `tool_contract` ≠ the server's, and the `orient` reference tells the model to stop and report if `server_status` disagrees at runtime (a copied-skills install can drift; a plugin install cannot).
+- **Compatibility matrix**: one row — "Skills N.x require server N.x". No cross-major support; the cost of a matrix is not worth it for a single-maintainer project, and the plugin makes skew impossible for the primary install path.
+- Tool definitions are part of the prompt-cache prefix (A.6): change them only on releases, never at runtime (write tools appear only after a scope change, which is a re-auth event).
+
+### E.3 Evals — what runs in CI without tokens, what runs with tokens
+
+**Lane 1 — token-free, on every push (fast, deterministic):**
+1. `claude plugin validate . --strict` (manifest, paths, MCP entries) [V CLI reference in manifest page].
+2. `scripts/check-skills.ts`: frontmatter parses and starts at line 1; `name` ≤ 64 chars kebab-case without reserved words; `description` non-empty, ≤ 1,024 chars, third person, description + `when_to_use` ≤ 1,536 chars (the listing cap); body ≤ 500 lines; every `references/` link exists and is one level deep; every `yahoo-ff:<tool>` reference names a tool the server registers (read from `dist/` `tools/list` in a subprocess with the SDK's in-memory transport); every Skill except `apply` has no `commit_` reference; every Skill body contains the output template headings and a `rec_log` step; `metadata.tool_contract` matches; `trigger_eval.json` has ≥ 6 positives and ≥ 6 negatives.
+3. Vitest: every analytics tool against `fx-12h` fixtures with property-style assertions (05 §17-style: monotonicity, intervals contain the point estimate, Δ interval semantics), plus a golden test that `score_stat_line` reproduces Yahoo's `player_points.total` for the fixture's sample; every mock in `evals/mocks/yahoo-ff/` validated against the tool's `outputSchema` (so mocks cannot drift from the server).
+4. `npm audit` at zero on the runtime group; lockfile present (02 §5).
+
+**Lane 2 — with tokens, nightly and on release branches (never on every push):**
+- `claude plugin eval . --json results.json --trust-plugin --model <pinned> --judge-model <pinned> --ablation none --max-cost-usd 20` with the mocks (a run "never starts your plugin's real MCP servers unless you ask"); `regex`/`tool_used`/`tool_order` graders are free, `llm` graders are the paid minority; commit `evals/mocks/.replay/` so agent-style mocks answer "with no model call" [V plugin-evals page]. Fail the build on the exit code and archive the JSON.
+- Weekly: the same with `--ablation with-without` to keep the "Δ vs no plugin" number honest, and `--judge-model sonnet` when a rubric looks flaky.
+- Trigger evals (`trigger_eval.json`) run as plugin-eval cases with `tool_used: Skill` (`arm: both`, `min: 0, max: 0` for negatives) — cheap, high value.
+
+**Authoring loop (manual, tokens):** the `skill-creator` plugin's with-skill vs baseline runs, `grading.json`, `benchmark.json`, viewer — used when writing or revising a Skill, not in CI. Its `evals/evals.json` lives next to `trigger_eval.json` in each Skill and is kept in sync by hand; the two formats are not interchangeable [V plugin-evals page].
+
+### E.4 Install paths per client
+
+| Client | Skills | Server | Command / path |
+|---|---|---|---|
+| **Claude Code** (primary) | plugin | plugin `.mcp.json` | `claude plugin marketplace add ChadPapineau/yahoo-fantasy-football-mcp` → `claude plugin install yahoo-ff@yahoo-fantasy-football-mcp` (user scope), then `/yahoo-ff:onboard`. Dev: `claude --plugin-dir .`. Alternative without the plugin: copy `skills/*` into `~/.claude/skills/` and `claude mcp add yahoo-ff -- node <path>/dist/server.js` (skew possible; `check` in `orient` catches it) |
+| **Claude Desktop (Code tab)** | same as Claude Code (shared settings) | same | — |
+| **Claude Desktop / claude.ai chat** | plugin installed from Customize > Plugins (Skills load; also syncs into Claude Code) or per-Skill zip upload (standard fields only) | **not via the plugin** (local stdio "Ignored" in Chat); Desktop's own MCP configuration for a stdio server [U-3]; or the remote HTTP variant when built (02 §3.9) | document as "Skills everywhere; server in Claude Code and Desktop-with-manual-config until the remote variant exists" |
+| **Cowork** | claude.ai-account skills | local MCP loads only when the session runs on the user's computer | as chat |
+| **Agent SDK** (scheduled Tuesday/Sunday runs) | `settingSources: ["user","project"]` + `skills: [...]` or the `plugins` option pointing at the repo [U-13] | `mcpServers` option with the same command | a small `scripts/run-weekly.ts` example in the repo |
+| **Non-Claude MCP clients** (Cursor, VS Code, Gemini CLI, ChatGPT) | copy `skills/` where the client reads Agent Skills, else use **prompts** (`/yahoo-ff:weekly`) or the `yahoo_ff_playbook` tool | client's MCP config (stdio) | prompts and playbook are generated from the same `SKILL.md` |
+
+Distribution artefact for releases: the marketplace entry can stay `source: "./"` (GitHub clone of the repo, `sha`-pinned per release) as long as `dist/` is committed on release tags; if committing build output is unwanted (02 §4 mistake 11), switch the entry to `npm {package, version}` and publish a package whose contents are the plugin root (`.claude-plugin/`, `.mcp.json`, `skills/`, `dist/`, lockfile) — Claude Code installs its lockfile dependencies without running scripts [V marketplace reference]. Test the `npm` path before relying on it [U-6].
+
+### E.5 Lifecycle in one line each
+
+Author a Skill in `skills-src/` → write `trigger_eval.json` and three `evals.json` cases first → iterate with `skill-creator` → `npm run build:skills` → Lane 1 → open PR → Lane 2 nightly → tag release, bump `version` in `plugin.json`/marketplace → users `claude plugin update`. A tool change bumps `tool_contract`, regenerates the stamped `tool-outputs.md`, and reruns Lane 1 (which would otherwise fail on the contract mismatch).
+
+---
+
+## F. Unverified — by name
+
+1. **U-1** Whether Claude Code auto-approves MCP tools annotated `readOnlyHint: true` without a permission prompt (the Directory doc says annotations "determine auto-permissions in Claude"; the Claude Code MCP page describes prompts "in standard permission modes" without stating an annotation exemption).
+2. **U-2** Whether Claude Code (and Desktop) forward `structuredContent` to the model in addition to `content` — if both, every structured result costs double; determines whether large list tools should omit `structuredContent`.
+3. **U-3** Claude Desktop chat: the resource-picker UI, MCP prompts as commands, and adding a **stdio** server through Desktop's own configuration — well-known behaviours, but not re-verified this session; the claude.com table only confirms that plugin-carried local servers are ignored in chat.
+4. **U-4** Whether Claude Code's Tool Search deferral keeps deferred MCP tool schemas out of the prompt-cache prefix (affects whether tool-count discipline matters in Claude Code at all).
+5. **U-5** Skills-over-MCP (`io.modelcontextprotocol/skills`): no Claude client is listed as supporting it; if Claude adds it, the `playbook` tool and prompts become redundant.
+6. **U-6** The `npm` plugin source's lockfile-dependency install step against a real Node MCP server (`dist/` + `node_modules`) — needs one end-to-end test before it is the release path.
+7. **U-7** What claude.ai does with a plugin upload that contains a local `.mcp.json`: "Ignored" per the table, but whether it warns, silently drops, or lists it as "Runs in each session".
+8. **U-8** Elicitation through the Agent SDK / print mode: a changelog fix implies support; not exercised.
+9. **U-9** Whether plugin-eval mock files can return `structuredContent` (only a text body is documented) — determines whether mocks can exercise `outputSchema` validation.
+10. **U-10** The compact-table vs JSON token ratio (~2×) is an estimate; measure with the real tool outputs before fixing `response_format` defaults.
+11. **U-11** Whether Yahoo will grant write scope to this product at all (03 §F.18) — the write layer (A.2) is designed but may never register.
+12. **U-12** The `SKILL.md` bodies of `derekrbreese/fantasy-football-skills` (GitHub's tree view did not render them); its trigger phrasing and confirmation wording could not be read.
+13. **U-13** The exact shape of the Agent SDK `plugins` option for loading a local plugin path.
+14. **U-14** Whether `disallowed-tools` / `allowed-tools` accept a glob over MCP tool names (`mcp__yahoo-ff__commit_*`) — if not, list the commit tools explicitly.
+15. **U-15** Claude Desktop elicitation: no positive evidence exists (issue #41110 closed as out of scope; official skill says "unconfirmed"); treated as unsupported until a release note says otherwise.
+
+## G. Sources (fetched 2026-09-29 unless marked local)
+
+MCP: `https://modelcontextprotocol.io/sitemap.xml` · `/specification/2026-07-28/changelog` · `/specification/2026-07-28/server/tools` · `/specification/2026-07-28/client/elicitation` · `/specification/2025-06-18/server/resources` · `/specification/2025-06-18/server/prompts` · `/specification/2026-07-28/server/utilities/pagination` · `/extensions/client-matrix` · `https://raw.githubusercontent.com/modelcontextprotocol/typescript-sdk/main/README.md` · `…/docs/servers/tools.md` · `…/docs/servers/elicitation.md`.
+Claude Code: `https://code.claude.com/docs/en/mcp` · `/docs/en/skills` · `/docs/en/plugins` · `/docs/en/plugins-reference` (manifest) · `/docs/en/plugins/marketplace-reference` · `/docs/en/plugin-evals` · `/docs/en/changelog` · `/docs/en/agent-sdk/skills`.
+Claude platform: `https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview` · `…/agent-skills/best-practices` · `https://platform.claude.com/docs/en/build-with-claude/prompt-caching` · `https://claude.com/docs/plugins/platform-support`.
+Anthropic engineering: `https://www.anthropic.com/engineering/writing-tools-for-agents` · `…/code-execution-with-mcp` · `…/equipping-agents-for-the-real-world-with-agent-skills`.
+Local official plugins (read, not run): `skill-creator` (`SKILL.md`, `references/schemas.md`), `mcp-server-dev/build-mcp-server` (`SKILL.md`, `references/elicitation.md`, `tool-design.md`, `resources-and-prompts.md`), `math-olympiad` (`evals/trigger_eval.json`), `example-plugin` (`.mcp.json`), the `claude-plugins-official` `marketplace.json`; the `mcp-builder` skill and its `mcp_best_practices.md`, `evaluation.md`.
+Prior art (static): `github.com/derekrbreese/fantasy-football-skills` (+ raw `marketplace.json`) · `github.com/TheClaudeFather/ff-advisor` · `github.com/jdguggs10/flaim` · `glama.ai/mcp/servers/eponerine/espn-fantasy-football-mcp-node/tools/how_to_answer` · `github.com/HamCops/dodi` · `fantasypros.com/mcp/` · `github.com/jasonbhorne/claude-code-skills` · `github.com/nmiller0113/fantasy-copilot` · `github.com/ruchirpipalia-spec/fantasy-football-agent` · `github.com/michaelfromyeg/fantasy-sports-toolkit` · `github.com/jbaros/sleeper-ffb-worker` · `github.com/machina-sports/sports-skills` · `mcpmarket.com/tools/skills/fantasy-football-analytics-ml` · `github.com/anthropics/skills` · `github.com/anthropics/claude-code/issues/41110`.
