@@ -35,7 +35,7 @@ file tells you whose move it is (`objections`/`verdicts` = mine, `defence` =
 orchestrator's).
 
 **Pushed SHAs:** 97f3085 (scratch start) · ebe848d (reading notes) ·
-round-1 log: see git log (recorded below after push).
+**52337a3 (round-1 objections, `docs/plan/adversarial-log.md`)**.
 
 ## Verification results (2026-09-30, primary sources) — keep for round 2
 
