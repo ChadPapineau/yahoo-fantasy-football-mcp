@@ -1,0 +1,10 @@
+# One rule id per line. secrets-selftest fails unless EVERY id here reports at least once on a copy
+# of must-flag.txt. Add a line here (and a value to must-flag.txt) whenever a rule is added to
+# .gitleaks.toml — a rule without a fixture is a rule that may silently match nothing.
+yahoo-client-id
+yahoo-client-secret
+yahoo-oauth-token
+yahoo-guid
+yahoo-league-key
+yahoo-team-key
+odds-api-key
