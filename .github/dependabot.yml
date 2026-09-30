@@ -1,0 +1,38 @@
+# Dependabot — plan 04 §1 / §5, plan 06 §1.1.
+# github-actions: keeps the SHA-pinned actions in .github/workflows current (it rewrites the pin and
+#   the `# vX.Y.Z` comment together). Grouped so one PR a week at most.
+# npm: harmless until package.json exists; then minor + patch updates arrive grouped, majors one PR
+#   each (a major is a decision, not a chore). `increase` matches the exact pins plan 04 §2 mandates.
+# Not managed here (bump by hand, both value and checksum): the mermaid-cli npx pin in
+#   .github/workflows/docs.yml and the gitleaks pin in scripts/install-gitleaks.sh.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    versioning-strategy: "increase"
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "build"
+      prefix-development: "build"

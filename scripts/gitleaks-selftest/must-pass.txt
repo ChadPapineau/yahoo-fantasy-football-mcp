@@ -1,0 +1,22 @@
+# gitleaks self-test fixture: strings that LOOK like Yahoo identifiers or credentials but are the
+# documentation placeholders the plan and research docs already use, or credential *names* without
+# values. secrets.yml scans a copy of this file expecting ZERO findings: it proves the allowlists are
+# exactly as wide as the placeholders and no wider, and that context words alone do not fire.
+
+# league / team / waiver-claim placeholders (plan 05 §3: fixtures use 461.l.1000…; 1000 and 10000-10009 are allowed)
+461.l.1000 461.l.1000.t.3 461.l.10009 461.l.10009.t.12 461.l.1000.w.c.2_6461
+# player key: public player id, not a personal identifier (research 04 §D)
+nfl.p.7200
+# scrub deny-list notation from plan 05 §3.1
+anything matching a Yahoo key outside 461.l.100[0-9]
+# manager guid placeholder without the xoauth context (plan 05 §3.1)
+FIXTUREGUID00000000000000N
+# token-response and refresh-request shapes with names only (research 03 §A)
+{"access_token","token_type":"bearer","expires_in":3600,"refresh_token","xoauth_yahoo_guid"}
+grant_type=refresh_token, refresh_token, redirect_uri
+Authorization: Basic base64(client_id:client_secret)
+# .env.example placeholders
+YAHOO_CLIENT_ID=your-yahoo-client-id-here
+YAHOO_CLIENT_SECRET=your-yahoo-client-secret-here
+YFF_TOKEN_STORE=~/.config/yahoo-fantasy-football-mcp/tokens.json
+# ODDS_API_KEY=

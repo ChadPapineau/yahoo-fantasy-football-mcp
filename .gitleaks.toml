@@ -1,0 +1,93 @@
+# gitleaks configuration for yahoo-fantasy-football-mcp
+# Spec: docs/plan/04-repo-structure-and-ci.md §4.3 (rule table) and docs/HANDOFF.md (public repo:
+# no secrets, no personal identifiers — league and team keys included).
+# Runs: .github/workflows/secrets.yml (diff on push/PR, weekly full history, self-test).
+# Self-test: scripts/gitleaks-selftest/ — every rule below has a fixture line that MUST fire and
+# every allowlist has a placeholder line that MUST NOT. Add a rule → add both.
+#
+# Regex dialect is Go RE2: no lookaround, `\b` is an ASCII word boundary, `(?i)` applies to the
+# whole rest of the pattern (so character classes go case-insensitive too — see yahoo-guid).
+
+title = "yahoo-fantasy-football-mcp"
+
+[extend]
+# Keep every default rule (GitHub/AWS/Slack/… and the generic-api-key heuristic) and add ours.
+useDefault = true
+
+# --- Yahoo credentials ---------------------------------------------------------------------
+
+[[rules]]
+id = "yahoo-client-id"
+description = "Yahoo Developer app client id / consumer key (base64 starting with 'v=2&i=' → dj0yJmk9)"
+regex = '''dj0yJmk9[A-Za-z0-9._=\-]{20,}'''
+keywords = ["dj0yjmk9"]
+tags = ["yahoo", "credential"]
+
+[[rules]]
+id = "yahoo-client-secret"
+description = "Yahoo consumer/client secret: 40 hex characters next to its name"
+regex = '''(?i)(?:consumer|client)[_-]?secret["']?\s*[:=]\s*["']?([0-9a-f]{40})\b'''
+secretGroup = 1
+keywords = ["secret"]
+tags = ["yahoo", "credential"]
+
+[[rules]]
+id = "yahoo-oauth-token"
+description = "OAuth access or refresh token with a value (JSON token store, env, or query form)"
+regex = '''(?i)(?:access|refresh)[_-]?token["']?\s*[:=]\s*["']?([A-Za-z0-9_./+=\-]{24,})'''
+secretGroup = 1
+entropy = 3.0
+keywords = ["access_token", "refresh_token", "access-token", "refresh-token"]
+tags = ["yahoo", "credential"]
+
+[[rules]]
+id = "yahoo-guid"
+description = "Yahoo user GUID (xoauth_yahoo_guid: 26 upper-case alphanumerics) — a personal identifier"
+# case-sensitive on purpose: real GUIDs are upper-case, and (?i) would widen [A-Z0-9]
+regex = '''xoauth_yahoo_guid["']?\s*[:=]\s*["']?([A-Z0-9]{26})\b'''
+secretGroup = 1
+keywords = ["xoauth_yahoo_guid"]
+tags = ["yahoo", "identifier"]
+
+# --- Yahoo identifiers: league and team keys -------------------------------------------------
+# <game>.l.<league_id> and <game>.l.<league_id>.t.<team_id>, game = 2–3 digit game id or a game code.
+# League ids are 4–8 digits (every league created in the last ~15 years); the documentation
+# placeholders 461.l.1000 and 461.l.10000–10009 (plan 05 §3, research 03) are allowlisted per rule.
+
+[[rules]]
+id = "yahoo-league-key"
+description = "Yahoo league key <game>.l.<league_id> — identifies a real person's league in a public repo"
+regex = '''\b(?:\d{2,3}|nfl|mlb|nba|nhl)\.l\.\d{4,8}\b'''
+keywords = [".l."]
+tags = ["yahoo", "identifier"]
+  [[rules.allowlists]]
+  description = "documentation placeholder league ids: 1000 and 10000–10009"
+  regexTarget = "secret"
+  regexes = ['''^(?:\d{2,3}|nfl|mlb|nba|nhl)\.l\.1000\d?$''']
+
+[[rules]]
+id = "yahoo-team-key"
+description = "Yahoo team key <game>.l.<league_id>.t.<team_id> — identifies a real person's team"
+regex = '''\b(?:\d{2,3}|nfl|mlb|nba|nhl)\.l\.\d{4,8}\.t\.\d{1,2}\b'''
+keywords = [".t."]
+tags = ["yahoo", "identifier"]
+  [[rules.allowlists]]
+  description = "documentation placeholder team keys under league ids 1000 and 10000–10009"
+  regexTarget = "secret"
+  regexes = ['''^(?:\d{2,3}|nfl|mlb|nba|nhl)\.l\.1000\d?\.t\.\d{1,2}$''']
+
+# --- Optional third-party keys ---------------------------------------------------------------
+
+[[rules]]
+id = "odds-api-key"
+description = "The Odds API key (ODDS_API_KEY = 32 hex)"
+regex = '''(?i)odds[_-]?api[_-]?key\s*[:=]\s*["']?([0-9a-f]{32})\b'''
+secretGroup = 1
+keywords = ["odds"]
+tags = ["credential"]
+
+# --- Global allowlists ------------------------------------------------------------------------
+
+[[allowlists]]
+description = "gitleaks self-test fixtures: fake, well-formed values that MUST match the rules above; secrets.yml scans copies of them outside this path"
+paths = ['''scripts/gitleaks-selftest/''']

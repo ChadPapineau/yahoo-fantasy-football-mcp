@@ -1,0 +1,24 @@
+# gitleaks self-test fixture: FAKE, well-formed values. Every rule in expected-rule-ids.txt MUST
+# report on this file. Nothing here was ever issued by Yahoo, The Odds API, or anyone else: each
+# value is derived from the public phrase in README.md (sha1/sha256/sha512/md5 of it, or base64 of an
+# obviously fake app payload). secrets.yml copies this file OUTSIDE the repo before scanning it, so
+# the path allowlist that lets the tree pass cannot apply to the copy.
+
+# yahoo-client-id: base64 of "v=2&i=..." exactly like a Yahoo consumer key, "--" padding included
+YAHOO_CLIENT_ID=dj0yJmk9U0VMRlRFU1RGQUtFQ0xJRU5USUQmZD1HSVRMRUFLUy1TRUxGLVRFU1QtTk9ULUEtUkVBTC1BUFAmcz1jb25zdW1lcnNlY3JldCZ4PTAw
+
+# yahoo-client-secret: 40 hex next to its name (sha1 of the phrase + ": client secret")
+consumer_secret = d59d48361a07b58d4af7f44486093e5dafda8a05
+
+# yahoo-oauth-token and yahoo-guid: a token-store / token-response shape with values
+{"access_token": "05e8nuStGgAZ5k4c-stjAu0ypMzTAZyZADD2T1xAKbkNcKFliejkNDl1PvGpUpqO5UtBJefbei-2w1aDWkYi8g", "refresh_token": "DrRR8C8eIoc1rEVtEm416k7q9Wo8FuW2AFqIvuvbQmA", "xoauth_yahoo_guid": "SELFTESTFAKEGUID0123456789"}
+
+# yahoo-league-key / yahoo-team-key: numeric game id and game-code forms; the league id 123456 is
+# outside the placeholder range (1000, 10000-10009) and so is the near-miss 10012
+league_key: 461.l.123456
+team_key: 461.l.123456.t.7
+by game code: nfl.l.987654 and nfl.l.987654.t.12
+near miss of the placeholder allowlist: 461.l.10012
+
+# odds-api-key: 32 hex (md5 of the phrase + ": odds api key")
+ODDS_API_KEY=8a06b28ea3a52f52af24978375632101
