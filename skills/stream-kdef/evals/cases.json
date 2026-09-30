@@ -1,0 +1,55 @@
+{
+  "$comment": "Lane 2 (plan 09 §5.2; plan 10 A11a): model-graded cases on the fixture manual league. Expectation kinds: skills/README.md#lane-2-cases.",
+  "schema_version": 1,
+  "skill": "stream-kdef",
+  "fixture_league": "manual.l.example",
+  "cases": [
+    {
+      "id": "KD-1",
+      "phase": "1a",
+      "prompt": "Which defense should I stream?",
+      "fixture_variant": null,
+      "setup": "Base league, week 4; the user's DEF is HOU.",
+      "expectations": [
+        {
+          "kind": "tool_order",
+          "tools": ["ff_get_schedule", "ff_analyze_waivers", "ff_record_recommendation"]
+        },
+        { "kind": "tool_args", "tool": "ff_analyze_waivers", "args": { "look_ahead": 2 } },
+        { "kind": "regex", "pattern": "implied (team )?total", "flags": "i" },
+        { "kind": "regex", "pattern": "next week|two-week|look-ahead", "flags": "i" },
+        { "kind": "regex", "pattern": "waiver wire|availability|available", "flags": "i" },
+        {
+          "kind": "rubric",
+          "text": "States a hold-or-stream verdict with the reason, and says the ranking does not know who is available so the user must check the waiver wire first."
+        }
+      ]
+    },
+    {
+      "id": "KD-2",
+      "phase": "1a",
+      "prompt": "Should I keep the Lions defense or stream someone this week?",
+      "fixture_variant": "kd-2-dome-shootout",
+      "setup": "The user's DEF (DET) faces a 50.5 total in a dome; the best-ranked other defense faces a 38.5 total outdoors with a 20 mph wind forecast.",
+      "expectations": [
+        { "kind": "tool_used", "tool": "ff_analyze_waivers" },
+        { "kind": "regex", "pattern": "wind", "flags": "i" },
+        {
+          "kind": "rubric",
+          "text": "Recommends streaming the other defense, citing the low game total and the wind against the Lions' high-total dome game."
+        }
+      ]
+    },
+    {
+      "id": "KD-3",
+      "phase": "1a",
+      "prompt": "who should I start at WR3",
+      "fixture_variant": null,
+      "setup": "Base league. A wide-receiver start/sit question, not a K/DEF one.",
+      "expectations": [
+        { "kind": "skill_invoked", "value": false },
+        { "kind": "tool_not_used", "tool": "ff_analyze_waivers" }
+      ]
+    }
+  ]
+}

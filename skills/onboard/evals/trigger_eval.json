@@ -1,0 +1,19 @@
+[
+  { "query": "Set up my league", "should_trigger": true },
+  { "query": "Help me create my league.yaml", "should_trigger": true },
+  { "query": "Connect my league to this assistant", "should_trigger": true },
+  {
+    "query": "The commissioner changed our scoring settings, can you update the file?",
+    "should_trigger": true
+  },
+  { "query": "I traded for a new receiver, help me update my roster file", "should_trigger": true },
+  { "query": "What are my league rules?", "should_trigger": true },
+  { "query": "Onboard my fantasy league", "should_trigger": true },
+  { "query": "Configure my league for this assistant", "should_trigger": true },
+  { "query": "who should I start", "should_trigger": false },
+  { "query": "How do I get a Yahoo API key?", "should_trigger": false },
+  { "query": "Which kicker should I stream?", "should_trigger": false },
+  { "query": "Review last week", "should_trigger": false },
+  { "query": "Should I start Josh Allen or Jordan Love?", "should_trigger": false },
+  { "query": "Is Trey McBride playing?", "should_trigger": false }
+]

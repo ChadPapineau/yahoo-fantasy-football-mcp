@@ -1,0 +1,43 @@
+{
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7): the calls this Skill promises, in order, with example arguments on the fixture manual league. Format: skills/README.md#tool-sequences.",
+  "schema_version": 1,
+  "skill": "stream-kdef",
+  "tool_contract": 1,
+  "fixture": { "league_key": "manual.l.example", "team_key": "manual.l.example.t.1", "week": 4 },
+  "sequences": [
+    {
+      "id": "default",
+      "when": "always",
+      "steps": [
+        { "id": "status", "tool": "ff_get_status", "args": {} },
+        { "id": "league", "tool": "ff_get_league", "args": {} },
+        { "id": "roster", "tool": "ff_get_roster", "args": { "week": 4 } },
+        { "id": "schedule", "tool": "ff_get_schedule", "args": { "weeks": [4, 5] } },
+        { "id": "pool_k", "tool": "ff_list_players", "args": { "position": "K", "status": "A" } },
+        {
+          "id": "pool_def",
+          "tool": "ff_list_players",
+          "args": { "position": "DEF", "status": "A" }
+        },
+        {
+          "id": "rank",
+          "tool": "ff_analyze_waivers",
+          "args": { "positions": ["K", "DEF"], "look_ahead": 2 }
+        },
+        {
+          "id": "record",
+          "tool": "ff_record_recommendation",
+          "args": {
+            "kind": "stream",
+            "week": 4,
+            "rec": { "$ref": "rank.data.rec" },
+            "alternatives": [],
+            "source_calls": { "$source_calls": ["roster", "schedule", "rank"] },
+            "followed_hint": "unknown",
+            "client_ref": "stream-kdef-w4"
+          }
+        }
+      ]
+    }
+  ]
+}
