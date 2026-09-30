@@ -639,15 +639,26 @@ export function readConfigFile(configDir: string): unknown {
   }
 }
 
-/** Resolves the config from the real process environment: config dir → config.json → loadConfig. */
+/**
+ * Resolves the config from the real process environment: config dir → config.json → loadConfig.
+ * An unusable FF_CONFIG_DIR is not a config.json problem: config.json is then not read at all and
+ * `loadConfig` reports the issue under FF_CONFIG_DIR, together with every other issue (QA-1-057).
+ */
 export function loadConfigFromProcess(opts: { env: Env; home: string; repoRoot: string }): Config {
-  let file: unknown;
+  let configDir: string | null;
   try {
-    file = readConfigFile(resolveConfigDir(opts.env, opts.home));
-  } catch (e) {
-    if (e instanceof ConfigError) throw e;
-    // an unusable FF_CONFIG_DIR or config.json path problem is reported by loadConfig / as below
-    throw new ConfigError([{ key: "config.json", reason: pathReason(e) }]);
+    configDir = resolveConfigDir(opts.env, opts.home);
+  } catch {
+    configDir = null;
+  }
+  let file: unknown;
+  if (configDir !== null) {
+    try {
+      file = readConfigFile(configDir);
+    } catch (e) {
+      if (e instanceof ConfigError) throw e;
+      throw new ConfigError([{ key: "config.json", reason: pathReason(e) }]);
+    }
   }
   return loadConfig({ ...opts, file });
 }
