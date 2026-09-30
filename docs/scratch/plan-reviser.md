@@ -22,7 +22,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 | 7 | OBJ-06/07/15 / plans 01, 02, 07 (+05, 09, 10) (untrusted_fields labelling, wrappers, structuredContent, rec-log source) | [x] | 0b4489a |
 | 8 | OBJ-04/05 / plans 07, 10 (+08, 09) (Dist.basis, A7, mean default, delta_pwin, E13, n≥30 table, params → Phase 3) | [x] | e04efde |
 | 9 | OBJ-10/11/16/17/19/22/23 / plans 01–10 | [x] | 94bc8fb |
-| 10 | OBJ-12 / docs.yml + plan 04 §4.2 + plan 10 Z3 — PROVE GREEN | [ ] | — |
+| 10 | OBJ-12 / docs.yml + plan 04 §4.2 + plan 10 Z3 — PROVE GREEN (runs pending at push time) | [~] | 7592321 |
 | 11 | OBJ-13 / plan 04 §5, plan 10 Z1 | [ ] | — |
 | 12 | OBJ-20 / plan 01 D7 (snappy, upload.R:85) | [ ] | — |
 | 13 | D.2 items (Yahoo-dependency header tag ×10, FF_TOOLSET default, re-tag sources) | [ ] | — |
@@ -35,6 +35,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 (none yet)
 
 ### Choices I had to make
+- G10: puppeteer is pinned on the `-p` list too (`-p puppeteer@25.12.0`) so the peer mmdc loads is the version whose Chrome the explicit step installs — the ruling said `puppeteer@<exact pin>`; pinning it only on the browsers-install line would let npm resolve a different peer later. Pin = today's `latest` (25.12.0, the version the advocate read).
 - G9: game-day window = within 3 h of the player's kickoff (defence said 'within 3 h' — used as given); the 10 % league-wide mismatch threshold lives in `src/domain/scoring/policy.ts` [plan 08 A-5]; doctor rows numbered 19–22 (T9's 19–20 + OBJ-22's 21–22); Claude Desktop log path tagged [plan 03 A-8]; `ff_debug_elicit` named as G3's sibling for A19; `STORE_BUSY` retry window ≤ 1 s and cache `busy_timeout` 100 ms as the defence stated; the swap-transaction bound (< 50 ms) is mine.
 - G8: the §2.1 per-week n estimates (player-weeks ~150–190/wk, designations ~8–15/wk, swaps ~3–6/wk …) are mine, tagged [A-7]; E13's `n_by_metric[]` corrects them. The coarse `delta_pwin` shape is `{ sign, band: small|medium|large }` and `coin_flip` widens to `|ΔP(win)| < 0.04` in `position_cv` mode (defence said 'widened', no number).
 - G7: `meta.untrusted_fields[]` entries become `{ path, source }` objects (were bare path strings) — the minimum that lets the OBJ-15 ruling ('listed … with `source: "store.recommendation_log"`') be true. The defence scoped bare strings to *player names* only; dataset text (nflverse `desc`, depth-chart labels, Sleeper notes) stays wrapped.
