@@ -11,33 +11,36 @@ same tree in parallel.
 
 ## RESUME HERE
 
-**Status:** WRITING 2026-09-29 — `05-strategy-and-analytics.md` has preamble + §1–§13 landed and pushed (Groups 1–4). Remaining: Group 5 (§14 added decisions, §15 scoring engine, §16 data-needs order, §17 what goes wrong, §18 negatives).
+**Status:** COMPLETE 2026-09-29. Deliverable `docs/research/05-strategy-and-analytics.md`
+pushed in five groups: preamble + §1–§3 (`c0763f9`), §4–§6 (`d3dad43`), §7–§9 (`7fc5e50`),
+§10–§13 (`9200bfa`), §14–§19 (this commit). No `.wip.patch` was ever needed — every push
+landed complete sections — so there is nothing to retire.
 
-**Constraints inherited from the orchestrator (do not re-derive):**
-1. `docs/research/03-yahoo-api.md` §B.5: Yahoo exposes `stat_categories` +
-   `stat_modifiers` + `roster_positions` in one `settings` call, so the scoring
-   engine is data-driven from Yahoo's stat-id table. Yahoo provides **no
-   player-level projections** — only team-week `team_projected_points` and
-   `win_probability`. Projection construction must be buildable from usage /
-   efficiency data + external sources.
-2. Refer to data by *kind* (snap share, route participation, implied totals…);
-   `data-source-evaluator` maps kinds to sources in `04-*`. Do not wait for it.
+**Done**
+- 13 decision types, each with Inputs / Method / Format sensitivity / Pitfalls / Output
+  shape / Evaluation; §14 six added decision types; §15 scoring-engine spec keyed to
+  Yahoo's stat-id/modifier/bonus model (03 §B.5) with the [U] items named; §16 data-needs
+  ordered by value per complexity with an honest MVP cut; §17 consolidated pitfalls; §18
+  the "does not predict" negatives by name with references; §19 the three
+  architecture-shaping choices.
+- Evidence markers throughout: [V] fetched-and-says-so, [S] search-summary only (never a
+  number), [F] folk wisdom. Two summary-only numbers were deliberately NOT used (wind
+  −12 %/−17 %; kicker dome 8.7 vs wind 7.7).
 
-**Plan (push after each group):**
-- Group 1 — §1 projections, §2 replacement level / VOR, §3 start/sit
-- Group 2 — §4 waivers/FAAB, §5 trades, §6 injury cascade
-- Group 3 — §7 bye/playoff planning, §8 K/DEF streaming, §9 ROS construction
-- Group 4 — §10 news-vs-stats, §11 H2H win probability, §12 retrospective /
-  calibration, §13 draft
-- Group 5 — scoring-engine spec, data-needs ordering, "what usually goes
-  wrong", the "does not predict" negatives; retire the wip patch
+**Open for the orchestrator / later agents**
+- `04-data-sources.md` must map the kinds in §16 to sources; §16 #15 (player props) is
+  conditional on its ToS verdict.
+- §15 has four [U] semantics to verify with a live token before the engine ships:
+  `uses_negative_points` floor level, `uses_fractional_points` rounding, the wire form of
+  `bonuses`, and the ids for yards-allowed brackets / missed kicks / return yards.
+- No rigorous published study was found for injury redistribution (§6.2) or handcuffing
+  (§9.2); the plan should build those tables from play-by-play rather than assume.
+- Haugh & Singal (SSRN) returned 403; cited by title for the double-up vs top-heavy framing
+  only. Hunter/Vielma/Zaman (arXiv) was fetched and carries the modelling claim.
 
-**Rules recap:** cite published research / documented community methods; say
-when something is folk wisdom; no code copied; formulas in plain math or
-pseudocode; every method parameterised by scoring + roster slots; explicit-path
-staging only; `git pull --rebase origin main` before every push; never
-force-push; confirm `HEAD == origin/main` after each push; stop taking scope
-at ~20% context.
+**Next concrete step (for whoever continues)**
+- Nothing pending in this workstream. The architecture-planner (wave 4) should read §19,
+  §16 and §15 first, then §1 and §12.
 
 ## Source log (append as read — URL, date, what it established)
 
