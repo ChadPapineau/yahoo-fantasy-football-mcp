@@ -100,6 +100,19 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
    `derekrbreese/fantasy-football-mcp-public`; verified by the orchestrator
    from file names in the scratch clones, values never printed or tested).
    Notifying the owners is Chad's decision; nothing has been sent.
+6. **Will this ever be distributed commercially?** Two sources in the
+   recommended free stack are non-commercial (Sleeper's API for trending
+   adds/drops; Open-Meteo for weather) and two are share-alike (FTN
+   charting, ffopportunity). Personal use is fine as planned; a commercial
+   path means swapping Open-Meteo → NWS and Sleeper → an own trending
+   signal, plus attribution. The plan will default to personal use unless
+   Chad says otherwise (`docs/research/04-data-sources.md` §G.3).
+7. **Projections will be ours, not a vendor's.** No free, legal, current
+   projection source exists (FantasyPros' cheap tier is personal-use only,
+   ~$9/mo). The plan builds projections from usage + play-by-play +
+   expected-points + lines + injuries and labels them as such. If Chad
+   would rather pay for a consensus feed as a baseline/comparator, say so
+   (`04` §C, `05` §16 item 12).
 
 ## Open items
 
