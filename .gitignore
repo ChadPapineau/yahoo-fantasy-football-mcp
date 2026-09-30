@@ -57,6 +57,10 @@ credentials.*
 tokens/
 private/
 
+# --- Manual-league file (real league/team names; lives in <config>/, never here)
+*league.yaml
+!fixtures/manual/*.yaml
+
 # --- Local data caches the server may write ------------------------------
 data/cache/
 *.sqlite
