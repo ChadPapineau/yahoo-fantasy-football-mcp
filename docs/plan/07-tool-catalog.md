@@ -411,6 +411,20 @@ Claude Code warns at 10 000 tokens and truncates at 25 000 by default (06 §A.1)
 
 **Per-turn fixed cost — definitions, not results** *(added round 1, OBJ-08)*. The table above counts what a call returns; a client without deferred tool loading (Claude Desktop; Claude Code only when Tool Search is off) also pays `tools/list` **every turn**: for each registered tool its description (~150 chars with the C13 pointer; ~400 when it carried the §6.3 sentence, before round 2), its zod-derived `inputSchema`, and — where present — its `outputSchema`; plus the Skills listing (12 × ≤ 350 chars, plan 09 §2) and the prompts list. Controls: `FF_TOOLSET=core` as the default (C3), no `outputSchema` on the list tools (C10), the §6.3 sentence served once in `instructions` with a ≤ 45-char pointer per description (C13), static descriptions (§5.4). Measurement: `tests/mcp/size.test.ts` records `tools/list` bytes **and tokens (one model's tokenizer)** under `core` and `full`, plus the Skills listing chars, in fixture mode, against **token-derived, downward-only ceilings — `core` ≤ 20 000 chars (≈ 5k tokens; research 06 §A.1's own rule of thumb for ~30 rich tools), `full` ≤ 35 000 chars, Skills listing ≤ 4 500 chars [A-4]** *(revised round 2, OBJ-28: round 1's 40 000/70 000 sat above the design's size and constrained nothing)* — and the numbers go into plan 10 §2's ledger row. The ceilings are calibrated on the first measurement and may only ever move **down**; **a new tool that would breach a ceiling shrinks a schema or moves to `full`** — the number is never raised. The rule "definitions are budgeted like results" is not a constant.
 
+**Measured — Phase 1a, fixture mode, 2026-09-30** (`tests/mcp/size.test.ts`; CI writes the same table to the `test` job summary on every run — plan 10 §2 ledger). Token counts are the 4-chars/token rule of thumb and a 3-chars/token upper bound (no tokenizer is a dependency); the per-client token re-base waits on A17's manual half.
+
+| Quantity | Measured | Ceiling | Headroom |
+|---|---|---|---|
+| `tools/list` under `FF_TOOLSET=core` (19 P0 tools) | 19,483 chars ≈ 4.9k tokens (≤ 6.5k) | 20,000 | 517 chars (2.6 %) |
+| `tools/list` under `full` (Phase 1a registers only the `core` tools) | 19,483 chars | 35,000 | 44 % |
+| prompts list | 440 chars | — | — |
+| Skills listing (4 shipped Skills) | 1,159 chars | 4,500 | 74 % |
+| OBJ-07 `ff_list_players` (32 names): bare + path-listed → wrapped | 18,559 → 21,373 chars (+15.2 %) | 20,000 | wrapping would breach the worst case |
+| OBJ-07 `ff_get_roster` (16 names): bare + path-listed → wrapped | 6,942 → 8,349 chars (+20.3 %) | 20,000 | — |
+| Largest single results (compact / full) | `ff_list_players` 18,559 / 19,775; `ff_get_league` 13,716; `ff_search_players` 13,279; analytics max `ff_analyze_waivers` 9,725 / 7,883 | 20,000; analytics 10,000 | every tool within its column |
+
+`core` sits at 97.4 % of its ceiling: by the downward-only rule, the next tool added to `core` shrinks a schema or goes to `full`.
+
 ### 5.2 What `detail: "compact"` drops (and why the Skills can rely on it)
 
 `compact` keeps every identifier, every number a decision needs, and every `Dist`; it drops per-game rows (usage), per-week arrays beyond three weeks (projections `ros`), `stat_line_expectation`, `shrinkage[]`, `flex_allocation_trace`, `weekly_impact` beyond the next four weeks, and `evidence` strings inside signals. `full` is for the retrospective and for debugging. The cheat-sheet (`ff://docs/tool-outputs`) lists the exact field set per tool per level so a Skill never asks for `full` to find a field that `compact` already has.

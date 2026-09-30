@@ -2,12 +2,13 @@
 // tool's compact and full result ≤ its worst-case column (analytics ≤ 10 000 chars), the per-turn
 // fixed cost of tools/list against the downward-only ceilings (core ≤ 20 000 chars, full ≤ 35 000;
 // Skills listing ≤ 4 500), and the OBJ-07 bare-vs-wrapped player-name comparison. The measured
-// numbers are printed (the ledger copies them into plan 07 §5.1).
+// numbers go to the CI job summary (plan 10 §2 ledger) and are copied into plan 07 §5.1.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ANALYTICS_BUDGET_CHARS, wrapUntrusted } from "../../src/mcp/envelope.js";
 import { TEAM_A, ROOT, connect, makeWorld, type World } from "./helpers/env.js";
+import { writeSizeReport, type SizeReport } from "./helpers/size-report.js";
 
 /** plan 07 §5.1 worst-case column (serialised chars at compact; the halving point is the budget). */
 const WORST: Readonly<Record<string, number>> = {
@@ -66,13 +67,15 @@ const HEAVY: Readonly<Record<string, Record<string, unknown>>> = {
 const CEILING = { core: 20_000, full: 35_000, skills: 4_500 } as const;
 
 let world: World;
-const report: Record<string, unknown> = {};
+const report: SizeReport = {};
 beforeAll(async () => {
   world = await makeWorld();
 }, 60_000);
 afterAll(() => {
-  // the ledger row (plan 10 §2): printed so CI's job output carries the measured numbers
+  // the ledger rows (plan 10 §2): the CI job summary carries the measured numbers as a table
+  // (tests/mcp/helpers/size-report.ts); the log line keeps them in the raw job output too
   console.log(`SIZE-REPORT ${JSON.stringify(report)}`);
+  writeSizeReport(report, CEILING);
   world.cleanup();
 });
 
@@ -168,7 +171,7 @@ describe("per-turn fixed cost (plan 07 §5.1; plan 10 §2 ledger)", () => {
 
   it("OBJ-07: player names bare + path-listed vs wrapped (ff_list_players, ff_get_roster)", async () => {
     const { client, close } = await connect(world);
-    const out: Record<string, unknown> = {};
+    const out: NonNullable<SizeReport["obj07"]> = {};
     for (const [name, args] of [
       ["ff_list_players", { limit: 100 }],
       ["ff_get_roster", { week: 4 }],
