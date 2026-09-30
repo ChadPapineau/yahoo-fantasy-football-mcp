@@ -5,29 +5,11 @@ Brief: `docs/scratch/briefs/data-source-evaluator.md`. Deliverable:
 
 ## RESUME HERE
 
-**Status:** IN PROGRESS — Group A (nflverse core), crosswalk sources, Sleeper, NWS, ESPN scoreboard, ffopportunity OBSERVED (see source log). Next: odds/weather/projections/news ToS + probes, then write `docs/research/04-data-sources.md`.
+**Status: COMPLETE (2026-09-30 UTC).** Deliverable `docs/research/04-data-sources.md` pushed at `499d6cd` (fast-forward; `origin/main` had not moved). Nothing outstanding for this agent.
 
-**Next step:** read `docs/research/03-yahoo-api.md` §E (Gaps) + capability matrix
-and `docs/research/01-repo-security-audit.md` verdicts (only for code libraries),
-then evaluate needs in groups of 3–4, pushing after each group:
+If reopened, the only follow-ups are in `04-data-sources.md` §H (unverified list), the top three being: (1) confirm Yahoo `player_id` ≡ nflverse `yahoo_id` with one live call, (2) read Yahoo's team-abbreviation set for the matcher's mapping table, (3) find which sportsbook feeds nflverse `schedules` lines. No wip patch exists (the doc was written and committed atomically).
 
-1. Group A — nflverse core: pbp / player_stats / snap_counts / participation /
-   ftn_charting / schedules (2026 data present? last-updated? cadence? license?)
-2. Group B — injuries / depth charts / players crosswalk (nflverse, Sleeper, ESPN)
-3. Group C — betting lines / weather / schedule
-4. Group D — projections + rankings (FantasyPros, ESPN, Sleeper, numberFire, paid)
-5. Group E — trending / news / RSS / Reddit
-6. Group F — defensive matchup derivations; historical backtests
-7. Synthesis: primary+secondary table, ID-crosswalk plan, freshness map,
-   do-not-use list, unverified list. Retire the wip patch.
-
-**Rules recap:** no installs, no third-party code execution, samples ≤ 5 MB,
-`curl -I` preferred; mark verified vs unverified; quote ToS; explicit-path
-staging only; pull --rebase before each push.
-
-**Owned paths:** `docs/research/04-data-sources.md`,
-`docs/scratch/data-source-evaluator.md`,
-`docs/scratch/data-source-evaluator.wip.patch` (temporary).
+**Owned paths:** `docs/research/04-data-sources.md`, `docs/scratch/data-source-evaluator.md`. Dirty files seen in the tree at close (`docs/HANDOFF.md`, `docs/scratch/roster.md`) are another agent's and were not touched.
 
 ## Source log (append as observed) — all observed 2026-09-29 (UTC evening)
 
@@ -79,4 +61,9 @@ ESPN site.api.espn.com scoreboard (unofficial) → 200, cache-control max-age=9,
 
 ## Findings for the orchestrator
 
-_(populated in 04-data-sources.md; see its §G)_
+1. **No free, legal, current projections; no free in-season route data** (04 §G-1). Projections must be built from nflverse usage + ffopportunity EP + lines + injuries; routes cannot be shown in-season (snap share is the proxy).
+2. **Yahoo-id crosswalk is incomplete by construction:** 170/532 active skill players (all 2025 + 2026 rookies) have no `yahoo_id` in nflverse, DynastyProcess (identical 362) or Sleeper (fills none). The crosswalk must be a name+team+position matcher seeded from Yahoo's player list, persisted, with overrides (04 §D). Build and test it first.
+3. **Licence shape:** nflverse CC-BY 4.0 (backbone, keyless, file-based); FTN charting + ffopportunity CC-BY-SA 4.0 (attribute); Sleeper + Open-Meteo **non-commercial** (swap to NWS / own signal before monetising); The Odds API free 500 credits/mo (storing allowed).
+4. **Breaking-change watch:** nflverse renamed `player_stats`→`stats_player` (old tag frozen 2025-05-07), rebuilt `players` without yahoo/sleeper ids, retimestamped `depth_charts`, consolidated NGS files. Pin file names, assert columns at load, poll `timestamp.txt`.
+5. **ESPN is WAF-blocked with any query string** from this network and ToS-barred; Reddit 403; NBC/Rotoworld feeds dead/empty; FantasyPros RSS serves 0 bytes; numberFire redirects to FanDuel. Free news = RotoWire RSS (5 items, ~200 chars) + ESPN RSS (headlines only).
+6. Sleeper defects to code around: `gsis_id` leading space (866/3,893), `practice_participation` never populated, `yahoo_id` 26 % filled.
