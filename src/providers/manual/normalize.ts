@@ -360,7 +360,9 @@ export function normalizeLeague(f: LeagueFile): NormalizeResult {
     }),
   });
 
-  const identifiers = new Set<string>([f.league.name, league_key, slug]);
+  // The full `manual.l.<slug>` key, not the bare slug: the default slug is the word "league",
+  // and redacting every "league" in every log line would shred them (platform.ts obligation).
+  const identifiers = new Set<string>([f.league.name, league_key]);
   for (const t of teams) {
     identifiers.add(t.name);
     if (t.manager !== null) identifiers.add(t.manager);
