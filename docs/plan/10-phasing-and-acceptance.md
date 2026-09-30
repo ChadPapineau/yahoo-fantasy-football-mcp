@@ -57,8 +57,8 @@
 | News source calibration (Brier by source × claim type, 05 §10 eval) | Phase 3 | `ff_analyze_evidence.calibration_state` | `ff_get_status.checks[]` |
 | Skill Lane 1 (structural) | Phase 1a | `check:skills` | CI |
 | Skill Lane 2 (model-graded) | Phase 1a/1b, pre-release | `npm run eval:skills` | `docs/evals/` |
-| Token sizes vs plan 07 §5.1 table | Phase 1a | `tests/mcp/size.test.ts` (fixture mode, every tool, both `detail` levels) | CI |
-| **Per-turn fixed cost**: `tools/list` bytes **and tokens** under `FF_TOOLSET=core` and `full` + Skills listing chars + prompts list, vs the plan 07 §5.1 ceilings (token-derived, downward-only — round 2, OBJ-28) *(added round 1, OBJ-08)* | Phase 1a (`core`) → Phase 2 (`full`) | `tests/mcp/size.test.ts` (fixture mode) | CI job summary; the measured numbers are copied into plan 07 §5.1 |
+| Token sizes vs plan 07 §5.1 table | Phase 1a | `tests/mcp/size.test.ts` (fixture mode, every tool, both `detail` levels) | CI (job summary); measured values in plan 07 §5.1 |
+| **Per-turn fixed cost**: `tools/list` bytes **and tokens** under `FF_TOOLSET=core` and `full` + Skills listing chars + prompts list, vs the plan 07 §5.1 ceilings (token-derived, downward-only — round 2, OBJ-28) *(added round 1, OBJ-08)* | Phase 1a (`core`) → Phase 2 (`full`) | `tests/mcp/size.test.ts` (fixture mode) | CI job summary (`test` job, written by the test); the measured numbers are copied into plan 07 §5.1. **Phase 1a, 2026-09-30:** `core` 19,483 chars ≈ 4.9k tokens (≤ 6.5k) of 20,000; Skills listing 1,159 of 4,500; prompts list 440 |
 
 ### 2.1 When each retrospective metric reaches n ≥ 30 for one 12-team H2H league *(added round 1, OBJ-05)*
 
