@@ -20,6 +20,6 @@ Agent rules: repo `CLAUDE.md`. Commits only via `scripts/dev/commit-paths.sh`; N
 
 ## RESUME HERE
 
-Stage A about to start (guard-rails committed `b0a7194`). If this session is cut off: check
+Stage A DONE and verified (`fbcd8e8`; build moved to ~/Developer/yahoo-fantasy-football-mcp, outside iCloud). Stage B (modules) next. If this session is cut off: check
 `git log origin/build/phase-1a`, `gh run list --branch build/phase-1a`, and the workflow
 journal; re-run the stage's workflow with `resumeFromRunId` (cached agent results replay).

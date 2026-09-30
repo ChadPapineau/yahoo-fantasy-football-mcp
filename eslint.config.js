@@ -236,7 +236,7 @@ const offIfEmpty = (list) => (list.length ? ["error", ...list] : "off");
 /**
  * no-restricted-imports / -syntax / -properties replace (not merge) across config objects, so each
  * layer's object restates the global bans.
- * @param {{ paths?: object[], patterns?: object[], fetch?: boolean, stdout?: boolean }} extra
+ * @param {{ paths?: object[], patterns?: object[], fetch?: boolean, stdout?: boolean, clock?: boolean }} extra
  * @returns {import("eslint").Linter.RulesRecord}
  */
 function restrictions(extra) {
@@ -249,9 +249,29 @@ function restrictions(extra) {
     "no-restricted-properties": offIfEmpty([
       ...(extra.stdout ? STDOUT_BAN : []),
       ...(extra.fetch ? FETCH_BAN.properties : []),
+      ...(extra.clock ? CLOCK_BAN : []),
     ]),
   };
 }
+
+/**
+ * src/domain is deterministic: randomness comes from the seeded Rng and time from the Clock in
+ * src/domain/clock.ts (Stage A critique B C-17), so simulations and tests are reproducible.
+ */
+const CLOCK_BAN = [
+  {
+    object: "Math",
+    property: "random",
+    message:
+      "src/domain must use the seeded Rng from src/domain/clock.ts, not Math.random (B C-17).",
+  },
+  {
+    object: "Date",
+    property: "now",
+    message:
+      "src/domain must take time from the injected Clock (src/domain/clock.ts), not Date.now.",
+  },
+];
 
 const TS_FILES = ["**/*.ts", "**/*.mts", "**/*.cts"];
 const JS_FILES = ["**/*.js", "**/*.mjs", "**/*.cjs"];
@@ -341,6 +361,17 @@ export default [
   // --- layer-specific import bans (plan 01 §1.1) --------------------------------------------------
   {
     files: ["src/domain/**/*.ts"],
+    rules: restrictions({
+      paths: [...FS_BAN, ...DOMAIN_IO_BAN],
+      patterns: [MCP_SDK_BAN],
+      fetch: true,
+      stdout: true,
+      clock: true,
+    }),
+  },
+  {
+    // the one sanctioned reader of wall-clock time in src/domain (systemClock)
+    files: ["src/domain/clock.ts"],
     rules: restrictions({
       paths: [...FS_BAN, ...DOMAIN_IO_BAN],
       patterns: [MCP_SDK_BAN],

@@ -29,6 +29,10 @@ no Yahoo API access, so the product runs on `ManualLeagueProvider` (league setti
 
 ## Workflow
 
+- **Build in `~/Developer/yahoo-fantasy-football-mcp`** (a clone outside iCloud). The owner's
+  canonical checkout in `~/Documents/Repos/` is iCloud-synced: iCloud creates conflict copies
+  ("name 2.ext") under `node_modules` and `.git`, so no install, build or agent work happens there
+  — it only `git pull`s.
 - Node through `scripts/dev/with-node.sh <cmd>` (Node from `.nvmrc` via fnm; the machine's global
   default is left alone). Heavy jobs (`npm ci`/`install`, full test/coverage, `build`, process
   tests) through `scripts/dev/heavy-lock.sh scripts/dev/with-node.sh <cmd>` — one at a time.
