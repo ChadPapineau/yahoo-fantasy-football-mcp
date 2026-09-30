@@ -267,3 +267,119 @@ I endorse the proposed resolutions of T1–T7, T9–T13 as written. T5 (never pr
 ---
 
 _Round 1 ends here. Orchestrator: append `## Round 1 — defence` below this line._
+
+---
+
+## Round 1 — defence
+
+**Author:** orchestrator · **Date:** 2026-09-30 · Plan revision that answers this defence: the `plan-reviser` commits that follow (`docs(plan): round-1 revisions — …`), diffed against `7663b6a`.
+
+**Method.** Each objection gets one of: **CONCEDE** (the plan changes as asked), **CONCEDE-MODIFIED** (the plan changes, but not exactly as asked — with the reason), **JUSTIFY** (the plan stands — with evidence). Where the advocate could not verify something, I verified it myself before ruling (§D.0). Then §D.2 asks what the defended position should strengthen beyond what was attacked.
+
+### D.0 Facts I verified before ruling (primary sources, 2026-09-30)
+
+| Fact | Source | Effect |
+|---|---|---|
+| nflverse writes parquet with `arrow::write_parquet(d, path)` and **no compression argument** | `nflverse/nflverse-data` `R/upload.R` line 85 (GitHub API) | Arrow R's default applies |
+| Arrow R `write_parquet` default `compression = "snappy"` ("if available, otherwise uncompressed") | arrow.apache.org/docs/r/reference/write_parquet.html | **OBJ-20 closes**: hyparquet reads snappy natively; no sixth package |
+| fast-xml-parser source default `processEntities: true`, `htmlEntities: false` | `src/xmlparser/OptionsBuilder.js` lines 42–43 (GitHub API) | **The plan's A-9 was inverted**, as the advocate suspected; OBJ-14's entity half is confirmed |
+| `node:sqlite` on Node 22.23.2 prints `ExperimentalWarning` | HANDOFF "Stack facts" (run locally) | OBJ-09 confirmed |
+| `docs`/`secrets` workflows green on `main` without `.npmrc` today | GitHub Actions runs on `f3a0a48`, `e995228` | OBJ-12's prediction is about Phase 0, not today |
+
+### D.1 Rulings
+
+#### OBJ-01 — **CONCEDE-MODIFIED** (blocking → resolved by rewording + three mechanism changes)
+The advocate is right that the headline claim is false for Claude Code, and right that it was going to be copied into the README. The gate is **not** withdrawn — it is still the only mechanism that binds what is committed to what was previewed, and Chad's 2026-09-30 decision (read-only is the product; Phase W conditional and low priority) bounds the blast radius to a phase that may never start — but its *claim* must be true in every named client. Changes:
+1. **Plan 02 §1/§4.2/§8 rewritten** to state the trust boundary honestly: the gate's human channels are unforgeable **only when the model has no OS access as the user** (Claude Desktop chat, claude.ai). In **Claude Code**, where the model has `Bash`/`Read`/`Write` as Chad, the server-side gate is defence-in-depth and the actual gate is the client's permission prompts on `Bash`/`Edit`/`Write` and the user's own hooks. Threat model row #2 residual: "in Claude Code, the model can forge every channel; accepted because writes are disabled by default and the README says so."
+2. **`FF_WRITE_ENABLED=1` is documented as unsupported in a Claude Code session with unrestricted `Bash`**, and `ff doctor` warns when it detects a Claude Code launch (env `CLAUDECODE`/the client's `clientInfo.name` at connect) with writes enabled. A documented `permissions.deny` set is offered as the way to make it supported (deny `Bash(cat ~/.config/fantasy-football-mcp/**)`, `Bash(ff confirm*)`, `Edit(.claude/settings*.json)`, `Edit(**/hooks.json)`) — offered, not assumed, because I cannot verify a user keeps it.
+3. **The plaintext pending file is removed.** Channel 2 = macOS notification carrying the code + `sha256(code)` on the journal row only. `ff confirm` and `ff auth` **refuse when stdin is not a TTY** (`process.stdin.isTTY`), which defeats `printf 'y' | ff confirm`; the model could still run it inside a pty, so this is a hurdle, not a proof — and the plan says so.
+4. **Tokens readable by the model in Claude Code: stated plainly** in plan 02 §3.3 and the threat model. The Keychain `SecretSource` (plan 01 §11) is pulled forward as a **Phase W prerequisite** (not Phase 1): if writes are ever enabled, the refresh token moves to Keychain with an access prompt, so a Bash `cat` yields nothing. Read-only Phase 1 keeps the 0600 file — a model that can `cat` a read-only token can read the league, which it can already do through the tools.
+*What would not satisfy me:* dropping the gate because one client can bypass it — the gate still protects Desktop/claude.ai users and still gives the binding + audit trail everywhere.
+
+#### OBJ-02 — **CONCEDE** (blocking → resolved by phase split, dated gate, named fallbacks, honest EV)
+Correct on every point; the plan was silent where it mattered most. Changes to plan 10 (§0, §1, §3) and HANDOFF:
+1. **Phase 1 splits into 1a (Yahoo-free) and 1b (Yahoo).** 1a: store, `ff refresh` for `schedules`/`injuries`/`roster_weekly`/**`stats_player_week`** (moved from Phase 2 — see OBJ-03), the crosswalk, the scoring engine over nflverse lines, projections v1, K/DEF streaming by implied totals, weather/lines, the recommendation log, Skills `stream-kdef`/`retro` in fixture mode, and — for Chad's own league under denial — a **`ManualLeagueProvider`** behind `FantasyPlatform` (settings + roster imported from a hand-filled YAML the `onboard` Skill helps write; other teams' rosters optional). 1a's acceptance is defined on fixtures + nflverse only and **starts now**. 1b: `ff auth`, Yahoo provider, league tools, golden test vs Yahoo `player_points`, `ff smoke` on the live league. 1b's acceptance is the old A2/A16.
+2. **Dated decision gate** in plan 10 §0: "Application submitted: <date Chad submits — recorded in HANDOFF>. Decision point: **4 weeks after submission** (or NFL week 9, whichever is earlier): if no read grant, 1b pauses and the fallback ships." The date is a placeholder until Chad submits; the *rule* is fixed now.
+3. **Fallbacks named.** X1 = 1a + `ManualLeagueProvider` (Chad's league keeps start/sit, K/DEF, waiver *candidates* by usage; loses the live FA pool and other rosters unless pasted). X2 = `SleeperProvider` as the **first** second platform (public, keyless, read API; non-commercial, fine for personal use) — it proves the seam on a platform that is not ToS-blocked, and makes the product usable to anyone on Sleeper. ESPN stays "later" and the plan says why (04 §B5).
+4. **Honest expected value for the 2026 season**, one paragraph in plan 10 §0: approved by week 6 → 1b live by ~week 9–10, read-only weekly briefings for the second half and the playoffs; approved by week 10 → 1b live for the fantasy playoffs only; denied/unanswered → X1 for Chad (degraded but real), X2 for the public, and every line of Phase 2–3 remains valuable for 2027. The plan will no longer imply a week-4 start yields a week-4 product.
+*Also:* plan 10 §5 gains **D0 — the application itself** as the decision that outranks the other ten.
+
+#### OBJ-03 — **CONCEDE**
+v1 trailing stat lines come from nflverse `stats_player_week` (keyless, everyone, every season); Yahoo lines are used for the golden check and `match` only. `stats_player_week` moves into Phase 1a. Plan 07 E1, plan 10 §3.1 updated; plan 08 §3.2's `toStatLine(nflverse)` becomes the Phase-1 path.
+
+#### OBJ-04 — **CONCEDE-MODIFIED**
+(a) `Dist.basis: "position_cv" | "player_sim"` on every distribution, printed by every output template. (b) A7 gains `objective: pwin` vs `objective: mean` regret on fixture weeks; **v1 default is `mean`**, `pwin` opt-in, until A7 shows `pwin` wins. (c) In `position_cv` mode `delta_pwin` is reported as a **sign + coarse band**, and `coin_flip` widens. *Modification:* the `pwin` machinery stays in the code path (Phase 3 needs it and it is the same solver); only the default and the reporting change.
+
+#### OBJ-05 — **CONCEDE**
+E12 stays P0. E13/`retro` reframed around metrics that reach n ≥ 30 within weeks for one league: per-player projection CRPS/pinball/coverage (dozens of player-weeks per week), swap regret, `P(active)` Brier. Plan 10 gains a table "metric → week at which n ≥ 30 for one 12-team league". `parameter_changes_proposed` moves to Phase 3 (held-out seasons); until then `retro` prints "n too small" by name for `p_win`, `p_win_given_bid`, `p_role_holds`.
+
+#### OBJ-06 — **CONCEDE**
+Phase 1a week-1 spike: a `ff_debug_echo` fixture-mode tool returns a nonce only in `structuredContent`; each client is asked to repeat it; the answer goes into HANDOFF "Stack facts". Until measured, **list tools omit `structuredContent`** (research 06 §A.6's rule) and plan 07 §5.1 is re-based on measured tokens per client. The "Markdown as a second text block" clause is deleted (it would be a third copy).
+
+#### OBJ-07 — **CONCEDE-MODIFIED**
+One mechanism for **Yahoo-authored player names**: bare strings + `meta.untrusted_fields[]` paths; caps/stripping/NFC unchanged. Per-field `untrusted_text` wrappers are **kept** for the genuinely manager- or editor-authored classes — news title/blurb, `trade_note`, `injury_note`/`status_full`, manager nickname, team/league name — because those are where injection actually arrives and the wrapper's `source` tag is what the `news-check` reliability model reads. `tests/mcp/size.test.ts` records the before/after; the NC-1/AP-4 injection evals run with and without wrappers so the control's value becomes a number. *Why not drop the wrappers entirely:* a path list labels, a wrapper labels **and carries the source and truncation state** the Skills' evidence weighting needs (05 §10).
+
+#### OBJ-08 — **CONCEDE**
+Plan 10 §2 gains a ledger row "per-turn fixed cost: `tools/list` bytes + Skill listing chars", measured in fixture mode, with a ceiling. `outputSchema` is omitted on large list tools. A `FF_TOOLSET=core|full` switch: `core` (default) registers the 19 P0 tools; `full` adds P1 analytics. The C3 dispatcher alternative is *not* adopted (it hides tools from annotations and permission prompts); toolset gating achieves the budget without that cost. G2 `ff_get_playbook` → **later** (OBJ-21). Skill descriptions capped at ~350 chars each (research 06 §A.6).
+
+#### OBJ-09 — **CONCEDE**
+`engines.node >= 24.15`; doctor #1 says so; CI matrix = Node 24 only (25 added when it is LTS). Plan 01 D2/D4 corrected to cite the v24 line ("1.2 – Release candidate", `backup()` returning a Promise). The `ExperimentalWarning` observed on 22.23.2 is recorded as the reason. Chad runs Node 22 via `fnm` today; `fnm install 24` is a one-liner and goes in the quickstart.
+
+#### OBJ-10 — **CONCEDE**
+Plan 03 §7: pre-migration backup = `sqlite.backup()` (v24 API) or `VACUUM INTO`, taken under the process-wide lock (the token-lock pattern) so the second process cannot write mid-backup; a test restores from the backup and asserts the journal/log row counts.
+
+#### OBJ-11 — **CONCEDE**
+Plan 01 D8 reworded ("the server never *loads datasets*; it does write its own six tables"). Cache writes are **best-effort**: `busy_timeout` 100 ms, failure = a miss, never an error. Required writes (journal, recommendation log) retry for ≤ 1 s and then surface `STORE_BUSY` with the next step — never silently dropped. `ff refresh` loads into an **attached staging database** and swaps with a millisecond transaction. Plan 05 gains the test: hold a 3-s writer lock, assert p95 tool latency < 300 ms and zero errors.
+
+#### OBJ-12 — **CONCEDE**
+`docs.yml` gains an explicit `npx --yes puppeteer@<pin> browsers install chrome` step (and `--ignore-scripts=false` on the mermaid-cli invocation) with a header comment naming the interaction; plan 04 §4.2 names it; Z3 exercises `docs.yml` with `.npmrc` present. The reviser owns this edit and must show the workflow green after it.
+
+#### OBJ-13 — **CONCEDE** (already independently reached by `ci-bootstrap`)
+Plan 04 §5 "Now" = no force-push, no deletion, linear history, secret-scanning push protection (already on); **no required checks** until PRs are required when product code lands. Plan 10 Z1 reworded. The `ci-vigilance` obligation (verify every push's runs) is written in as the docs-phase substitute. Chad's exact `gh api` command is in `docs/scratch/ci-bootstrap.md`.
+
+#### OBJ-14 — **CONCEDE** (both halves; the entity default verified inverted — §D.0)
+`processEntities: false` and `htmlEntities: false` set explicitly in `xml.ts`, with a fixture asserting an internal-`DOCTYPE` entity is *not* expanded and the billion-laughs document is inert. The runtime allow-list becomes the **full `npm ls --omit=dev --all` tree with the count stated**, and the CI diff runs against it. Pin-time rule recorded in plan 04 §2: prefer the smaller tree (fast-xml-parser 4.x, one dependency) unless 5.x has a feature we need — decided at pin time with the reason in the table.
+
+#### OBJ-15 — **CONCEDE**
+Recommendation-log free text (`note`, `assumptions[].text`, `drivers[].name`, `alternatives[].action`) is listed in `meta.untrusted_fields[]` with `source: "store.recommendation_log"` on every read (E13/E14/`ff://rec/*`); plan 02 §6.1 adds "our own store, written by the model under whatever influence it was under" as an injection source; NC-1/AP-4 gain a two-session variant (inject in week N, read the log in week N+1).
+
+#### OBJ-16 — **CONCEDE-MODIFIED**
+D2 states that **game-day availability comes from Yahoo `status`/`status_full` only** and sets `p_active_basis: "yahoo_gameday_status"` whenever the roster's game is within 3 h of kickoff; `sources_agree` is suppressed on game day. The `live` branch (OBJ-18) reads Yahoo status only. *Modification:* no game-day Sleeper refreshes — Sleeper's "once per day at most" etiquette stays honoured; Yahoo's status is the live source we already have.
+
+#### OBJ-17 — **CONCEDE**
+Mismatch → `engine_complete: false` and a `warnings[]` line on the **affected players only**; analytics fall back to Yahoo `player_points` for those players where a final week exists; a league-wide block only when > 10 % of rostered player-weeks mismatch (a settings change, not a correction). Plan 08 E6/§6.3 and plan 09 `onboard` guardrail reworded.
+
+#### OBJ-18 — **CONCEDE**
+`live` is **folded into `start-sit`** as a branch selected by data: when `ff_get_roster.lock_schedule` shows any locked slot, `start-sit` switches to `only_unlocked`, reads Yahoo game-day status (OBJ-16), and reports live `P(win)` split final/live/pending. The Skills count becomes **12**. The trigger-collision eval gains time-blind Sunday prompts. K1's rejection reason is reversed and the listing budget improves (OBJ-08).
+
+#### OBJ-19 — **CONCEDE**
+`ff_prepare_*` and `ff_cancel_prepared` join the T8 "local write" annotation family (`readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false`).
+
+#### OBJ-20 — **JUSTIFY** (closed with evidence, §D.0)
+nflverse's parquet is snappy by Arrow R's default; hyparquet reads it natively. Plan 01 D7 records the codec and the source line; the loader still asserts the codec at load and fails loudly if a release ever changes it.
+
+#### OBJ-21 — **CONCEDE**
+E15 `ff_analyze_scoring` → later; E10 `ff_analyze_evidence` → **P2**, and until its calibration table has n, `news-check` says "priors are hand-set" and avoids "posterior" wording; G2 `ff_get_playbook` → later (prompts already carry the Skill bodies for non-Claude clients).
+
+#### OBJ-22 — **CONCEDE**
+Doctor gains rows: stale `dist/` (mtime vs `src/`/`package.json`), and the tail of the client's MCP log (Claude Desktop `~/Library/Logs/Claude/mcp-server-<name>.log`; Claude Code per its docs; `--client-log <path>` override). Classifier gains "network error on refresh → `UPSTREAM_UNAVAILABLE`, serve stale within the hard limit".
+
+#### OBJ-23 — **CONCEDE**
+(a) plan 01 §11 fixed. (b) Claude Code form-mode elicitation stays **[U]** with a Phase-1b acceptance line that verifies it in the Inspector and in Claude Code. (c) `@modelcontextprotocol/client` added to devDependencies with its row (it is test-only). (d) Plan 04 A-3 corrected: `dj0yJmk9` = base64 of `v=2&i=`; plan 03 A-7 stays [U] with doctor's text hedged.
+
+#### The 13 tensions — **all accepted as proposed**, with the advocate's two additions (T5 explicit in migration comments; T8 covers `prepare_*`/`cancel_*`).
+
+### D.2 What the defended position should strengthen beyond what was attacked
+
+Asked as the brief requires: *what could be optimized about the position I am defending?*
+
+1. **The plan had no single "if Yahoo says no" sentence anywhere** — the deepest gap. Beyond OBJ-02's fixes, every plan file's header will carry a one-line "Yahoo-dependency: none / read / write" tag so a reader can see at a glance what survives denial.
+2. **The security plan's language was stronger than its guarantees.** Rule going forward (added to plan 02 §0): every "cannot" in a security claim names the client set for which it holds.
+3. **The token economy counted results and not definitions** — a category error, not a number error; the ledger row fixes it, and `FF_TOOLSET=core` becomes the *default*, not an option.
+4. **Verification hygiene:** the plans marked [A]/[U] honestly, but two [V-node]/[A-9] tags were wrong. The reviser will re-tag every claim it touches with the source it actually read.
+
+### D.3 What the advocate should check in round 2
+
+Diff `docs/plan/*` and `.github/workflows/docs.yml` against `7663b6a`; confirm each ruling landed where this defence says; look for what the revisions broke (the Phase 1a/1b split, the `ManualLeagueProvider`, the `live` fold, the toolset switch, and the Node 24 floor are the largest changes). Say explicitly when what remains is marginal.
+
+_Round 1 defence ends here. The advocate opens `## Round 2 — verdicts and objections` below once the reviser's commits are on `main`._
