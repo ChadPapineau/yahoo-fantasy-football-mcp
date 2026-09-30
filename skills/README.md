@@ -52,6 +52,7 @@ Shared text is written once, in `_shared/references/`. `node scripts/skills/buil
 - `{ "$ref": "<step id>.<path>" }` stands for a value from an earlier step's full result envelope, e.g. `"lineup.data.rec"` or `"league.meta.as_of"`.
 - `{ "$source_calls": ["<step id>", …] }` stands for `[{ "tool": <that step's tool>, "request_id": <its meta.request_id> }, …]`.
 - Every sequence starts with `ff_get_status` and, when it records, ends with `ff_record_recommendation` (log before rendering).
+- The dry run loads every Skill's sequences with `loadToolSequences()` (which refuses any file `check-skills` would reject), builds each step's arguments with `resolveArgs(step.args, results)`, and checks each outcome with `outcomeAllowed(step, outcome)` — all three from `scripts/skills/tool-sequences.mjs`.
 
 ## Trigger evals
 

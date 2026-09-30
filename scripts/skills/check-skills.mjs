@@ -937,6 +937,11 @@ export function checkSkills(opts = {}) {
       const re = new RegExp(`^#{2,4} ${h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "m");
       if (!re.test(body)) errors.push(`${rel}/SKILL.md: output-contract heading "${h}" is missing`);
     }
+    if (!body.includes("`basis`") || !body.includes("position_cv")) {
+      errors.push(
+        `${rel}/SKILL.md: the output contract must print the distribution \`basis\` (position_cv; plan 10 A7 d)`,
+      );
+    }
     if (!body.includes("ff_record_recommendation"))
       errors.push(`${rel}/SKILL.md: no ff_record_recommendation step (log discipline)`);
     for (const re of skillRule?.body ?? []) {
