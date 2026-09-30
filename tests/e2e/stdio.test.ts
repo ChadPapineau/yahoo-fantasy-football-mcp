@@ -120,6 +120,16 @@ describe("the refreshed cache and the handshake", () => {
   });
 });
 
+describe("A5a over the production path", () => {
+  it("every rostered fixture player resolves (roster_weekly id or name + team + position)", async () => {
+    const { body } = await call("ff_get_status", {});
+    const cw = (body.data as { crosswalk: { matched: number; unmatched_rostered: unknown[] } })
+      .crosswalk;
+    expect(cw.unmatched_rostered).toEqual([]);
+    expect(cw.matched).toBeGreaterThanOrEqual(29); // every gsis-keyed fixture player at least
+  });
+});
+
 describe("every tool, valid arguments → a schema-valid envelope over stdio", () => {
   for (const [name, argsList] of Object.entries(VALID)) {
     for (const args of argsList) {
