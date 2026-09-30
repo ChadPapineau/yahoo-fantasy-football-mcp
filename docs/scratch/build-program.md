@@ -28,4 +28,4 @@ Agent rules: repo `CLAUDE.md`. Commits only via `scripts/dev/commit-paths.sh`; N
   resumeFromRunId: "wf_c928f9e4-827"})` (completed agents replay from cache). In a new session:
   read each module's commits on `origin/build/phase-1a` (`git log --format='%h %s'`), then re-run
   only the stages whose commits are missing.
-- **Stage C RUNNING** — workflow `ffmcp-qa-pentest` (12 finder lenses → 2–3 adversarial verifiers each → remediation by area with regression tests → round gate → re-verification; loop until 2 dry rounds, max 4). Then Stage D (merge).
+- **Stage C RUNNING** — workflow `ffmcp-qa-pentest`, run `wf_8b711506-794` (resume same-session with its scriptPath + resumeFromRunId; 12 finder lenses → 2–3 adversarial verifiers each → remediation by area with regression tests → round gate → re-verification; loop until 2 dry rounds, max 4). Then Stage D (merge).
