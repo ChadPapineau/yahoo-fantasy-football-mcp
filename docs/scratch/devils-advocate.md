@@ -9,7 +9,7 @@ Off-limits (owned by `ci-bootstrap`, in flight in the same tree): `.github/**`,
 
 ## RESUME HERE
 
-**Round:** 3 (verdicts + closing) — **DONE**; the advocate rests. Round 3 over
+**Round:** 3 (verdicts + closing) — **DONE and pushed at 4c1d981**; the advocate rests. Round 3 over
 `b904a6f` (diffed against `8c39191`): OBJ-24…30 all conceded-by-defence and
 landed (7/7; sweeps clean; `DiscoverResult.instructions` re-verified by me on
 the spec page; `.gitignore` exception verified with `git check-ignore -v`).
@@ -66,7 +66,7 @@ file tells you whose move it is (`objections`/`verdicts` = mine, `defence` =
 orchestrator's).
 
 **Pushed SHAs:** 97f3085 (scratch start) · ebe848d (reading notes) ·
-**52337a3** (round-1 objections) · **1ab4db5** (round-2 verdicts + OBJ-24…30).
+**52337a3** (round-1 objections) · **1ab4db5** (round-2 verdicts + OBJ-24…30) · **4c1d981** (round-3 verdicts + closing verdict).
 
 ## Verification results (2026-09-30, primary sources) — keep for round 2
 
