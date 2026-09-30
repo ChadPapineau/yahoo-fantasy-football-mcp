@@ -37,7 +37,7 @@ Spec: `docs/plan/adversarial-log.md` § "Round 2 — defence" (§D.0 verified fa
 
 | # | Ruling | Status | Commit |
 |---|---|---|---|
-| R2-0 | Round 2 RESUME HERE pushed | [~] | — |
+| R2-0 | Round 2 RESUME HERE pushed | [x] | 27db930 |
 | R2-R | Read round-2 objections + defence in full | [x] | — |
 | OBJ-24 | plan 02: client sets → *session conditions* (no-reach vs reach); every "cannot" re-qualified; D.2 rule reworded; S12/README rule → any session with a file/shell-capable tool; doctor #13 heuristic over `claude_desktop_config.json`'s other `mcpServers`; Chad's multi-server setup as the motivating case | [x] | c8a7696 |
 | OBJ-25 | Keychain = removes the refresh token from disk/backups; in a reach session a hurdle (`node -e`), never a proof; "so a Bash cat yields nothing" deleted; signed helper + user presence priced as a Phase W item; re-audit plan 02 for cannot/never/yields nothing (D.2 item 3) | [x] | 689cee7 |
@@ -48,11 +48,11 @@ Spec: `docs/plan/adversarial-log.md` § "Round 2 — defence" (§D.0 verified fa
 | OBJ-30 | plan 04 §2 pin-time rule verbatim addition: "…and the pinned line has had a release in the last 6 months or is the maintainer's declared LTS; otherwise pin the current line and accept its tree, recording the count." | [x] | 9e265fe |
 | R2-D2 | plan 05 §0 rule: every latency/size bound names the fixture/dataset size it is measured on and the test that measures it; the post-OBJ-24/25 re-audit of plan 02 | [x] | 2a03b87 (item 1), c61a284 (item 3) |
 | R2-L | changelog: fix round-1 summary counts (18 concede + 4 concede-modified + 1 justified); add `## Round 2` | [x] | f7906db |
-| R2-C | consistency sweep + final docs/secrets proof after the last push | [~] | sweep clean after this commit; proof pending |
-| R2-F | reply: SHAs per ruling, run URLs, objection → file § table, forced choices | [ ] | — |
+| R2-C | consistency sweep + final docs/secrets proof after the last push | [x] | 295dfc0 — docs https://github.com/ChadPapineau/yahoo-fantasy-football-mcp/actions/runs/36676553916 · secrets https://github.com/ChadPapineau/yahoo-fantasy-football-mcp/actions/runs/36676553957 (both success) |
+| R2-F | reply: SHAs per ruling, run URLs, objection → file § table, forced choices | [x] | (this commit) |
 
 ### Round 2 — could not apply
-(none yet)
+(none — all seven rulings and the D.2 additions applied as written)
 
 ### Round 2 — choices I had to make
 - OBJ-26: the 1a-minimum cut's exit gate = the subset of 1a items that apply to its scope (A1a, A3a, A4a, A5a, A6, A7, A8, A10, A13–A15, A17); the defence gave the scope, not the gate.
@@ -88,5 +88,6 @@ Spec: `docs/plan/adversarial-log.md` § "Round 2 — defence" (§D.0 verified fa
 - Plan 07 C3 "34 read tools (19 P0 + 15 P1)" was a miscount: the P1 list (C3, D1, D4–D6, E4, E6–E11, E15, G2) is 14. After OBJ-21 (E15, G2 → later; E10 → P2): v1 = 31 (19 P0 + 11 P1 + 1 P2); Phase 2 tools/list = 30 under `FF_TOOLSET=full`. Plan 10 B10/B12 said 34 → fix to 30 (G4).
 
 ### Notes
+- **ROUND 2 DONE 2026-09-30.** Rulings: OBJ-24 c8a7696 · OBJ-25 689cee7 · OBJ-26 980aae7 (+ 295dfc0 leftover) · OBJ-27 e2cbd24 · OBJ-28 c97b151 · OBJ-29 f1b24ac · OBJ-30 9e265fe · D.2 items 2a03b87 / c61a284 · changelog f7906db. Tree proven green on 295dfc0 (URLs in row R2-C). Round 3 diffs against 8c39191.
 - **DONE 2026-09-30.** Plan tree proven green on `b3d9bfe`: docs https://github.com/ChadPapineau/yahoo-fantasy-football-mcp/actions/runs/36673538686 · secrets https://github.com/ChadPapineau/yahoo-fantasy-football-mcp/actions/runs/36673538700. The `docs.yml` change itself was proven on `90d8df6` (row 10). Round 2 (`devils-advocate`) diffs `docs/plan/*` + `.github/workflows/docs.yml` against `7663b6a`.
 - WIP patch: none was ever needed — every group was committed and pushed within its own working window (14 topic commits + consistency + changelog, each followed by a scratch commit), so no `.wip.patch` exists to retire.
