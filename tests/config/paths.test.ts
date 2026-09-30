@@ -240,6 +240,80 @@ describe("assertNotSynced (iCloud Desktop & Documents, iCloud Drive, CloudStorag
   });
 });
 
+describe("location guards see every spelling of a path (QA-1-086)", () => {
+  const onDarwin = process.platform === "darwin";
+  it.runIf(onDarwin)(
+    "refuses a differently-cased spelling of an existing synced folder (case-insensitive APFS)",
+    () => {
+      mkdirSync(path.join(tmp.dir, "Documents"));
+      mkdirSync(path.join(tmp.dir, "Library", "Mobile Documents"), { recursive: true });
+      for (const rel of [
+        "documents/ff-cache",
+        "DOCUMENTS/ff-cache",
+        "dOcUmEnTs",
+        "library/mobile documents/x",
+        "LIBRARY/MOBILE DOCUMENTS",
+      ]) {
+        expect(
+          refusal(() => {
+            assertNotSynced(path.join(tmp.dir, rel), tmp.dir);
+          }),
+          rel,
+        ).toBe("synced_folder");
+      }
+    },
+  );
+  it.runIf(onDarwin)("refuses a differently-cased synced folder that does not exist yet", () => {
+    for (const rel of ["documents/ff", "DESKTOP", "Library/cloudstorage/Drive/ff"]) {
+      expect(
+        refusal(() => {
+          assertNotSynced(path.join(tmp.dir, rel), tmp.dir);
+        }),
+        rel,
+      ).toBe("synced_folder");
+    }
+  });
+  it.runIf(onDarwin)("refuses a Unicode-normalisation variant of a synced folder", () => {
+    // APFS is normalisation-insensitive: NFD and NFC spellings name the same directory.
+    const home = path.join(tmp.dir, "Jose\u0301");
+    mkdirSync(path.join(home, "Documents"), { recursive: true });
+    expect(
+      refusal(() => {
+        assertNotSynced(path.join(tmp.dir, "Jos\u00e9", "Documents", "ff"), home);
+      }),
+    ).toBe("synced_folder");
+  });
+  it.runIf(onDarwin)("refuses a differently-cased spelling of the repository checkout", () => {
+    for (const p of [
+      path.join(ROOT.toUpperCase(), "probe"),
+      path.join(ROOT.toLowerCase(), "fixtures", "x"),
+      ROOT.toUpperCase(),
+    ]) {
+      expect(
+        refusal(() => {
+          assertOutsideRepo(p, ROOT);
+        }),
+        p,
+      ).toBe("inside_repo");
+    }
+  });
+  it("still allows lookalike names and sibling directories", () => {
+    for (const rel of ["DocumentsArchive/ff", "documents-old", ".config/ff"]) {
+      expect(
+        refusal(() => {
+          assertNotSynced(path.join(tmp.dir, rel), tmp.dir);
+        }),
+        rel,
+      ).toBe("no-throw");
+    }
+    expect(
+      refusal(() => {
+        assertOutsideRepo(`${ROOT}-sibling/x`, ROOT);
+      }),
+    ).toBe("no-throw");
+  });
+});
+
 describe("derived locations and dataset naming (plan 01 §5.5)", () => {
   const cache = "/c";
   it("builds the fixed layout", () => {
@@ -536,6 +610,37 @@ describe("hardening (critic C-20): FIFOs never block; insecure ancestors are ref
         ensureSecureDir(path.join(shared, "new", "conf"), { create: true });
       }),
     ).toBe("insecure_ancestor");
+  });
+  it("follows a symlinked component to its real ancestors (QA-1-091)", () => {
+    const shared = path.join(tmp.dir, "shared");
+    mkdirSync(path.join(shared, "mine"), { recursive: true });
+    chmodSync(shared, 0o777);
+    chmodSync(path.join(shared, "mine"), 0o700);
+    symlinkSync(path.join(shared, "mine"), path.join(tmp.dir, "link"));
+    const viaLink = path.join(tmp.dir, "link", "cache");
+    mkdirSync(viaLink, { mode: 0o700 });
+    expect(insecureAncestors(viaLink)).toContain(shared);
+    expect(
+      refusal(() => {
+        ensureSecureDir(viaLink, { create: false });
+      }),
+    ).toBe("insecure_ancestor");
+    expect(
+      refusal(() => {
+        ensureSecureDir(path.join(tmp.dir, "link", "cache2"), { create: true });
+      }),
+    ).toBe("insecure_ancestor");
+  });
+  it("creates nothing beneath an insecure ancestor (the refusal comes before mkdir) (QA-1-091)", () => {
+    const shared = path.join(tmp.dir, "shared");
+    mkdirSync(shared);
+    chmodSync(shared, 0o777);
+    expect(
+      refusal(() => {
+        ensureSecureDir(path.join(shared, "a", "b"), { create: true });
+      }),
+    ).toBe("insecure_ancestor");
+    expect(readdirSync(shared)).toEqual([]);
   });
   it("a group-writable ancestor is refused; the sticky bit (like /tmp) makes it safe", () => {
     const g = path.join(tmp.dir, "grp");
