@@ -1,0 +1,23 @@
+[
+  { "query": "who should I start?", "should_trigger": true },
+  { "query": "X is inactive, who goes in?", "should_trigger": true },
+  { "query": "what can I still change?", "should_trigger": true },
+  { "query": "what are my odds right now?", "should_trigger": true },
+  { "query": "Should I start Ja'Marr Chase or Deebo Samuel Sr. at flex?", "should_trigger": true },
+  { "query": "Is my lineup right for this week?", "should_trigger": true },
+  {
+    "query": "Trey McBride is Questionable, do I play him or Hunter Henry?",
+    "should_trigger": true
+  },
+  { "query": "Start or sit Kenneth Walker III?", "should_trigger": true },
+  { "query": "Who do I play at W/R/T?", "should_trigger": true },
+  { "query": "Jahmyr Gibbs is a late scratch, what do I do?", "should_trigger": true },
+  { "query": "Should I claim Ashton Jeanty off waivers?", "should_trigger": false },
+  { "query": "Trade Derrick Henry for Amon-Ra St. Brown?", "should_trigger": false },
+  { "query": "What's a good DFS lineup for the main slate?", "should_trigger": false },
+  { "query": "Prep me for next week", "should_trigger": false },
+  { "query": "Which defense should I stream?", "should_trigger": false },
+  { "query": "How did last week's advice do?", "should_trigger": false },
+  { "query": "Set up my league", "should_trigger": false },
+  { "query": "Who won my matchup last week?", "should_trigger": false }
+]

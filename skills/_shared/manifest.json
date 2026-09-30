@@ -1,0 +1,41 @@
+{
+  "$comment": "Single source for the Skills bundle's tool facts (plan 09 §4 K5, §5.1). `tool_contract` is stamped into every SKILL.md by scripts/skills/build-skills.mjs and must equal src/mcp/registry.ts TOOL_CONTRACT once the registry exports it; `tools` are the 19 Phase-1a P0 tools (plan 07 C3, plan 10 §3.1a) and must equal tests/smoke/expected-tools.json `core` once it exists. `write_tools` may be named only by the `apply` Skill (not shipped in 1a); `disallowed_tools` is the frontmatter deny-list every other Skill carries (plan 09 K3).",
+  "server": "fantasy-football-mcp-server",
+  "tool_contract": 1,
+  "tools": [
+    "ff_list_leagues",
+    "ff_get_league",
+    "ff_get_standings",
+    "ff_get_scoreboard",
+    "ff_list_transactions",
+    "ff_get_roster",
+    "ff_get_player_stats",
+    "ff_search_players",
+    "ff_list_players",
+    "ff_get_injuries",
+    "ff_get_schedule",
+    "ff_project_players",
+    "ff_analyze_lineup",
+    "ff_analyze_matchup",
+    "ff_analyze_waivers",
+    "ff_record_recommendation",
+    "ff_analyze_retrospective",
+    "ff_list_recommendations",
+    "ff_get_status"
+  ],
+  "write_tools": [
+    "ff_prepare_lineup",
+    "ff_prepare_transaction",
+    "ff_prepare_trade",
+    "ff_commit_lineup",
+    "ff_commit_transaction",
+    "ff_commit_trade",
+    "ff_cancel_prepared"
+  ],
+  "disallowed_tools": [
+    "fantasy-football-mcp-server:ff_commit_lineup",
+    "fantasy-football-mcp-server:ff_commit_transaction",
+    "fantasy-football-mcp-server:ff_commit_trade"
+  ],
+  "skills": ["onboard", "start-sit", "stream-kdef", "retro"]
+}
