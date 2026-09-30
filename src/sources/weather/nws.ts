@@ -32,7 +32,14 @@ export const NWS_FORECAST_HOURLY_RE =
 export const NWS_POINTS_MAX_BYTES = 1024 * 1024;
 export const NWS_HOURLY_MAX_BYTES = 4 * 1024 * 1024;
 const ACCEPT = "application/geo+json";
-const WIND_RE = /^\s*(\d{1,3}(?:\.\d+)?)(?:\s*to\s*(\d{1,3}(?:\.\d+)?))?\s*(mph|km\/h)?\s*$/i;
+/**
+ * Longest quantity string parsed ("5 to 10 mph" is 11 characters). Upstream text is untrusted (plan
+ * 02 §1 T3) and an hourly body may be 4 MiB: anything longer is refused BEFORE any regex runs.
+ */
+export const NWS_QUANTITY_TEXT_MAX = 32;
+// Matched against the trimmed text with whitespace runs collapsed to one space, so no two
+// quantifiers compete for the same characters (a `\s*…\s*` pair backtracks in O(n²) — QA-1-082).
+const WIND_RE = /^(\d{1,3}(?:\.\d{1,3})?)(?: ?to ?(\d{1,3}(?:\.\d{1,3})?))? ?(mph|km\/h)?$/i;
 
 /** A coordinate as NWS wants it: ≤ 4 decimals, no trailing zeros (avoids its 301 normalisation). */
 export function nwsCoord(x: number): string {
@@ -51,7 +58,8 @@ function quantity(
 ): { value: number | null; unit: string | null } {
   if (typeof v === "number") return { value: num(v), unit: fallbackUnit };
   if (typeof v === "string") {
-    const m = WIND_RE.exec(v);
+    if (v.length > NWS_QUANTITY_TEXT_MAX) return { value: null, unit: null };
+    const m = WIND_RE.exec(v.trim().replace(/\s+/g, " "));
     if (m === null) return { value: null, unit: null };
     const a = Number(m[1]);
     const b = m[2] === undefined ? a : Number(m[2]);
