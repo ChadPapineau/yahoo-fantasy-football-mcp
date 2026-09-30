@@ -54,7 +54,9 @@ permissions:
 
 concurrency:
   group: docs-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  # PRs: a superseded head is cancelled. Pushes to main: never — a cancelled run on main is a commit
+  # without a verdict (the run on 0722918 was cancelled by the next push seconds later).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # exact pin; bump deliberately (see header)
