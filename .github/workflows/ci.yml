@@ -1,6 +1,7 @@
 # ci — the product gate on every push (any branch) and every PR. Spec: docs/plan/04 §4.1 (jobs
-# lint, typecheck, test, supply-chain, pack; `process` and `smoke` arrive with the server in a later
-# stage), plan 05 §7 (coverage gate), plan 04 R5 (ubuntu, Node 24 only), R11 (full runtime tree).
+# lint, typecheck, test, supply-chain, pack, process, smoke), plan 05 §7 (coverage gate), plan 05
+# §4.2 + plan 10 A13 (process tests: ubuntu on every push, macOS weekly / on demand), plan 10 A3a
+# (the Inspector smoke in fixture mode), plan 04 R5 (ubuntu, Node 24 only), R11 (full runtime tree).
 #
 # Choices, and why
 # - Actions pinned to full commit SHAs with the `# vX.Y.Z` comment, exactly as docs.yml/secrets.yml;
@@ -12,6 +13,12 @@
 #   pull_request_target); persist-credentials: false so the job token never lands in .git/config.
 # - Concurrency cancels superseded runs for PRs only — a cancelled run on a pushed commit is a commit
 #   without a verdict (as docs.yml).
+# - smoke: the MCP Inspector CLI is pinned EXACTLY (npx pins are not Dependabot-managed — bump
+#   deliberately) and runs from $RUNNER_TEMP with npm_config_ignore_scripts=true, so neither the
+#   project .npmrc nor an install script of the Inspector's own tree is involved. It drives the built
+#   server through tests/smoke/fixture-serve.mjs (fixture mode on a temp home — a stdio client passes
+#   only a safe subset of its environment to the server). `npm run smoke` is the same A3a check with
+#   the repo's own SDK client, both protocol eras, instructions and cache hints included.
 
 name: ci
 
@@ -19,6 +26,8 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1" # Monday 06:17 UTC: the weekly macOS process run (plan 10 A13)
 
 permissions:
   contents: read
@@ -144,3 +153,91 @@ jobs:
         run: npm run build
       - name: Scan what npm pack would ship
         run: npm run pack:scan
+
+  process:
+    name: process
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Process, end-to-end and latency suites against dist (plan 05 §4.2; A13, A15)
+        env:
+          FF_PROCESS_TEST_DIST: "1"
+        run: npm run test:process
+
+  process-macos:
+    name: process (macOS)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Process, end-to-end and latency suites against dist (plan 05 §4.2; A13 on macOS)
+        env:
+          FF_PROCESS_TEST_DIST: "1"
+        run: npm run test:process
+
+  smoke:
+    name: smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      INSPECTOR: "@modelcontextprotocol/inspector@2.8.0"
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: SDK stdio smoke — both protocol eras (tools, instructions, resources, prompts, G3)
+        run: npm run smoke
+      - name: MCP Inspector CLI (pinned) — tools/list, resources, templates, prompts in fixture mode
+        env:
+          npm_config_ignore_scripts: "true"
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/inspector"
+          mkdir -p "$out"
+          cd "$RUNNER_TEMP"
+          for method in tools/list resources/list resources/templates/list prompts/list; do
+            file="$out/$(echo "$method" | tr / _).json"
+            timeout 180 npx --yes "$INSPECTOR" --cli \
+              node "$GITHUB_WORKSPACE/tests/smoke/fixture-serve.mjs" \
+              --method "$method" --format json > "$file"
+            echo "$method: $(wc -c < "$file") bytes"
+          done
+          node "$GITHUB_WORKSPACE/tests/smoke/assert-inspector.mjs" \
+            "$out/tools_list.json" "$out/resources_list.json" \
+            "$out/resources_templates_list.json" "$out/prompts_list.json"

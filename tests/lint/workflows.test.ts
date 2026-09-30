@@ -77,10 +77,47 @@ describe("ci.yml", () => {
     );
   });
 
-  it("has the plan 04 §4.1 jobs (process/smoke join in a later stage)", () => {
+  it("has the plan 04 §4.1 jobs, process and smoke included", () => {
     expect(Object.keys(jobs)).toEqual(
-      expect.arrayContaining(["lint", "typecheck", "test", "supply-chain", "pack"]),
+      expect.arrayContaining([
+        "lint",
+        "typecheck",
+        "test",
+        "supply-chain",
+        "pack",
+        "process",
+        "process-macos",
+        "smoke",
+      ]),
     );
+  });
+
+  it("process runs against the built dist; macOS only weekly or on demand (A13)", () => {
+    expect(runs("process").indexOf("npm run build")).toBeLessThan(
+      runs("process").indexOf("npm run test:process"),
+    );
+    const env = (jobs.process?.steps ?? []).find((s) => s.run === "npm run test:process") as
+      (Step & { env?: Record<string, string> }) | undefined;
+    expect(env?.env?.FF_PROCESS_TEST_DIST).toBe("1");
+    const mac = jobs["process-macos"] as Job & { if?: string };
+    expect(mac["runs-on"]).toMatch(/^macos-/);
+    expect(mac.if).toContain("schedule");
+    expect(runs("process-macos")).toContain("npm run test:process");
+  });
+
+  it("smoke builds, runs the SDK smoke and the Inspector pinned to an exact version (A3a)", () => {
+    const smoke = jobs.smoke as Job & { env?: Record<string, string> };
+    expect(smoke.env?.INSPECTOR).toMatch(/^@modelcontextprotocol\/inspector@\d+\.\d+\.\d+$/);
+    const r = runs("smoke");
+    expect(r.indexOf("npm run build")).toBeLessThan(r.indexOf("npm run smoke"));
+    expect(r).toContain('npx --yes "$INSPECTOR" --cli');
+    expect(r).toContain('--method "$method" --format json');
+    expect(r).toContain("tests/smoke/assert-inspector.mjs");
+    for (const m of ["tools/list", "resources/list", "resources/templates/list", "prompts/list"])
+      expect(r).toContain(m);
+    const step = (smoke.steps ?? []).find((s) => s.run?.includes("$INSPECTOR")) as
+      (Step & { env?: Record<string, string> }) | undefined;
+    expect(step?.env?.npm_config_ignore_scripts).toBe("true");
   });
 
   it("installs with npm ci and Node from .nvmrc in every job", () => {
@@ -106,6 +143,8 @@ describe("ci.yml", () => {
       ],
     ],
     ["pack", ["npm run build", "npm run pack:scan"]],
+    ["process", ["npm run build", "npm run test:process"]],
+    ["smoke", ["npm run build", "npm run smoke"]],
   ])("%s runs its gate commands", (job, commands) => {
     for (const c of commands) expect(runs(job)).toContain(c);
   });
@@ -115,5 +154,34 @@ describe("ci.yml", () => {
       s.run?.includes("--audit-level=high"),
     );
     expect(gate?.run).not.toMatch(/\|\||continue-on-error/);
+  });
+});
+
+describe("docs.yml", () => {
+  const wf = load("docs.yml");
+  const jobs = wf.jobs ?? {};
+  const runs = (job: string) => (jobs[job]?.steps ?? []).map((s) => s.run ?? "").join("\n");
+
+  it("has the skills job: build-skills --check, then check-skills (plan 09 §5.1; A10)", () => {
+    const r = runs("skills");
+    expect(r).toContain("node scripts/skills/build-skills.mjs --check");
+    expect(r).toContain("node scripts/skills/check-skills.mjs");
+    expect(r.indexOf("--check")).toBeLessThan(r.indexOf("check-skills.mjs"));
+  });
+
+  it("runs on skills, the checker scripts and the contract files it reads", () => {
+    const on = wf.on as Record<string, { paths?: string[] }>;
+    for (const trigger of ["push", "pull_request"]) {
+      const paths = on[trigger]?.paths ?? [];
+      for (const p of [
+        "skills/**",
+        "scripts/skills/**",
+        "src/mcp/registry.ts",
+        "src/mcp/errors.ts",
+        "src/mcp/envelope.ts",
+        "tests/smoke/expected-tools.json",
+      ])
+        expect(paths, `${trigger} ${p}`).toContain(p);
+    }
   });
 });
