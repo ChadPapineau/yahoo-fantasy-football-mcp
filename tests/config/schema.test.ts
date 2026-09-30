@@ -469,12 +469,27 @@ describe("readConfigFile / loadConfigFromProcess", () => {
     chmodSync(f, 0o644);
     expect(loadConfigFromProcess({ env: {}, home, repoRoot: ROOT }).toolset).toBe("core");
   });
-  it("turns an unusable FF_CONFIG_DIR into a ConfigError", () => {
+  it("names FF_CONFIG_DIR (not config.json) when FF_CONFIG_DIR itself is unusable [QA-1-057]", () => {
+    for (const bad of ["relative", "rel/cfg", "./x", "~someone/x"]) {
+      const issues = issuesOf(() =>
+        loadConfigFromProcess({ env: { FF_CONFIG_DIR: bad }, home, repoRoot: ROOT }),
+      );
+      expect(
+        issues.map((i) => i.key),
+        bad,
+      ).toEqual(["FF_CONFIG_DIR"]);
+      expect(issues[0]?.reason, bad).toMatch(/absolute|~user/);
+    }
+  });
+  it("still reports every other issue alongside an unusable FF_CONFIG_DIR [QA-1-057]", () => {
     const issues = issuesOf(() =>
-      loadConfigFromProcess({ env: { FF_CONFIG_DIR: "relative" }, home, repoRoot: ROOT }),
+      loadConfigFromProcess({
+        env: { FF_CONFIG_DIR: "rel", FF_TOOLSET: "bogus" },
+        home,
+        repoRoot: ROOT,
+      }),
     );
-    expect(issues[0]?.key).toBe("config.json");
-    expect(issues[0]?.reason).toMatch(/absolute/);
+    expect(issues.map((i) => i.key).sort()).toEqual(["FF_CONFIG_DIR", "FF_TOOLSET"]);
   });
   it("surfaces an unexpected I/O failure as a value-free ConfigError", () => {
     const d = confDir();
