@@ -46,6 +46,7 @@ coverage/
 *.secrets
 secrets.*
 !secrets.example.*
+!.github/workflows/secrets.yml
 credentials.*
 !credentials.example.*
 *credentials*.json

@@ -15,7 +15,7 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | skills-mcp-researcher | a5edf2189cef8e218 | 3 | ✅ done (SHAs verified; spec rev 2026-07-28 confirmed at source; claude-code#41110 is closed `completed` with no visible out-of-scope statement → Desktop elicitation = unverified, design falls back automatically) | `docs/research/06-skills-and-mcp-design.md`, `docs/scratch/skills-mcp-researcher.md` | `5b30fba` | — |
 | architecture-planner-core | a45fab2bbf0065893 | 3 | ✅ done (SHAs verified; SDK v2 2.2.0 = npm `latest` and `node:sqlite` on Node 22.23 checked live — the latter still prints ExperimentalWarning) | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | `c5ea355` | — |
 | product-planner | a47f1502e3ab64907 | 4 | ✅ done (SHAs verified; identifier scan clean; 13 tensions + 10 open decisions in plan 10 §4–§5) | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | `b830114` | — |
-| ci-bootstrap | afe971bb2e5796cc9 | 4 | 🟢 running | `.github/**`, `.gitleaks.toml`, `scripts/**`, `docs/scratch/ci-bootstrap.md` | — | `docs/scratch/ci-bootstrap.md` §RESUME HERE |
+| ci-bootstrap | afe971bb2e5796cc9 | 4 | ✅ done (orchestrator verified: `docs` + `secrets` green on `f3a0a48`; full-history scan green; 20 files tracked) | `.github/**`, `.gitleaks.toml`, `scripts/**`, `docs/scratch/ci-bootstrap.md` | `f3a0a48` | — |
 | devils-advocate | a2ed55e691cda6d2a | 5 | 🟢 running (round 1) | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | `docs/scratch/devils-advocate.md` §RESUME HERE; resume the same ID via SendMessage for round 2+ |
 | docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md`, `docs/scratch/docs-writer.md` | — | brief: `docs/scratch/briefs/docs-writer.md` |
 
@@ -68,3 +68,12 @@ only if the ID is gone.
 - 2026-09-30 — wave 5 spawned: `devils-advocate` round 1 (reads only;
   writes `docs/plan/adversarial-log.md`). Orchestrator defends in the same
   file under `## Round N — defence` and edits the plan for conceded points.
+- 2026-09-30 — `ci-bootstrap` ✅ (`3051246`…`f3a0a48`): `docs.yml` (Mermaid
+  7/7 rendered via mermaid-cli 11.17.0; internal links; self-tests that
+  prove both checks can fail) and `secrets.yml` (gitleaks 8.30.1 pinned by
+  sha256, 7 custom Yahoo rules, self-test 7/7 fired on the must-flag copy,
+  0 on the tree; weekly full-history scan: 69 commits, no leaks), Dependabot,
+  PR template. Orchestrator verified every run green on `main`. Handed
+  back: `.gitignore` `secrets.*` swallowed `secrets.yml` (fixed by the
+  orchestrator); Chad's ruleset `gh` command is in
+  `docs/scratch/ci-bootstrap.md` § "For Chad".
