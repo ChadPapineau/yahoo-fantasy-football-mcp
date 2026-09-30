@@ -36,11 +36,13 @@ import {
 import { createPrivateFile, StatementGuard, WriteExecutor } from "./sqlite.js";
 import { openMigrated } from "./store.js";
 import {
+  PUBLISH_ALREADY_CURRENT,
   StoreBusyError,
   type DatasetPublisher,
   type DatasetRow,
   type DatasetTableSpec,
   type DatasetWriter,
+  type PublishOptions,
   type PublishOutcome,
   type PublishStats,
   type PublisherOpenOptions,
@@ -224,11 +226,39 @@ export function openPublisher(
     });
   };
 
+  /** The current row carries `version` and its file exists (else: RangeError naming why not). */
+  const assertCurrent = (sourceId: DatasetSourceId, version: string): void => {
+    const cur = currentRefreshRow(deps, sourceId);
+    if (cur?.file_version !== version)
+      throw new RangeError("store: version is not the current published one");
+    const file = path.join(opts.datasetDir, `${datasetFileStem(sourceId)}.sqlite`);
+    try {
+      lstatSync(file);
+    } catch {
+      throw new RangeError("store: the current dataset file is missing; publish it again");
+    }
+  };
+  const markChecked = (sourceId: DatasetSourceId, checkedAt: string): Promise<void> =>
+    deps.writes.required("refresh_log", () => {
+      db.prepare(
+        `UPDATE refresh_log SET checked_at = ? WHERE id = (SELECT MAX(id) FROM refresh_log WHERE source = ? AND ok = 1)`,
+      ).run(checkedAt, sourceId);
+    });
+  const isCurrent = (sourceId: DatasetSourceId, version: string): boolean => {
+    try {
+      assertCurrent(sourceId, version);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   async function publish(
     sourceId: DatasetSourceId,
     version: string,
     releaseUpdatedAt: string | null,
     fill: (writer: DatasetWriter) => Promise<PublishStats>,
+    options?: PublishOptions,
   ): Promise<PublishOutcome> {
     if (closed) throw new Error("store: the publisher is closed");
     if (!isDatasetSourceId(sourceId)) return { ok: false, error: "invalid_source" };
@@ -263,6 +293,13 @@ export function openPublisher(
     let writer: StagingWriter | null = null;
     let stage = "sweep_failed";
     try {
+      // single-flight (plan 01 §5.7): the caller's "unchanged" check ran before this lock; another
+      // refresh may have published this very release and released the lock since
+      if (options?.skipIfCurrent === true && isCurrent(sourceId, version)) {
+        stage = "refresh_log_failed"; // a failed check write is not a failed publish: no failure row
+        await markChecked(sourceId, clock.nowIso());
+        return { ok: false, error: PUBLISH_ALREADY_CURRENT };
+      }
       sweepDebris(opts.datasetDir, sourceId);
       stage = "staging_failed";
       staging = stagingPath(opts.datasetDir, sourceId, version);
@@ -372,20 +409,8 @@ export function openPublisher(
       if (!isDatasetSourceId(sourceId)) throw new RangeError("store: unknown dataset source");
       if (!Number.isFinite(Date.parse(checkedAt)))
         throw new RangeError("store: checkedAt must be ISO-8601");
-      const cur = currentRefreshRow(deps, sourceId);
-      if (cur?.file_version !== version)
-        throw new RangeError("store: version is not the current published one");
-      const file = path.join(opts.datasetDir, `${datasetFileStem(sourceId)}.sqlite`);
-      try {
-        lstatSync(file);
-      } catch {
-        throw new RangeError("store: the current dataset file is missing; publish it again");
-      }
-      await deps.writes.required("refresh_log", () => {
-        db.prepare(
-          `UPDATE refresh_log SET checked_at = ? WHERE id = (SELECT MAX(id) FROM refresh_log WHERE source = ? AND ok = 1)`,
-        ).run(checkedAt, sourceId);
-      });
+      assertCurrent(sourceId, version);
+      await markChecked(sourceId, checkedAt);
     },
     close() {
       if (closed) return;

@@ -242,6 +242,19 @@ export interface PublishStats {
   readonly columns_hash: string;
 }
 
+/** Options of `DatasetPublisher.publish` (additive; omitted = always publish). */
+export interface PublishOptions {
+  /**
+   * Under the job lock, when the current refresh_log row already carries `version` and its file
+   * exists, publish nothing: advance `checked_at` and return `{ ok: false, error:
+   * PUBLISH_ALREADY_CURRENT }`. Set for release-versioned sources unless `--force`.
+   */
+  readonly skipIfCurrent?: boolean;
+}
+
+/** The `PublishOutcome` error when `skipIfCurrent` found the version already published. */
+export const PUBLISH_ALREADY_CURRENT = "already_current";
+
 /** The result of publishing a dataset file. */
 export type PublishOutcome =
   | {
@@ -260,6 +273,10 @@ export type PublishOutcome =
  * Any failure deletes the staging file and leaves the previous dataset file untouched (plan 05 §2
  * `sources/*`). `recordUnchanged` is the skip path: the release version equals the attached one, so
  * no file is written and only refresh_log `checked_at` advances (the "release" age basis).
+ * `options.skipIfCurrent` re-makes that check UNDER the job lock (single-flight, plan 01 §5.7): a
+ * refresh that checked "unchanged" before another refresh published the same release and released
+ * the lock would otherwise publish it a second time — it returns `PUBLISH_ALREADY_CURRENT` instead,
+ * having advanced `checked_at`, without calling `fill`.
  */
 export interface DatasetPublisher {
   publish(
@@ -267,6 +284,7 @@ export interface DatasetPublisher {
     version: string,
     releaseUpdatedAt: IsoInstant | null,
     fill: (writer: DatasetWriter) => Promise<PublishStats>,
+    options?: PublishOptions,
   ): Promise<PublishOutcome>;
   recordUnchanged(sourceId: DatasetSourceId, version: string, checkedAt: IsoInstant): Promise<void>;
   /** Releases the publisher's connection; idempotent. */
