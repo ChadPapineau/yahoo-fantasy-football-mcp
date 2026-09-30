@@ -47,9 +47,9 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 |---|---|---|
 | 0 — repo setup | ✅ done | `.gitignore`, `.env.example`, `main` pushed, description + 14 topics applied via `gh`, tooling inventory (`docs/research/00-*`) |
 | 1 — research (waves 1–3) | ✅ 01–06 all verified by the orchestrator (SHAs on origin, identifier scan, one load-bearing claim per doc checked at source) | `docs/research/01-*` … `06-*` |
-| 2 — plan | 🟢 core plan ✅ (`docs/plan/01-*`…`06-*`, 1,693 lines, verified) · product plan running (`07-*`…`10-*`) | `docs/plan/` |
+| 2 — plan | ✅ all ten files (`docs/plan/01-*`…`10-*`, 2,935 lines), both halves verified; plan 10 §4 lists 13 small tensions to fold in during the adversarial round | `docs/plan/` |
 | 2b — docs-only automation (plan 06 §4 step 1) | 🟢 `ci-bootstrap` running: Mermaid + link CI, gitleaks with Yahoo-key rules + self-test, Dependabot, PR template — no product code | `.github/**`, `.gitleaks.toml`, `scripts/**` |
-| 3 — adversarial review | ⚪ | `docs/plan/adversarial-log.md`, changelog |
+| 3 — adversarial review | 🟢 round 1 running (`devils-advocate`); orchestrator defends + edits the plan between rounds | `docs/plan/adversarial-log.md`, changelog |
 | docs — README, LICENSE, SECURITY.md | ⚪ | root + `docs/README.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
 
@@ -138,7 +138,13 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
    path means swapping Open-Meteo → NWS and Sleeper → an own trending
    signal, plus attribution. The plan will default to personal use unless
    Chad says otherwise (`docs/research/04-data-sources.md` §G.3).
-7. **Projections will be ours, not a vendor's.** No free, legal, current
+7. **Ten product decisions with defaults** are in `docs/plan/10-phasing-and-acceptance.md`
+   §5 (D1–D10: commercial? paid projections? plugin manifest in Phase 2?
+   Odds API key? FAAB budget at onboarding; `apply` at P0 read-only; nightly
+   token budget for Skill evals; a second fixture league; backtest seasons;
+   Sunday `live` in Phase 1?). The plan proceeds on the stated defaults
+   unless Chad overrides.
+8. **Projections will be ours, not a vendor's.** No free, legal, current
    projection source exists (FantasyPros' cheap tier is personal-use only,
    ~$9/mo). The plan builds projections from usage + play-by-play +
    expected-points + lines + injuries and labels them as such. If Chad

@@ -14,9 +14,9 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | fantasy-strategy-analyst | a370e42955935355b | 2 | ✅ done (SHAs verified; Questionable-tag 71% claim spot-checked at source) | `docs/research/05-strategy-and-analytics.md`, `docs/scratch/fantasy-strategy-analyst.md` | `d9bd716` | — |
 | skills-mcp-researcher | a5edf2189cef8e218 | 3 | ✅ done (SHAs verified; spec rev 2026-07-28 confirmed at source; claude-code#41110 is closed `completed` with no visible out-of-scope statement → Desktop elicitation = unverified, design falls back automatically) | `docs/research/06-skills-and-mcp-design.md`, `docs/scratch/skills-mcp-researcher.md` | `5b30fba` | — |
 | architecture-planner-core | a45fab2bbf0065893 | 3 | ✅ done (SHAs verified; SDK v2 2.2.0 = npm `latest` and `node:sqlite` on Node 22.23 checked live — the latter still prints ExperimentalWarning) | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | `c5ea355` | — |
-| product-planner | a47f1502e3ab64907 | 4 | 🟢 running | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | — | `docs/scratch/product-planner.md` §RESUME HERE |
+| product-planner | a47f1502e3ab64907 | 4 | ✅ done (SHAs verified; identifier scan clean; 13 tensions + 10 open decisions in plan 10 §4–§5) | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | `b830114` | — |
 | ci-bootstrap | afe971bb2e5796cc9 | 4 | 🟢 running | `.github/**`, `.gitleaks.toml`, `scripts/**`, `docs/scratch/ci-bootstrap.md` | — | `docs/scratch/ci-bootstrap.md` §RESUME HERE |
-| devils-advocate | — | 5 | ⚪ not started | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | brief: `docs/scratch/briefs/devils-advocate.md` |
+| devils-advocate | a2ed55e691cda6d2a | 5 | 🟢 running (round 1) | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | `docs/scratch/devils-advocate.md` §RESUME HERE; resume the same ID via SendMessage for round 2+ |
 | docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md`, `docs/scratch/docs-writer.md` | — | brief: `docs/scratch/briefs/docs-writer.md` |
 
 ## Cutoff procedure
@@ -62,3 +62,9 @@ only if the ID is gone.
   "Now (docs-only repo)" items of plan 06 §4 step 1 (Mermaid + link CI,
   gitleaks with Yahoo rules + self-test, Dependabot, PR template). Owns
   `.github/**`, `.gitleaks.toml`, `scripts/**` only; no product code.
+- 2026-09-30 — `product-planner` ✅ (`d10835c`…`b830114`), four plan files,
+  1,242 lines; 34 read tools (19 P0), 7 conditional writes, 13 Skills ship.
+  Plan phase complete (10 files, 2,935 lines).
+- 2026-09-30 — wave 5 spawned: `devils-advocate` round 1 (reads only;
+  writes `docs/plan/adversarial-log.md`). Orchestrator defends in the same
+  file under `## Round N — defence` and edits the plan for conceded points.
