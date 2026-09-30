@@ -44,6 +44,14 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
   safety was lost); the games reader uses the venue's physical roof for open-air and fixed-roof
   venues (nflverse says `dome` for the MCG, Stade de France and Allianz Arena); a transient
   failure polling an nflverse `timestamp.txt` is retried instead of failing the refresh.
+- `ff_project_players` meets A15 as written (a 16-player roster at 4,000 sims ≈ 0.3 s, was
+  ≈ 0.8 s): projection samples are stored in a compact exact column form, and only a 1,000-sample
+  prefix is kept (the store grew by ~25 MB per roster call); `scoreSamples` skips per-sample
+  explanations and `denoise` no longer round-trips through a string (bit-identical results).
+- `ff_record_recommendation` refuses a rec logged under a different week (or tool) than a source
+  call this server session answered.
+- A bare `ff refresh all` in fixture mode exits 0: fixture mode defaults to the seasons the fixture
+  manifest records.
 
 - Project scaffold (Phase 0 remainder, `docs/plan/10-phasing-and-acceptance.md` §3.0):
   - `.npmrc` — `save-exact`, `ignore-scripts`, `engine-strict`, `audit`, no funding noise; landed
