@@ -12,7 +12,7 @@ docs/scratch/roster.md, docs/scratch/program.md, docs/scratch/briefs/*, docs/pla
 SDK README, npm registry). Verifying three last facts (SDK v2 legacy-client compat, `node:sqlite`
 stability, client elicitation support), then writing plan files 01 → 06 in order.
 
-**Next step:** write `docs/plan/02-security-architecture.md`; commit + push; then 03 … 06.
+**Next step:** write `docs/plan/03-lifecycle-and-operations.md`; commit + push; then 04 … 06.
 If resuming cold: the "Working notes" below hold every verified fact and every decision taken so
 far — do not re-derive them.
 
@@ -21,7 +21,7 @@ far — do not re-derive them.
 | File | Status |
 |---|---|
 | `docs/plan/01-system-architecture.md` | **written, pushed** |
-| `docs/plan/02-security-architecture.md` | not started |
+| `docs/plan/02-security-architecture.md` | **written, pushed** |
 | `docs/plan/03-lifecycle-and-operations.md` | not started |
 | `docs/plan/04-repo-structure-and-ci.md` | not started |
 | `docs/plan/05-testing-strategy.md` | not started |
