@@ -17,6 +17,7 @@ import type {
   RosterSlots,
 } from "../league/types.js";
 import type { Dist, DistBasis } from "../scoring/types.js";
+import { at } from "../scoring/numeric.js";
 import { FORBIDDEN, solveAssignment } from "./assignment.js";
 import { INACTIVES_LEAD_MS, LIMITS, LINEUP, Z90 } from "./constants.js";
 import { AnalyticsError } from "./errors.js";
@@ -179,13 +180,10 @@ function solve(input: SolveInput): Assignment {
   });
   const ans = solveAssignment(cost);
   rows.forEach((p, i) => {
-    const j = ans[i] ?? -1;
-    const c = cost[i]?.[j] ?? FORBIDDEN;
-    const x = inst[j];
-    out.set(
-      p.player_key,
-      j >= 0 && j < inst.length && c < FORBIDDEN / 2 && x ? x.slot.name : BENCH,
-    );
+    const j = at(ans, i);
+    // a bench column, or (never, while the bench columns stay open) a forbidden start cell
+    const starts = j < inst.length && at(at(cost, i), j) < FORBIDDEN / 2;
+    out.set(p.player_key, starts ? at(inst, j).slot.name : BENCH);
   });
   return out;
 }
@@ -226,7 +224,7 @@ function startersOf(
   players: readonly LineupPlayer[],
   slots: RosterSlots,
 ): LineupPlayer[] {
-  return players.filter((p) => isStartClass(slotOf(slots, a.get(p.player_key) ?? BENCH)));
+  return players.filter((p) => isStartClass(slotOf(slots, slotIn(a, p.player_key))));
 }
 
 function currentAssignment(players: readonly LineupPlayer[]): Assignment {
@@ -235,18 +233,29 @@ function currentAssignment(players: readonly LineupPlayer[]): Assignment {
 
 const lineupId = (a: Assignment, starters: readonly LineupPlayer[]): string =>
   starters
-    .map((p) => `${p.player_key}@${a.get(p.player_key) ?? ""}`)
+    .map((p) => `${p.player_key}@${slotIn(a, p.player_key)}`)
     .sort()
     .join(",");
 
-function etWeekday(iso: string | null): string | null {
-  const ms = kickoffMs(iso);
-  if (ms === null) return null;
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    weekday: "short",
-  }).format(ms);
+const ET_WEEKDAY = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  weekday: "short",
+});
+
+/** The Eastern-time weekday (`Thu`, `Mon`) of an epoch instant. */
+const etWeekday = (ms: number): string => ET_WEEKDAY.format(ms);
+
+/** Plain code-unit string order (keys are ASCII codes; never locale-dependent). */
+export const cmpStr = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/** Whether a player is still unlocked at `t` (no lock, or a lock after it). */
+function opensAfter(p: LineupPlayer, t: number): boolean {
+  const k = kickoffMs(p.lock_at);
+  return k === null || k > t;
 }
+
+/** The slot an assignment gives a player (bench when it names none). */
+const slotIn = (a: Assignment, key: PlayerKey): string => a.get(key) ?? BENCH;
 
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
 
@@ -267,7 +276,7 @@ function assignments(
 ): LineupSlotAssignment[] {
   return players
     .map((p) => ({
-      slot: a.get(p.player_key) ?? BENCH,
+      slot: slotIn(a, p.player_key),
       player_key: p.player_key,
       name: p.name,
       points: p.points,
@@ -275,8 +284,7 @@ function assignments(
     }))
     .sort(
       (x, y) =>
-        slotOrder(slots, x.slot) - slotOrder(slots, y.slot) ||
-        (x.player_key < y.player_key ? -1 : x.player_key > y.player_key ? 1 : 0),
+        slotOrder(slots, x.slot) - slotOrder(slots, y.slot) || cmpStr(x.player_key, y.player_key),
     );
 }
 
@@ -462,14 +470,13 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
     .filter((p) => !curKeys.has(p.player_key))
     .sort(
       (x, y) =>
-        slotOrder(slots, chosen.a.get(x.player_key) ?? BENCH) -
-          slotOrder(slots, chosen.a.get(y.player_key) ?? BENCH) ||
-        (x.player_key < y.player_key ? -1 : 1),
+        slotOrder(slots, slotIn(chosen.a, x.player_key)) -
+          slotOrder(slots, slotIn(chosen.a, y.player_key)) || cmpStr(x.player_key, y.player_key),
     );
   const pairs: { out: LineupPlayer; in: LineupPlayer; slot: string }[] = [];
   const left = [...leaving];
   for (const e of entering) {
-    const slot = chosen.a.get(e.player_key) ?? BENCH;
+    const slot = slotIn(chosen.a, e.player_key);
     let i = left.findIndex((l) => l.slot === slot);
     if (i < 0) i = 0;
     const o = left[i];
@@ -519,21 +526,21 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
     if (lockMs === null) continue;
     const decided = lockMs - INACTIVES_LEAD_MS;
     if (decided <= nowMs) continue;
-    const slotName = chosen.a.get(x.player_key) ?? BENCH;
+    const slotName = slotIn(chosen.a, x.player_key);
     const slot = slotOf(slots, slotName);
     if (slot === undefined) continue;
     const alt = req.players
       .filter(
         (y) =>
           !recKeys.has(y.player_key) &&
-          slotOf(slots, chosen.a.get(y.player_key) ?? BENCH)?.class !== "ir" &&
+          slotOf(slots, slotIn(chosen.a, y.player_key))?.class !== "ir" &&
           !exclude.has(y.player_key) &&
           (y.p_active ?? 1) > 0 &&
           y.points.mean > 0 &&
-          (kickoffMs(y.lock_at) === null || (kickoffMs(y.lock_at) ?? 0) > decided) &&
+          opensAfter(y, decided) &&
           canOccupy(slot, { positions: y.positions, status: y.status }),
       )
-      .sort((a, b) => b.points.mean - a.points.mean || (a.player_key < b.player_key ? -1 : 1))[0];
+      .sort((a, b) => b.points.mean - a.points.mean || cmpStr(a.player_key, b.player_key))[0];
     if (alt === undefined) continue;
     conditionals.push({
       if: {
@@ -564,7 +571,7 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
       effect: mode === "protect" ? "floor-" : "ceiling+",
     });
   }
-  stackFlags.sort((a, b) => ((a.players[0] ?? "") < (b.players[0] ?? "") ? -1 : 1));
+  stackFlags.sort((a, b) => cmpStr(a.players.join(","), b.players.join(",")));
 
   const schedule = lockGroups(req.players);
   const latest = latestExecutionTime(schedule, nowMs);
@@ -587,7 +594,7 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
       gsis_id: p.gsis_id ?? null,
       nfl_team: p.positions.includes("DEF") ? p.nfl_team : null,
       role: "start",
-      slot: chosen.a.get(p.player_key) ?? null,
+      slot: slotIn(chosen.a, p.player_key),
     });
   }
   for (const pr of pairs) {
@@ -699,19 +706,19 @@ function optionValue(
   const ki = kickoffMs(pr.in.lock_at);
   const ko = kickoffMs(pr.out.lock_at);
   if (ki === null || ko === null || ki === ko) return null;
-  const earlier = ki < ko ? pr.in : pr.out;
-  const later = ki < ko ? pr.out : pr.in;
+  const inFirst = ki < ko;
+  const later = inFirst ? pr.out : pr.in;
   const pLater = later.p_active ?? 1;
   const kind: OptionValue["kind"] | null =
-    etWeekday(earlier.lock_at) === "Thu"
+    etWeekday(Math.min(ki, ko)) === "Thu"
       ? "thursday"
-      : etWeekday(later.lock_at) === "Mon"
+      : etWeekday(Math.max(ki, ko)) === "Mon"
         ? "monday"
         : pLater < 1
           ? "late_game"
           : null;
   if (kind === null) return null;
-  const decided = (kickoffMs(later.lock_at) ?? 0) - INACTIVES_LEAD_MS;
+  const decided = Math.max(ki, ko) - INACTIVES_LEAD_MS;
   const slot = slotOf(slots, pr.slot);
   const recKeys = new Set(recStarters.map((p) => p.player_key));
   const reserve = players
@@ -720,18 +727,17 @@ function optionValue(
         y !== pr.in &&
         y !== pr.out &&
         !recKeys.has(y.player_key) &&
-        slotOf(slots, a.get(y.player_key) ?? BENCH)?.class !== "ir" &&
-        (kickoffMs(y.lock_at) === null || (kickoffMs(y.lock_at) ?? 0) > decided) &&
+        slotOf(slots, slotIn(a, y.player_key))?.class !== "ir" &&
+        opensAfter(y, decided) &&
         (slot === undefined || canOccupy(slot, { positions: y.positions, status: y.status })),
     )
     .reduce((best, y) => Math.max(best, y.points.mean), 0);
   const value = round((1 - pLater) * reserve, 3);
   const gain = pr.in.points.mean - pr.out.points.mean;
-  const verdict =
-    earlier === pr.in
-      ? gain >= value
-        ? "commit: the gain covers the option value of waiting"
-        : "hold: the gain does not cover the option value of the later game"
-      : "commit: starting the later player keeps the option open";
+  const verdict = inFirst
+    ? gain >= value
+      ? "commit: the gain covers the option value of waiting"
+      : "hold: the gain does not cover the option value of the later game"
+    : "commit: starting the later player keeps the option open";
   return { kind, value, verdict };
 }

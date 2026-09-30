@@ -18,12 +18,15 @@ import { KDEF, LIMITS, Z90 } from "./constants.js";
 import { AnalyticsError } from "./errors.js";
 import { type AnyStamp, newestAsOf } from "./inputs.js";
 import { round, sigmaOf, zeroDist } from "./math.js";
+import { at } from "../scoring/numeric.js";
+import { cmpStr } from "./lineup.js";
 import {
+  bracketPoints,
   type ProjectedPlayer,
-  type ProjectedWeek,
   type ProjectionReaders,
   type ProjectionTarget,
   projectForRanking,
+  statOf,
 } from "./projection.js";
 import type {
   Assumption,
@@ -94,53 +97,30 @@ function modifierOf(settings: ScoringSettings, canonical: string, pt: PositionTy
   return r?.modifier ?? 0;
 }
 
-function bracketsE(settings: ScoringSettings, w: ProjectedWeek, pt: PositionType): number | null {
-  if (w.samples === null) return null;
-  let total = 0;
-  for (const fam of settings.brackets) {
-    if (fam.position_type !== pt) continue;
-    const probs = w.samples.bracket_probability[fam.family];
-    if (probs === undefined) continue;
-    fam.members.forEach((m, i) => {
-      total += (probs[i] ?? 0) * modifierOf(settings, m.canonical, pt);
-    });
-  }
-  return round(total, 3);
-}
+const round2OrNull = (x: number | null): number | null => (x === null ? null : round(x, 2));
 
 function detail(settings: ScoringSettings, p: ProjectedPlayer, pos: KdefPosition): KdefDetail {
-  const w = p.weeks[0];
+  const w = at(p.weeks, 0);
   const next = p.weeks[1];
   const pt: PositionType = pos === "K" ? "K" : "DT";
-  const e = w?.expectation ?? {};
-  const mod = (c: string): number => modifierOf(settings, c, pt);
+  const e = w.expectation;
+  const pts = (c: string): number => statOf(e, c) * modifierOf(settings, c, pt);
   const isDef = pos === "DEF";
   return {
-    implied_total: w?.implied_total == null ? null : round(w.implied_total, 2),
-    opp_implied_total: w?.opp_implied_total == null ? null : round(w.opp_implied_total, 2),
-    brackets_e: w === undefined ? null : bracketsE(settings, w, pt),
-    sacks_e: isDef ? round((e.dst_sack ?? 0) * mod("dst_sack"), 3) : null,
-    takeaways_e: isDef
-      ? round((e.dst_int ?? 0) * mod("dst_int") + (e.dst_fum_rec ?? 0) * mod("dst_fum_rec"), 3)
-      : null,
+    implied_total: round2OrNull(w.implied_total),
+    opp_implied_total: round2OrNull(w.opp_implied_total),
+    brackets_e: w.samples === null ? null : round(bracketPoints(settings, pt, w.samples), 3),
+    sacks_e: isDef ? round(pts("dst_sack"), 3) : null,
+    takeaways_e: isDef ? round(pts("dst_int") + pts("dst_fum_rec"), 3) : null,
     rare_c: isDef
-      ? round(
-          ["dst_td", "dst_ret_td", "dst_safety", "dst_blk"].reduce(
-            (s, c) => s + (e[c] ?? 0) * mod(c),
-            0,
-          ),
-          3,
-        )
+      ? round(pts("dst_td") + pts("dst_ret_td") + pts("dst_safety") + pts("dst_blk"), 3)
       : null,
     next_week:
       next === undefined
         ? null
         : {
             opponent: next.opponent,
-            implied_total:
-              (isDef ? next.opp_implied_total : next.implied_total) === null
-                ? null
-                : round((isDef ? next.opp_implied_total : next.implied_total) ?? 0, 2),
+            implied_total: round2OrNull(isDef ? next.opp_implied_total : next.implied_total),
             e: round(next.dist.mean, 3),
           },
   };
@@ -154,7 +134,10 @@ interface Scored {
   readonly delta: number | null;
 }
 
-const meanOf = (p: ProjectedPlayer | undefined, i: number): number => p?.weeks[i]?.dist.mean ?? 0;
+const meanOf = (p: ProjectedPlayer, i: number): number => at(p.weeks, i).dist.mean;
+
+/** A projected subject's key (E5 targets always carry one). */
+const keyOf = (p: ProjectedPlayer): PlayerKey => p.target.player_key ?? "";
 
 const shift = (d: Dist, by: number): Dist => ({
   ...d,
@@ -192,9 +175,15 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
   const weeks: Week[] = [];
   for (let w = req.week; w <= Math.min(22, req.week + look); w++) weeks.push(w);
   const mine = new Set(req.current.map((c) => c.player_key));
-  const pool = req.universe.filter(
-    (c) => positions.includes(c.position) && !mine.has(c.player_key),
-  );
+  // one entry per key (the first wins): a duplicated universe must not list a candidate twice
+  const seen = new Set<PlayerKey>();
+  const pool = req.universe.filter((c) => {
+    if (!positions.includes(c.position) || mine.has(c.player_key) || seen.has(c.player_key)) {
+      return false;
+    }
+    seen.add(c.player_key);
+    return true;
+  });
   const current = req.current.filter((c) => positions.includes(c.position));
   const all = [...current, ...pool];
   const uniq = new Map<PlayerKey, KdefCandidateInput>();
@@ -223,26 +212,22 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
   const keep = new Set<PlayerKey>(mineSet);
   for (const pos of positions) {
     first.players
-      .filter((p) => p.target.position === pos && !mineSet.has(p.target.player_key ?? ""))
-      .sort(
-        (a, b) =>
-          meanOf(b, 0) - meanOf(a, 0) ||
-          ((a.target.player_key ?? "") < (b.target.player_key ?? "") ? -1 : 1),
-      )
+      .filter((p) => p.target.position === pos && !mineSet.has(keyOf(p)))
+      .sort((a, b) => meanOf(b, 0) - meanOf(a, 0) || cmpStr(keyOf(a), keyOf(b)))
       .slice(0, KDEF.shortlistPerPosition)
-      .forEach((p) => keep.add(p.target.player_key ?? ""));
+      .forEach((p) => keep.add(keyOf(p)));
   }
   // pass 2: the shortlist over the look-ahead at full ranking size
   const out = projectForRanking(
     {
       ...base,
-      targets: targets.filter((t) => keep.has(t.player_key ?? "")),
+      targets: targets.filter((t) => t.player_key !== null && keep.has(t.player_key)),
       weeks,
       n_sims: nFirst,
     },
     Math.min(nFirst, KDEF.nSimsLookAhead),
   );
-  const byKey = new Map(out.players.map((p) => [p.target.player_key ?? "", p]));
+  const byKey = new Map(out.players.map((p) => [keyOf(p), p]));
   const inputs = out.result.inputs;
   const assumptions: Assumption[] = [
     A(
@@ -278,11 +263,10 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
       .map((c) => ({ c, p: byKey.get(c.player_key) }))
       .filter((x): x is { c: KdefCandidateInput; p: ProjectedPlayer } => x.p !== undefined)
       .filter((x) => !req.availability_known || x.c.availability !== "T")
-      .sort((a, b) => meanOf(b.p, 0) - meanOf(a.p, 0) || (a.c.player_key < b.c.player_key ? -1 : 1))
+      .sort((a, b) => meanOf(b.p, 0) - meanOf(a.p, 0) || cmpStr(a.c.player_key, b.c.player_key))
       .slice(0, KDEF.maxCandidatesPerPosition);
     for (const { c, p } of ranked) {
-      const w0 = p.weeks[0];
-      if (w0 === undefined) continue;
+      const w0 = at(p.weeks, 0);
       const kd = detail(req.settings, p, pos);
       const signals: WaiverSignal[] = [];
       const market = pos === "DEF" ? kd.opp_implied_total : kd.implied_total;
@@ -314,7 +298,8 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
       candidates.push(cand);
       scored.push({ cand, p, cur: cur ?? null, delta: curE === null ? null : w0.dist.mean - curE });
     }
-    if (cur !== undefined && ranked.length > 0) {
+    const leader = ranked[0];
+    if (cur !== undefined && leader !== undefined) {
       const ratios: number[] = [];
       weeks.forEach((_, i) => {
         const c = meanOf(cur, i);
@@ -325,7 +310,7 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
           ratios.length === 0 ? 0 : ratios.reduce((x, y) => x + y, 0) / ratios.length,
           3,
         ),
-        current_starter_delta: round(meanOf(ranked[0]?.p, 0) - meanOf(cur, 0), 3),
+        current_starter_delta: round(meanOf(leader.p, 0) - meanOf(cur, 0), 3),
       };
       if (hold === null || h.current_starter_delta > hold.current_starter_delta) hold = h;
     }
@@ -335,7 +320,7 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
   const order = [...scored].sort(
     (a, b) =>
       (b.delta ?? meanOf(b.p, 0)) - (a.delta ?? meanOf(a.p, 0)) ||
-      (a.cand.player_key < b.cand.player_key ? -1 : 1),
+      cmpStr(a.cand.player_key, b.cand.player_key),
   );
   const top = order[0] ?? null;
   const streamIt = top !== null && (top.delta === null || top.delta > KDEF.holdMargin);
