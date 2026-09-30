@@ -2,10 +2,37 @@
 // E13 retrospective incl. `n_by_metric` and the "n too small (k of 30)" strings, E14 list items;
 // plan 01 §8.2 `recommendation_log`, never pruned; plan 10 §2.1 n-per-metric; OBJ-05: NO
 // `parameter_changes_proposed` in v1; OBJ-15: every free-text field here is model-authored and
-// untrusted on read — tools path-list it with source `store.recommendation_log`).
-import type { Rec } from "../analytics/types.js";
+// untrusted on read — tools path-list it with source `store.recommendation_log`, using the ONE list
+// RECLOG_TEXT_PATHS). Contract revision: every record carries `season` (a manual league key spans
+// seasons; critic C-04), alternatives carry structured subjects (critic C-01b), a scored outcome is
+// persisted beside the immutable log row (critic C-02b), required writes are async (C-04b), and
+// log ids / tool names / decision metrics have grammars (critics C-09, C-21).
+import type { InputFreshness, Rec, RecSubject } from "../analytics/types.js";
 import type { IsoInstant, PageOf, Week } from "../league/types.js";
 import type { Dist } from "../scoring/types.js";
+
+/** `log_id` grammar: `rec-` + a 26-char Crockford-base32 ULID. */
+export const LOG_ID_RE = /^rec-[0-9A-HJKMNP-TV-Z]{26}$/;
+/** `source_calls[].tool` grammar: an `ff_` tool name (≤ 40 chars). */
+export const TOOL_NAME_RE = /^ff_[a-z_]{1,37}$/;
+/** `decision_metric` grammar: a snake-case metric name, never prose. */
+export const DECISION_METRIC_RE = /^[a-z_]{1,32}$/;
+
+/**
+ * Every model-authored free-text path in a stored record, relative to the record (plan 01 §4.2 item
+ * 3, plan 02 §6.1, plan 07 E12 OBJ-15). EVERY reader (E13, E14, `ff://rec/{log_id}`,
+ * `ff://rec/week/{week}`) path-lists these (prefixed with its own `data…` path) with source
+ * RECLOG_UNTRUSTED_SOURCE. Non-prose strings (`decision_metric`, `confidence.inputs[].source`,
+ * `source_calls[].tool`, keys, slots) are grammar-checked on input instead, so they cannot carry text.
+ */
+export const RECLOG_TEXT_PATHS: readonly string[] = Object.freeze([
+  "rec.action",
+  "rec.assumptions[].text",
+  "rec.assumptions[].revisit_trigger",
+  "rec.drivers[].name",
+  "alternatives[].action",
+  "note",
+]);
 
 /** The provenance tag every read-back free-text field carries in `meta.untrusted_fields[]`. */
 export const RECLOG_UNTRUSTED_SOURCE = "store.recommendation_log";
@@ -36,12 +63,17 @@ export type FollowedHint = "unknown" | "user_said_yes" | "user_said_no";
 export interface Alternative {
   /** Model-authored text (untrusted on read). */
   readonly action: string;
+  /** Structured subjects of the alternative (what regret is computed from; never `action`). */
+  readonly subjects: readonly RecSubject[];
   readonly point_estimate: number;
   readonly distribution: Dist;
   readonly decision_metric_value: number;
 }
 
-/** A tool call the recommendation was derived from. */
+/**
+ * A tool call the recommendation was derived from: `tool` matches TOOL_NAME_RE and `request_id` is
+ * the `meta.request_id` the envelope of that call carried (`r-` + 12 hex; critic C-03).
+ */
 export interface SourceCall {
   readonly tool: string;
   readonly request_id: string;
@@ -50,6 +82,8 @@ export interface SourceCall {
 /** The validated `ff_record_recommendation` input (plan 07 E12). */
 export interface RecordRecommendationInput {
   readonly league_key: string;
+  /** Filled by the tool from `League.season` — never supplied by the model. */
+  readonly season: number;
   readonly kind: RecommendationKind;
   readonly week: Week;
   readonly rec: Rec;
@@ -85,11 +119,29 @@ export interface RecordResult {
 export interface RecommendationListItem {
   readonly log_id: string;
   readonly kind: RecommendationKind;
+  readonly season: number;
   readonly week: Week;
   readonly recorded_at: IsoInstant;
   /** Model-authored summary (untrusted on read). */
   readonly action_summary: string;
+  /** From the persisted outcome (null until the retrospective has scored the call). */
   readonly followed: boolean | null;
+}
+
+/**
+ * A scored outcome, persisted beside the immutable log row (table `recommendation_outcome`, a
+ * required write, never pruned; critic C-02b). Written by the retrospective, re-written while
+ * `week_final` is false; E14 `followed` reads it instead of re-running the retrospective.
+ */
+export interface RecommendationOutcome {
+  readonly log_id: string;
+  readonly followed: boolean | null;
+  readonly realised: number | null;
+  readonly regret: number | null;
+  readonly decisive: boolean | null;
+  readonly scored_at: IsoInstant;
+  /** The week was final when scored (an outcome scored on provisional stats is re-scored later). */
+  readonly week_final: boolean;
 }
 
 // --- retrospective metrics (plan 07 E13; research 05 §12) --------------------------------------------
@@ -134,8 +186,12 @@ export interface PerPlayerMetrics {
   };
   /** Share of outcomes inside the 80 % interval. */
   readonly coverage_80: number | null;
-  /** Within-position Spearman correlation of projection vs outcome. */
+  /**
+   * Within-position Spearman correlation of projection vs outcome, keyed by POSITION_RE codes only
+   * (never a raw provider string — the envelope's key walker rejects anything else; critic C-12).
+   */
   readonly spearman_by_position: Readonly<Record<string, number | null>>;
+  /** Player-weeks scored: only projections that were PERSISTED before lock count (best-effort writes). */
   readonly n_player_weeks: number;
 }
 
@@ -213,28 +269,38 @@ export interface Retrospective {
   /** One line per metric under `min_n`, naming it. */
   readonly sample_size_caveats: readonly string[];
   readonly rec: Rec;
+  /** Every contributing input with its age and freshness (plan 07 §2). */
+  readonly inputs: readonly InputFreshness[];
 }
 
 // --- the repository port (implemented by src/store; required writes may throw StoreBusyError) --------
 
-/** A list query over the log. */
+/** A list query over the log. `week` filters within `season` (`ff://rec/week/{week}` = current season). */
 export interface RecommendationQuery {
   readonly league_key: string;
+  readonly season: number | null;
   readonly week: Week | null;
   readonly kind: RecommendationKind | null;
   readonly limit: number;
   readonly offset: number;
 }
 
-/** The recommendation-log repository (a REQUIRED-write family: ≤ 1 s of retries, then STORE_BUSY). */
+/**
+ * The recommendation-log repository (a REQUIRED-write family: the store yields between 100 ms lock
+ * attempts for ≤ 1 s, then rejects with StoreBusyError — plan 01 §5.3, plan 03 §1.2).
+ */
 export interface RecommendationLogRepository {
-  /** Inserts (or returns the existing row for the same league + `client_ref`). */
+  /** Inserts (or resolves to the existing row for the same league + `client_ref`). */
   record(
     input: RecordRecommendationInput,
     recordedAt: IsoInstant,
     settingsHash: string | null,
-  ): RecordResult;
+  ): Promise<RecordResult>;
   get(logId: string): RecommendationRecord | null;
+  /** Newest first; `followed` joined from the outcome table. */
   list(q: RecommendationQuery): PageOf<RecommendationListItem>;
-  forWeek(leagueKey: string, week: Week): readonly RecommendationRecord[];
+  forWeek(leagueKey: string, season: number, week: Week): readonly RecommendationRecord[];
+  /** Upserts the scored outcome of one call (required write; the log row itself never changes). */
+  recordOutcome(outcome: RecommendationOutcome): Promise<void>;
+  outcome(logId: string): RecommendationOutcome | null;
 }

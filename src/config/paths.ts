@@ -1,7 +1,9 @@
 // paths.ts — XDG resolution, absolute-path assertions, and 0700/0600 filesystem helpers for the
 // config and cache directories (plan 01 §5.1; plan 02 §3.3 "never relative to cwd or inside the
 // repo", "refuse to proceed if mode has group/other bits"; plan 03 §1.1 step 1, §3, §5 rows 4/8).
-// Symlinks are never followed for the config dir, the cache dir, or any file opened here.
+// Symlinks are never followed for the config dir, the cache dir, or any file opened here; files are
+// opened O_NONBLOCK (a planted FIFO cannot stall startup) and a directory whose ancestors are
+// group/other-writable without the sticky bit is refused (ssh StrictModes; critic C-20).
 import { randomBytes } from "node:crypto";
 import {
   closeSync,
@@ -15,6 +17,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeSync,
   type Stats,
 } from "node:fs";
@@ -50,12 +53,17 @@ export type PathRefusal =
   | "insecure_mode"
   | "wrong_owner"
   | "too_large"
+  | "insecure_ancestor"
   | "missing";
 
-/** A path failed a safety rule. `ff doctor` and startup report `reason` + the fixed `message`. */
+/**
+ * A path failed a safety rule. `ff doctor` and startup report `reason` + the fixed `message`. Inside
+ * a tool call (e.g. league.yaml re-read and found 0644) it maps to INTERNAL, never VALIDATION — the
+ * model's arguments are not at fault (critic C-13); startup still exits 2.
+ */
 export class PathSecurityError extends Error {
-  /** Error-contract code (plan 01 §4.3) — config problems are `VALIDATION`; startup exits 2. */
-  readonly ffCode = "VALIDATION" as const;
+  /** Error-contract code (plan 01 §4.3): an operator/environment problem, not the caller's. */
+  readonly ffCode = "INTERNAL" as const;
   /** Which rule refused the path. */
   readonly reason: PathRefusal;
   /** The offending path (local diagnostics only; never sent to a tool result). */
@@ -87,6 +95,8 @@ const REFUSAL_TEXT: Record<PathRefusal, string> = {
     "group/other permission bits are set (directories must be 0700, files 0600); run `ff doctor --fix`",
   wrong_owner: "is not owned by the current user",
   too_large: "file is larger than the allowed maximum",
+  insecure_ancestor:
+    "a parent directory is writable by group/other without the sticky bit, so the directory could be swapped; fix the parent's permissions",
   missing: "does not exist",
 };
 
@@ -295,7 +305,31 @@ function checkOwnerAndMode(st: Stats, p: string, what: string): void {
 }
 
 /**
- * Asserts `dir` is a real (non-symlink) directory owned by this user with no group/other bits.
+ * Every existing ancestor of `dir` (nearest first, `dir` itself excluded) that is writable by group
+ * or other WITHOUT the sticky bit — a directory in which someone else could rename our directory
+ * away and plant their own (ssh StrictModes). `/tmp` (mode 1777) passes: the sticky bit stops that.
+ */
+export function insecureAncestors(dir: string): string[] {
+  const out: string[] = [];
+  let cur = path.dirname(path.resolve(dir));
+  for (;;) {
+    let st: Stats | null = null;
+    try {
+      st = statSync(cur);
+    } catch {
+      st = null;
+    }
+    if (st?.isDirectory() === true && (st.mode & 0o022) !== 0 && (st.mode & 0o1000) === 0)
+      out.push(cur);
+    const parent = path.dirname(cur);
+    if (parent === cur) return out;
+    cur = parent;
+  }
+}
+
+/**
+ * Asserts `dir` is a real (non-symlink) directory owned by this user with no group/other bits, and
+ * that no ancestor is group/other-writable without the sticky bit (`insecure_ancestor`).
  * With `create`, a missing directory is created 0700 (parents 0700 too, as `mkdir -p`). An
  * existing directory with bad bits is refused, never silently chmod-ed (`ff doctor --fix` repairs
  * with consent — plan 03 §5 row 4).
@@ -311,6 +345,8 @@ export function ensureSecureDir(dir: string, opts: { create: boolean; what?: str
   if (st.isSymbolicLink()) throw new PathSecurityError("symlink", dir, what);
   if (!st.isDirectory()) throw new PathSecurityError("not_directory", dir, what);
   checkOwnerAndMode(st, dir, what);
+  if (insecureAncestors(dir).length > 0)
+    throw new PathSecurityError("insecure_ancestor", dir, what);
 }
 
 /** Asserts `file` is a real (non-symlink) regular file owned by this user with no group/other bits. */
@@ -323,8 +359,9 @@ export function assertSecureFile(file: string, what = "file"): void {
 }
 
 /**
- * Reads a file opened with `O_NOFOLLOW` and checked on the open descriptor (no TOCTOU between the
- * check and the read). `requirePrivate` enforces 0600-or-stricter and ownership (league.yaml);
+ * Reads a file opened with `O_NOFOLLOW | O_NONBLOCK` and checked on the open descriptor (no TOCTOU
+ * between the check and the read; a FIFO planted at the path is opened without blocking and then
+ * refused as `not_regular_file` instead of stalling the process forever). `requirePrivate` enforces 0600-or-stricter and ownership (league.yaml);
  * config.json passes `false` (plan 03 §3: "0600 not required — no secrets allowed in it").
  * Returns `null` when the file does not exist.
  */
@@ -336,7 +373,7 @@ export function readSecureFile(
   const max = opts.maxBytes ?? MAX_SECURE_FILE_BYTES;
   let fd: number;
   try {
-    fd = openSync(file, fsc.O_RDONLY | fsc.O_NOFOLLOW);
+    fd = openSync(file, fsc.O_RDONLY | fsc.O_NOFOLLOW | fsc.O_NONBLOCK);
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return null;

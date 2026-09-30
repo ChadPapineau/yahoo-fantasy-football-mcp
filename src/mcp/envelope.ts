@@ -4,13 +4,41 @@
 // text; caps per class; HTML/entity, control, zero-width, bidi stripping; NFC), the §6.3 rule
 // sentence + the ≤ 45-char pointer, and the 20 000-char result budget with explicit truncation.
 // Pure functions: no I/O, no clock reads (the caller passes `nowMs`).
+// Contract revision: `meta.request_id` on every result (so E12 `source_calls[].request_id` can be
+// filled truthfully — a deviation from the plan 01 §4.2 meta list; critic C-03); stamps judged by
+// their class basis with the warning quoting the basis age (C-12, C-08b); a registry of provenance
+// tags (C-20); non-pageable truncation for A5 and analytics (C-10); an object-KEY walker (C-12b);
+// the fixed resource TTLs (C-19); and the zod schemas of the envelope, the untrusted-text wrapper,
+// Dist and Rec that every tool's outputSchema and E12's input compose (C-08, C-09, C-01b).
+import { z } from "zod/v4";
 import {
   attributionFor,
+  freshnessClass,
+  stampState,
   worseFreshness,
   type Attribution,
   type Freshness,
   type FreshnessState,
 } from "../config/freshness.js";
+import {
+  GSIS_ID_RE,
+  KEY_MAX_CHARS,
+  MANUAL_KEY_RE,
+  NFL_TEAMS,
+  YAHOO_KEY_RE,
+} from "../config/schema.js";
+import type { DatasetStamp, InputFreshness } from "../domain/analytics/types.js";
+import { IR_ELIGIBLE_STATUSES, SLOT_NAME_RE, type PlatformStamp } from "../domain/league/types.js";
+import { DECISION_METRIC_RE } from "../domain/reclog/types.js";
+import { MANUAL_FA_POOL_WARNING } from "../providers/platform.js";
+
+export { IR_ELIGIBLE_STATUSES, MANUAL_FA_POOL_WARNING };
+
+/** The zod issue message the error mapper turns into `INVALID_KEY` (plan 01 §4.3). */
+export const INVALID_KEY_MESSAGE = "invalid_key";
+
+/** A request id: `r-` + 12 lowercase hex chars (errors.ts mints it; every envelope carries it). */
+export const REQUEST_ID_RE = /^r-[0-9a-f]{12}$/;
 
 // --- the rule sentence and pointer (plan 02 §6.3, plan 07 C13) ----------------------------------
 
@@ -44,6 +72,8 @@ export const TEXT_CAPS = Object.freeze({
   dataset_text: 200,
   rec_log_text: 200,
   claim_text: 400,
+  /** Platform stat/scoring-rule display names (A2 `scoring.rules[].name`; critic C-20). */
+  stat_name: 64,
 });
 /** A text class. */
 export type TextClass = keyof typeof TEXT_CAPS;
@@ -72,6 +102,55 @@ export interface UntrustedField {
 
 /** Provenance tag grammar: 2–6 dot-separated lowercase segments. */
 export const SOURCE_TAG_RE = /^[a-z0-9_]+(?:\.[a-z0-9_]+){1,5}$/;
+
+/**
+ * Every provenance tag a wrapper or a path-listed field may carry (plan 02 §6.2: the Skills weight
+ * reliability by tag, so tools may not invent them; critic C-20). Add a tag here before using it.
+ */
+export const UNTRUSTED_SOURCES = [
+  // Yahoo (Phase 1b; kept so the seam is complete)
+  "yahoo.league.name",
+  "yahoo.team.name",
+  "yahoo.manager.nickname",
+  "yahoo.player.name",
+  "yahoo.player.status_full",
+  "yahoo.player.injury_note",
+  "yahoo.transaction.note",
+  "yahoo.stat.name",
+  // ManualLeagueProvider (league.yaml — hand- or model-written)
+  "manual.league.name",
+  "manual.team.name",
+  "manual.manager.nickname",
+  "manual.player.name",
+  "manual.player.status_full",
+  "manual.player.injury_note",
+  "manual.stat.name",
+  // nflverse datasets
+  "nflverse.roster_weekly.name",
+  "nflverse.injuries.primary_injury",
+  "nflverse.injuries.secondary_injury",
+  "nflverse.injuries.report_status",
+  "nflverse.schedules.stadium",
+  "nflverse.pbp.desc",
+  // Sleeper / news (Phase 2)
+  "sleeper.player.name",
+  "sleeper.player.injury_note",
+  "rss.rotowire.title",
+  "rss.rotowire.blurb",
+  "rss.espn.title",
+  "rss.espn.blurb",
+  "rss.cbs.title",
+  "rss.cbs.blurb",
+  // model-authored text read back from the store (OBJ-15)
+  "store.recommendation_log",
+] as const;
+/** A registered provenance tag. */
+export type UntrustedSource = (typeof UNTRUSTED_SOURCES)[number];
+
+/** Whether `s` is a registered provenance tag. */
+export function isUntrustedSource(s: string): s is UntrustedSource {
+  return (UNTRUSTED_SOURCES as readonly string[]).includes(s);
+}
 /** Untrusted-field path grammar: `data` then `.key` segments, each optionally followed by `[]`. */
 export const FIELD_PATH_RE = /^data(?:\.[A-Za-z0-9_]+(?:\[\])*)+$/;
 
@@ -210,7 +289,8 @@ function codePoints(s: string): number {
 }
 
 function assertSourceTag(source: string): void {
-  if (!SOURCE_TAG_RE.test(source)) throw new RangeError("envelope: invalid untrusted source tag");
+  if (!SOURCE_TAG_RE.test(source) || !isUntrustedSource(source))
+    throw new RangeError("envelope: unregistered untrusted source tag");
 }
 
 /**
@@ -308,6 +388,31 @@ export function stringLeafPaths(data: unknown): string[] {
   return [...out];
 }
 
+/** The grammar every object key in tool output must match (critic C-12b). */
+export const OUTPUT_KEY_RE = /^[A-Za-z0-9_]{1,40}$/;
+
+/**
+ * Paths of every object KEY in `data` that fails OUTPUT_KEY_RE (arrays written `[]`, the bad key
+ * shown as `{?}`, never echoed). Tool tests assert this is empty: a key derived from third-party
+ * text (a bracket family, a position, a stat name) would otherwise reach the model unlabelled.
+ */
+export function objectKeyViolations(data: unknown): string[] {
+  const out = new Set<string>();
+  const walk = (v: unknown, path: string, depth: number): void => {
+    if (depth > MAX_WALK_DEPTH || typeof v !== "object" || v === null || isUntrustedText(v)) return;
+    if (Array.isArray(v)) {
+      for (const item of v) walk(item, `${path}[]`, depth + 1);
+      return;
+    }
+    for (const [k, child] of Object.entries(v)) {
+      if (!OUTPUT_KEY_RE.test(k)) out.add(`${path}.{?}`);
+      else walk(child, `${path}.${k}`, depth + 1);
+    }
+  };
+  walk(data, "data", 0);
+  return [...out];
+}
+
 // --- the envelope --------------------------------------------------------------------------------
 
 /** One contributing input's timestamps and state (also the analytics `data.inputs[]` row source). */
@@ -318,13 +423,46 @@ export interface InputStamp {
   readonly as_of: string;
   /** When we last fetched it. */
   readonly fetched_at: string;
+  /**
+   * The instant its state was judged from (its class basis: release check, fetch, or file mtime) —
+   * what a stale warning quotes (critic C-08b). Defaults to `fetched_at` when omitted.
+   */
+  readonly basis_at?: string;
   /** Its state against its freshness class (`expired` inputs appear only under allow_stale). */
   readonly state: FreshnessState;
 }
 
-/** The `meta` block (plan 01 §4.2). */
+/**
+ * The ONE conversion from a dataset or platform stamp to an envelope input (critics C-12, C-08b):
+ * the class comes from the stamp, the state and `basis_at` from `stampState` (release → checked_at,
+ * age → fetched_at, file → mtime/as_of). Tools never compute freshness themselves.
+ */
+export function stampToInput(stamp: DatasetStamp | PlatformStamp, nowMs: number): InputStamp {
+  const isDataset = "freshness_class" in stamp;
+  const cls = freshnessClass(isDataset ? stamp.freshness_class : stamp.freshness);
+  const st = stampState(
+    cls,
+    {
+      as_of: stamp.as_of,
+      fetched_at: stamp.fetched_at,
+      checked_at: isDataset ? stamp.checked_at : null,
+    },
+    nowMs,
+  );
+  return {
+    source: stamp.source,
+    as_of: stamp.as_of,
+    fetched_at: stamp.fetched_at,
+    basis_at: st.basis_at,
+    state: st.state,
+  };
+}
+
+/** The `meta` block (plan 01 §4.2, plus `request_id` — critic C-03). */
 export interface EnvelopeMeta {
   readonly schema_version: typeof ENVELOPE_SCHEMA_VERSION;
+  /** The call's id (`r-` + 12 hex) — the same id as its stderr log lines and E12 `source_calls`. */
+  readonly request_id: string;
   /** Every source that contributed, in first-seen order. */
   readonly source: readonly string[];
   /** Newest input timestamp. */
@@ -366,6 +504,8 @@ export interface Envelope<D> {
 /** Everything `buildEnvelope` needs; no hidden inputs. */
 export interface EnvelopeInput<D> {
   readonly data: D;
+  /** The call's request id (from `wrapHandler`); must match REQUEST_ID_RE. */
+  readonly requestId: string;
   /** The current instant (from the injected Clock). */
   readonly nowMs: number;
   /** Contributing inputs. Empty = computed now from nothing external (age 0). */
@@ -407,6 +547,7 @@ export function humanAge(seconds: number): string {
  */
 export function buildEnvelope<D>(input: EnvelopeInput<D>): Envelope<D> {
   if (!Number.isFinite(input.nowMs)) throw new RangeError("envelope: nowMs must be finite");
+  if (!REQUEST_ID_RE.test(input.requestId)) throw new RangeError("envelope: invalid request id");
   const nowIso = new Date(input.nowMs).toISOString();
   let newestAsOf = -Infinity;
   let oldestFetched = Infinity;
@@ -432,7 +573,8 @@ export function buildEnvelope<D>(input: EnvelopeInput<D>): Envelope<D> {
     addSource(stamp.source);
     if (stamp.state !== "fresh") {
       freshness = worseFreshness(freshness, "stale");
-      const age = Math.max(0, Math.floor((input.nowMs - f) / 1000));
+      const basis = stamp.basis_at === undefined ? f : isoOrThrow(stamp.basis_at);
+      const age = Math.max(0, Math.floor((input.nowMs - basis) / 1000));
       const w = `source ${stamp.source} is ${humanAge(age)} old (${stamp.state})`;
       if (!warnings.includes(w)) warnings.push(w);
     }
@@ -459,6 +601,7 @@ export function buildEnvelope<D>(input: EnvelopeInput<D>): Envelope<D> {
 
   const meta: EnvelopeMeta = {
     schema_version: ENVELOPE_SCHEMA_VERSION,
+    request_id: input.requestId,
     source: sources,
     as_of: asOfIso,
     fetched_at: fetchedIso,
@@ -474,13 +617,11 @@ export function buildEnvelope<D>(input: EnvelopeInput<D>): Envelope<D> {
     : { data: input.data, meta, page: input.page, truncated: false, warnings };
 }
 
-/** One analytics `data.inputs[]` row (plan 07 §2): source, as_of, age_s, freshness. */
-export interface DataInput {
-  readonly source: string;
-  readonly as_of: string;
-  readonly age_s: number;
-  readonly freshness: Freshness;
-}
+/**
+ * One analytics `data.inputs[]` row (plan 07 §2): source, as_of, age_s, freshness. The same type as
+ * the domain's InputFreshness, so `toDataInputs` feeds every analytics result (critic C-05).
+ */
+export type DataInput = InputFreshness;
 
 /**
  * The analytics `data.inputs[]` rows for the same stamps the envelope used (plan 07 §2; plan 01
@@ -508,13 +649,38 @@ export type FitResult<D> =
   | { readonly ok: false; readonly size: number };
 
 /**
+ * The fixed "what to do instead" clause of a truncation warning, per tool family (critic C-10):
+ * list tools page; A5 has no offset (`page.has_more` is always false — plan 07 A5); analytics have
+ * no paging at all (plan 07 C8).
+ */
+export const TRUNCATION_HINTS = Object.freeze({
+  list: "request a smaller limit, page with offset, or filter",
+  transactions: "request a smaller count or use since",
+  analytics: "narrow the request (fewer players, weeks or candidates) or use detail compact",
+});
+
+/** How `fitToBudget` treats paging. */
+export interface FitOptions {
+  /** True for list tools with `offset`: `page.has_more`/`next_offset` are set after truncation. */
+  readonly pageable: boolean;
+  /** The warning's fixed advice (one of TRUNCATION_HINTS). */
+  readonly hint: string;
+}
+
+/**
  * Fits an envelope to `budget` characters (plan 01 §4.2): when over budget and `listKey` names an
  * array directly under `data`, the array is halved until the whole serialised result fits;
- * `truncated: true`, a warning saying how to page, and `page` adjusted. Never silent. A result that
- * cannot fit (no list, or even an empty list is too big) returns `ok: false` — a bug for the caller
- * to surface as INTERNAL (plan 05 §2).
+ * `truncated: true` and a warning with the caller's fixed hint. Only a `pageable` result gets
+ * `page.has_more: true` + `next_offset`; a non-pageable one (A5, analytics) keeps its page untouched
+ * (A5's `has_more` stays false). Never silent. A result that cannot fit (no list, or even an empty
+ * list is too big) returns `ok: false` — a bug for the caller to surface as INTERNAL (plan 05 §2).
  */
-export function fitToBudget<D>(env: Envelope<D>, budget: number, listKey?: string): FitResult<D> {
+export function fitToBudget<D>(
+  env: Envelope<D>,
+  budget: number,
+  listKey?: string,
+  opts: FitOptions = { pageable: true, hint: TRUNCATION_HINTS.list },
+): FitResult<D> {
   const size = serializeEnvelope(env).length;
   if (size <= budget) return { ok: true, envelope: env };
   const data = env.data as unknown;
@@ -526,7 +692,7 @@ export function fitToBudget<D>(env: Envelope<D>, budget: number, listKey?: strin
   let n = total;
   while (n > 0) {
     n = Math.floor(n / 2);
-    const candidate = withList(env, listKey, list.slice(0, n), total, budget);
+    const candidate = withList(env, listKey, list.slice(0, n), total, budget, opts);
     const s = serializeEnvelope(candidate).length;
     if (s <= budget) return { ok: true, envelope: candidate };
   }
@@ -539,11 +705,16 @@ function withList<D>(
   items: unknown[],
   total: number,
   budget: number,
+  opts: FitOptions,
 ): Envelope<D> {
   const data = { ...(env.data as Record<string, unknown>), [listKey]: items } as D;
-  const warning = `result truncated to ${String(items.length)} of ${String(total)} ${listKey} to fit the ${String(budget)}-character budget; request a smaller limit, page with offset, or filter`;
+  const warning = `result truncated to ${String(items.length)} of ${String(total)} ${listKey} to fit the ${String(budget)}-character budget; ${opts.hint}`;
   const warnings = [...env.warnings, warning];
   if (env.page === undefined) return { ...env, data, truncated: true, warnings };
+  if (!opts.pageable) {
+    const page: PageInfo = { ...env.page, count: items.length };
+    return { ...env, data, page, truncated: true, warnings };
+  }
   const page: PageInfo = {
     ...env.page,
     count: items.length,
@@ -555,7 +726,8 @@ function withList<D>(
 
 /** An MCP tool success result: one text block, plus `structuredContent` when the tool has an outputSchema. */
 export interface ToolSuccessResult {
-  readonly content: readonly [{ readonly type: "text"; readonly text: string }];
+  /** A mutable tuple: the SDK's CallToolResult type requires a mutable content array. */
+  readonly content: [{ type: "text"; text: string }];
   readonly structuredContent?: Record<string, unknown>;
   readonly [key: string]: unknown;
 }
@@ -573,3 +745,198 @@ export function toToolResult(env: Envelope<unknown>, structured: boolean): ToolS
       }
     : { content: [{ type: "text", text }] };
 }
+
+// --- resources (plan 07 §4.1 `ttlMs` column; critic C-19) --------------------------------------------
+
+/**
+ * The fixed `ttlMs` of every Phase 1a resource, verbatim from plan 07 §4.1 (60 s and 1 h are not a
+ * freshness-class TTL, so they cannot come from `resourceTtlMs`). `ff://game/stat-categories` is
+ * Yahoo-only (1b) and is not registered under the manual league.
+ */
+export const RESOURCE_TTL_MS = Object.freeze({
+  "ff://league": 86_400_000,
+  "ff://league/settings": 86_400_000,
+  "ff://status": 60_000,
+  "ff://status/freshness": 60_000,
+  "ff://roster/snapshot": 60_000,
+  "ff://docs/tool-outputs": 86_400_000,
+  "ff://rec/{log_id}": 86_400_000,
+  "ff://rec/week/{week}": 3_600_000,
+});
+
+// --- zod schemas: envelope, wrapper, Dist, Rec (plan 01 §4.2 "zod-typed"; plan 07 legend; C-08) -------
+//
+// Every tool's outputSchema and E12's input compose these, so tools/list, the Dist invariants and
+// the "no bare string at a UT position" rule cannot drift between tools.
+
+/** Printable text: no C0/C1 controls and no format characters (zero-width, bidi, tags). */
+export const PRINTABLE_RE = /^[^\p{Cc}\p{Cf}\p{Cs}\p{Co}]*$/u;
+
+/** Model-supplied free text with a cap (trade notes, record notes, claims): printable, capped. */
+export function boundedTextSchema(maxChars: number) {
+  return z.string().max(maxChars).regex(PRINTABLE_RE, { message: "unprintable_characters" });
+}
+
+/** An input source tag: a dataset source id (`nflverse:schedules`) or a plain tag (`manual`, `engine`). */
+export const INPUT_SOURCE_RE =
+  /^(?:[a-z][a-z0-9_]{0,31}:[a-z][a-z0-9_]{0,47}|[a-z][a-z0-9_]{0,31}(?:\.[a-z0-9_]{1,31}){0,3})$/;
+
+/** Array caps for the Rec family (bounded input and output). */
+export const REC_LIMITS = Object.freeze({
+  drivers: 20,
+  assumptions: 20,
+  subjects: 20,
+  lineup: 30,
+  inputs: 25,
+});
+
+const isoSchema = z.iso.datetime({ offset: true }).max(40);
+/** Points are bounded well past any real fantasy score. */
+const pointsSchema = z.number().min(-1000).max(1000);
+const probSchema = z.number().min(0).max(1);
+const recText = boundedTextSchema(TEXT_CAPS.rec_log_text);
+const sourceTagSchema = z.enum(UNTRUSTED_SOURCES);
+const freshnessSchema = z.enum(["fresh", "stale", "provisional"]);
+
+/** The `untrusted_text` wrapper. */
+export const untrustedTextSchema = z.strictObject({
+  untrusted_text: z.strictObject({
+    value: z.string().max(Math.max(...Object.values(TEXT_CAPS))),
+    source: sourceTagSchema,
+    chars: z.number().int().min(0),
+    truncated: z.boolean(),
+  }),
+});
+
+/** One `meta.untrusted_fields[]` entry. */
+export const untrustedFieldSchema = z.strictObject({
+  path: z.string().max(200).regex(FIELD_PATH_RE),
+  source: sourceTagSchema,
+});
+
+/** One `meta.attribution[]` entry. */
+export const attributionSchema = z.strictObject({
+  source: z.string().max(64),
+  text: z.string().max(200).nullable(),
+  license: z
+    .enum(["CC-BY-4.0", "CC-BY-SA-4.0", "public-domain", "non-commercial", "api-terms"])
+    .nullable(),
+  url: z.url().max(200),
+});
+
+/** The `meta` block. */
+export const metaSchema = z.strictObject({
+  schema_version: z.literal(ENVELOPE_SCHEMA_VERSION),
+  request_id: z.string().regex(REQUEST_ID_RE),
+  source: z.array(z.string().regex(INPUT_SOURCE_RE)).max(30),
+  as_of: isoSchema,
+  fetched_at: isoSchema,
+  age_s: z.number().int().min(0),
+  freshness: freshnessSchema,
+  provisional: z.boolean(),
+  attribution: z.array(attributionSchema).max(30),
+  untrusted_fields: z.array(untrustedFieldSchema).max(200),
+  estimate: z.boolean(),
+});
+
+/** List-tool paging. */
+export const pageSchema = z.strictObject({
+  limit: z.number().int().min(1).max(200),
+  offset: z.number().int().min(0).max(10_000),
+  count: z.number().int().min(0),
+  has_more: z.boolean(),
+  next_offset: z.number().int().min(0).nullable(),
+});
+
+/** The full envelope around a tool's `data` schema (an outputSchema). */
+export function envelopeSchema<T extends z.ZodType>(data: T) {
+  return z.strictObject({
+    data,
+    meta: metaSchema,
+    page: pageSchema.optional(),
+    truncated: z.boolean(),
+    warnings: z.array(z.string().max(400)).max(50),
+  });
+}
+
+/** A points distribution (plan 07 legend `Dist`): monotone quantiles, p_zero a probability. */
+export const distSchema = z
+  .strictObject({
+    mean: pointsSchema,
+    p10: pointsSchema,
+    p25: pointsSchema,
+    p50: pointsSchema,
+    p75: pointsSchema,
+    p90: pointsSchema,
+    p_zero: probSchema,
+    basis: z.enum(["position_cv", "player_sim"]),
+  })
+  .refine((d) => d.p10 <= d.p25 && d.p25 <= d.p50 && d.p50 <= d.p75 && d.p75 <= d.p90, {
+    message: "quantiles_not_monotone",
+  });
+
+/** One analytics `data.inputs[]` row / confidence input. */
+export const inputFreshnessSchema = z.strictObject({
+  source: z.string().regex(INPUT_SOURCE_RE),
+  as_of: isoSchema,
+  age_s: z.number().int().min(0),
+  freshness: freshnessSchema,
+});
+
+const playerKeyRef = z
+  .string()
+  .max(KEY_MAX_CHARS.player, { message: INVALID_KEY_MESSAGE })
+  .refine((k) => YAHOO_KEY_RE.player.test(k) || MANUAL_KEY_RE.player.test(k), {
+    message: INVALID_KEY_MESSAGE,
+  });
+const slotSchema = z.string().regex(SLOT_NAME_RE);
+
+/** A structured Rec subject: at least one of player_key / gsis_id / nfl_team. */
+export const recSubjectSchema = z
+  .strictObject({
+    player_key: playerKeyRef.nullable(),
+    gsis_id: z.string().regex(GSIS_ID_RE, { message: INVALID_KEY_MESSAGE }).nullable(),
+    nfl_team: z.enum(NFL_TEAMS).nullable(),
+    role: z.enum(["start", "sit", "add", "drop", "stream", "trade_in", "trade_out"]),
+    slot: slotSchema.nullable(),
+  })
+  .refine((s) => s.player_key !== null || s.gsis_id !== null || s.nfl_team !== null, {
+    message: "subject_without_id",
+  });
+
+/** The recommendation (plan 07 legend `Rec`); `log_id` is null everywhere but E12's output. */
+export const recSchema = z.strictObject({
+  action: recText,
+  subjects: z.array(recSubjectSchema).max(REC_LIMITS.subjects),
+  lineup: z
+    .array(z.strictObject({ slot: slotSchema, player_key: playerKeyRef }))
+    .max(REC_LIMITS.lineup)
+    .nullable(),
+  point_estimate: pointsSchema,
+  distribution: distSchema,
+  delta_vs_next: z.strictObject({ value: pointsSchema, p10: pointsSchema, p90: pointsSchema }),
+  decision_metric: z.string().regex(DECISION_METRIC_RE),
+  drivers: z
+    .array(z.strictObject({ name: recText, contribution: pointsSchema }))
+    .max(REC_LIMITS.drivers),
+  assumptions: z
+    .array(z.strictObject({ text: recText, revisit_trigger: recText }))
+    .max(REC_LIMITS.assumptions),
+  confidence: z.strictObject({
+    role_games: z.number().int().min(0).max(1000),
+    inputs: z.array(inputFreshnessSchema).max(REC_LIMITS.inputs),
+  }),
+  as_of: isoSchema,
+  latest_execution_time: isoSchema.nullable(),
+  no_move: z.boolean(),
+  log_id: z.null(),
+});
+
+/** An E12 alternative. */
+export const alternativeSchema = z.strictObject({
+  action: recText,
+  subjects: z.array(recSubjectSchema).max(REC_LIMITS.subjects),
+  point_estimate: pointsSchema,
+  distribution: distSchema,
+  decision_metric_value: z.number().min(-1e6).max(1e6),
+});

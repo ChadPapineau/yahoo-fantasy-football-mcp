@@ -1,9 +1,14 @@
 // types.ts — the scoring-engine contract shared by the engine, the translators, the tools and the
 // tests: plan 08 §2 (types), §3.1 (canonical registry names), §4 (brackets, bonuses, rounding/floor
 // flags with `verified`), §5 (stored projections), E8 (`Dist.basis`). Deviations from §2's text:
+// bracket families carry `kind: indicator | count` (FG-by-distance bins are COUNTS — a kicker can
+// make two 40–49 FGs in a game; critic C-09); a stored projection is keyed by a ProjectionSubject
+// (a player's gsis id OR a team defence) with `made_at` so a post-kickoff run never overwrites the
+// pre-kickoff distribution the retrospective scores (critics C-13, C-03).
 // `StatLine.present` is a sorted array (not a Set) so every type is plain, serialisable data;
 // `ScoringSettings.platform` is any `PlatformId` (ManualLeagueProvider emits the same shape).
 // This file is pure data: the engine itself lives beside it (src/domain/scoring/*).
+import type { NflTeam } from "../../config/schema.js";
 
 /** A platform id — the four implementations the FantasyPlatform seam names (plan 01 §8). */
 export type PlatformId = "yahoo" | "manual" | "sleeper" | "espn";
@@ -96,10 +101,33 @@ export interface ScoringRule {
   readonly bonuses: readonly ScoringBonus[];
 }
 
-/** The derived bracket families (plan 08 §4.1); other families pass through as strings. */
+/** The derived bracket families (plan 08 §4.1); other families pass through as sanitised slugs. */
 export type BracketFamilyName = "dst_points_allowed" | "dst_yards_allowed" | "fg_distance";
 
-/** One member of a bracket family: an indicator stat for a scalar range. */
+/**
+ * How a family's members count per game (critic C-09):
+ * - `indicator`: exactly one member is 1 per game (points/yards allowed brackets) — Σ members ≤ 1;
+ * - `count`: each member is a count scored linearly per bin (FGs made by distance: 2 × 40–49 and
+ *   1 × 50+ in one game is legal). The translator emits per-bin counts; the engine never asserts
+ *   exclusivity on a count family.
+ */
+export type BracketKind = "indicator" | "count";
+
+/** The kind of each named family. */
+export const BRACKET_FAMILY_KIND: Readonly<Record<BracketFamilyName, BracketKind>> = Object.freeze({
+  dst_points_allowed: "indicator",
+  dst_yards_allowed: "indicator",
+  fg_distance: "count",
+});
+
+/**
+ * Grammar of any family name (named or derived from platform display names): a lowercase slug.
+ * The normaliser slugs derived names to this before they can become object keys in tool output
+ * (`bracket_probability`) — the envelope's key walker rejects anything else (critic C-12).
+ */
+export const BRACKET_FAMILY_RE = /^[a-z][a-z0-9_]{0,39}$/;
+
+/** One member of a bracket family: an indicator or count stat for a scalar range. */
 export interface BracketMember {
   /** Canonical name of the indicator stat (e.g. `dst_pa_7_13`). */
   readonly canonical: Canonical;
@@ -111,16 +139,16 @@ export interface BracketMember {
   readonly upper: number | null;
 }
 
-/** A mutually exclusive family of indicator stats derived from rule names (plan 08 §4.1). */
+/** A family of bracket stats derived from rule names (plan 08 §4.1). */
 export interface BracketFamily {
-  /** Family name. */
+  /** Family name: a BracketFamilyName or a derived slug matching BRACKET_FAMILY_RE. */
   readonly family: BracketFamilyName | (string & {});
   /** The position type the family scores. */
   readonly position_type: PositionType;
   /** Members sorted by `lower`, contiguous, non-overlapping (the normaliser asserts it). */
   readonly members: readonly BracketMember[];
-  /** Exactly one member indicator is 1 per game when the family is complete. */
-  readonly exclusive: true;
+  /** `indicator` (Σ members ≤ 1 per game) or `count` (linear per bin) — see BracketKind. */
+  readonly kind: BracketKind;
 }
 
 /** Total-points rounding (plan 08 E4): only applied once `verified`. */
@@ -218,7 +246,10 @@ export interface ScoreSamplesResult {
   readonly mean_of_exact: number;
   /** P(bonus fires) per canonical stat. */
   readonly bonus_probability: Readonly<Record<Canonical, number>>;
-  /** Per bracket family name: probability of each member, in member order. */
+  /**
+   * Per bracket family name (BRACKET_FAMILY_RE keys only): for an `indicator` family the
+   * probability of each member; for a `count` family the expected count per member. Member order.
+   */
   readonly bracket_probability: Readonly<Record<string, readonly number[]>>;
 }
 
@@ -236,16 +267,34 @@ export interface ScoringEngine {
   explain(line: StatLine, settings: ScoringSettings): ScoreResult;
 }
 
-/** A stored projection, format-agnostic, scored per league at read time (plan 08 §5, E7). */
+/**
+ * Who a projection (or any per-subject analytics row) is about — defined ONCE (critic C-13): a player
+ * by gsis id, or a team defence by its nflverse team. Team defences have no gsis id; they never enter
+ * the crosswalk matcher (their identity IS the team), and under ManualLeagueProvider their player key
+ * is `manual.p.def-<team lowercase>` (see `manualPlayerKeyFor` in src/domain/league/types.ts).
+ */
+export type ProjectionSubject =
+  | { readonly kind: "player"; readonly gsis_id: string }
+  | { readonly kind: "defense"; readonly nfl_team: NflTeam };
+
+/**
+ * A stored projection, format-agnostic, scored per league at read time (plan 08 §5, E7). Rows are
+ * APPEND-ONLY per (subject, season, week, model_version, made_at): a re-run adds a row, it never
+ * overwrites, so the retrospective can read the newest projection made before the subject's lock
+ * (`ProjectionRepository.getAsOf`) and no post-kickoff run leaks the outcome into CRPS/pinball.
+ */
 export interface StoredProjection {
-  /** Canonical player id. */
-  readonly gsis_id: string;
+  readonly subject: ProjectionSubject;
   /** Season year. */
   readonly season: number;
   /** Week 1..22. */
   readonly week: number;
   /** Which model produced it. */
   readonly model_version: string;
+  /** When it was computed (from the injected Clock). */
+  readonly made_at: string;
+  /** The newest `as_of` among its inputs (the data it could have seen). */
+  readonly inputs_as_of: string;
   /** Expected canonical stat line. */
   readonly expectation: Readonly<Record<Canonical, number>>;
   /** `n_sims` sampled canonical lines. */

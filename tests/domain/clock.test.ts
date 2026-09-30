@@ -1,6 +1,14 @@
 // clock.test.ts — src/domain/clock.ts: the injected time source (plan 05 §2 determinism).
 import { describe, expect, it } from "vitest";
-import { ageSeconds, fixedClock, parseIso, systemClock, toIso } from "../../src/domain/clock.js";
+import {
+  MAX_SEED,
+  ageSeconds,
+  fixedClock,
+  parseIso,
+  seededRng,
+  systemClock,
+  toIso,
+} from "../../src/domain/clock.js";
 
 describe("systemClock", () => {
   it("reads the wall clock", () => {
@@ -80,5 +88,61 @@ describe("ageSeconds", () => {
   });
   it("throws on an invalid timestamp rather than reading as fresh", () => {
     expect(() => ageSeconds("yesterday", clock)).toThrow(RangeError);
+  });
+});
+
+describe("seededRng (critic C-17: one deterministic random source; plan 07 E1 seed)", () => {
+  const draw = (seed: number, n: number, label?: string) => {
+    const r = label === undefined ? seededRng(seed) : seededRng(seed).fork(label);
+    return Array.from({ length: n }, () => r.next());
+  };
+
+  it("is deterministic for a seed and differs across seeds", () => {
+    expect(draw(42, 50)).toEqual(draw(42, 50));
+    expect(draw(42, 50)).not.toEqual(draw(43, 50));
+    expect(draw(0, 5)).not.toEqual(draw(1, 5));
+  });
+  it("yields floats in [0, 1) with a plausible mean and no short cycle", () => {
+    const xs = draw(7, 20_000);
+    for (const x of xs) {
+      expect(x).toBeGreaterThanOrEqual(0);
+      expect(x).toBeLessThan(1);
+    }
+    const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+    expect(Math.abs(mean - 0.5)).toBeLessThan(0.01);
+    expect(new Set(xs).size).toBeGreaterThan(19_990);
+    // bucket uniformity: 10 buckets within ±10 % of expectation
+    const buckets = new Array<number>(10).fill(0);
+    for (const x of xs) buckets[Math.floor(x * 10)]! += 1;
+    for (const b of buckets) expect(Math.abs(b - 2000)).toBeLessThan(200);
+  });
+  it("fork depends only on the root seed and the label path, never on parent draws", () => {
+    const a = seededRng(99);
+    const b = seededRng(99);
+    for (let i = 0; i < 37; i++) b.next();
+    const fa = Array.from({ length: 10 }, () => a.fork("projection:00-0012345").next());
+    const fb = Array.from({ length: 10 }, () => b.fork("projection:00-0012345").next());
+    expect(fa).toEqual(fb);
+    expect(draw(99, 10, "x")).not.toEqual(draw(99, 10, "y"));
+    expect(draw(99, 10, "x")).not.toEqual(draw(99, 10));
+    // nested forks are paths: fork("a").fork("b") differs from fork("a/b")? same path string → equal
+    const n1 = seededRng(5).fork("a").fork("b").next();
+    const n2 = seededRng(5).fork("a").fork("b").next();
+    expect(n1).toBe(n2);
+    expect(seededRng(5).fork("a").fork("b").next()).not.toBe(
+      seededRng(5).fork("b").fork("a").next(),
+    );
+  });
+  it("rejects every seed outside 0..2^31-1 (never silently wraps)", () => {
+    expect(MAX_SEED).toBe(2 ** 31 - 1);
+    expect(() => seededRng(MAX_SEED)).not.toThrow();
+    expect(() => seededRng(0)).not.toThrow();
+    for (const bad of [-1, MAX_SEED + 1, 1.5, NaN, Infinity, -Infinity, 2 ** 53])
+      expect(() => seededRng(bad)).toThrow(RangeError);
+  });
+  it("hostile labels (empty, huge, unicode) fork without throwing and stay deterministic", () => {
+    for (const label of ["", "x".repeat(100_000), "\u202e\u0000\ud800", "__proto__"]) {
+      expect(draw(3, 3, label)).toEqual(draw(3, 3, label));
+    }
   });
 });

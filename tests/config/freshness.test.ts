@@ -15,6 +15,7 @@ import {
   isDatasetSourceId,
   isProvisionalWeek,
   resourceTtlMs,
+  stampState,
   worseFreshness,
   type FreshnessClassId,
   type FreshnessState,
@@ -236,5 +237,115 @@ describe("attributionFor", () => {
     ]) {
       expect(attributionFor(tag)).toBeNull();
     }
+  });
+});
+
+describe("stampState — the class basis picks the instant (critics C-12, C-08b)", () => {
+  const NOW = Date.parse("2026-10-10T12:00:00.000Z");
+  const iso = (msAgo: number) => new Date(NOW - msAgo).toISOString();
+  const H = 3_600_000;
+  const D = 24 * H;
+
+  it("release basis: an unchanged release checked an hour ago is fresh however old the download", () => {
+    const cls = freshnessClass("nflverse_stats_player_week");
+    const st = stampState(
+      cls,
+      { as_of: iso(10 * D), fetched_at: iso(10 * D), checked_at: iso(H) },
+      NOW,
+    );
+    expect(st.state).toBe("fresh");
+    expect(st.basis_at).toBe(iso(H));
+    expect(st.age_s).toBe(3600);
+    // the same stamp judged by fetched_at alone would be expired (the bug the critics measured)
+    expect(classifyAge(cls, (10 * D) / 1000)).toBe("expired");
+  });
+  it("release basis: a missed daily check goes stale, then expired, by checked_at", () => {
+    const cls = freshnessClass("nflverse_schedules");
+    expect(
+      stampState(cls, { as_of: iso(D), fetched_at: iso(D), checked_at: iso(2 * H) }, NOW).state,
+    ).toBe("stale");
+    expect(
+      stampState(cls, { as_of: iso(9 * D), fetched_at: iso(9 * D), checked_at: iso(8 * D) }, NOW)
+        .state,
+    ).toBe("expired");
+  });
+  it("release basis: checked_at null or older than fetched_at falls back to the later instant", () => {
+    const cls = freshnessClass("nflverse_injuries");
+    const a = stampState(cls, { as_of: iso(H), fetched_at: iso(H), checked_at: null }, NOW);
+    expect(a.basis_at).toBe(iso(H));
+    const b = stampState(cls, { as_of: iso(H), fetched_at: iso(H), checked_at: iso(5 * D) }, NOW);
+    expect(b.basis_at).toBe(iso(H));
+    expect(b.state).toBe("fresh");
+  });
+  it("file basis (manual_league): judged from the mtime (as_of), not the read time", () => {
+    const cls = freshnessClass("manual_league");
+    const st = stampState(cls, { as_of: iso(8 * D), fetched_at: iso(0), checked_at: null }, NOW);
+    expect(st.state).toBe("stale");
+    expect(st.basis_at).toBe(iso(8 * D));
+    expect(st.age_s).toBe(8 * 86_400);
+    // no hard limit for the manual league: never expired
+    expect(
+      stampState(cls, { as_of: iso(400 * D), fetched_at: iso(0), checked_at: null }, NOW).state,
+    ).toBe("stale");
+  });
+  it("age basis uses fetched_at; immutable is always fresh", () => {
+    const w = freshnessClass("weather");
+    expect(
+      stampState(w, { as_of: iso(0), fetched_at: iso(2 * H), checked_at: iso(0) }, NOW).state,
+    ).toBe("stale");
+    const c = freshnessClass("crosswalk");
+    const st = stampState(
+      c,
+      { as_of: iso(900 * D), fetched_at: iso(900 * D), checked_at: null },
+      NOW,
+    );
+    expect(st.state).toBe("fresh");
+    expect(st.age_s).toBe(900 * 86_400);
+  });
+  it("a future instant (clock skew) reads age 0; garbage throws instead of reading fresh", () => {
+    const cls = freshnessClass("weather");
+    expect(
+      stampState(cls, { as_of: iso(-H), fetched_at: iso(-H), checked_at: null }, NOW).age_s,
+    ).toBe(0);
+    expect(() =>
+      stampState(cls, { as_of: "x", fetched_at: "not a date", checked_at: null }, NOW),
+    ).toThrow(RangeError);
+    expect(() =>
+      stampState(
+        freshnessClass("nflverse_pbp"),
+        { as_of: iso(0), fetched_at: iso(0), checked_at: "nope" },
+        NOW,
+      ),
+    ).toThrow(RangeError);
+    expect(() =>
+      stampState(
+        freshnessClass("manual_league"),
+        { as_of: "nope", fetched_at: iso(0), checked_at: null },
+        NOW,
+      ),
+    ).toThrow(RangeError);
+    expect(() =>
+      stampState(cls, { as_of: iso(0), fetched_at: iso(0), checked_at: null }, NaN),
+    ).toThrow(RangeError);
+  });
+  it("property: for every class and basis instant, state equals classifyAge of the basis age", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...classes),
+        fc.integer({ min: 0, max: 60 * 86_400 }),
+        fc.integer({ min: 0, max: 60 * 86_400 }),
+        (cls, fetchedAgo, checkedAgo) => {
+          const t = {
+            as_of: iso(fetchedAgo * 1000),
+            fetched_at: iso(fetchedAgo * 1000),
+            checked_at: iso(checkedAgo * 1000),
+          };
+          const st = stampState(cls, t, NOW);
+          const basisAgo = cls.basis === "release" ? Math.min(fetchedAgo, checkedAgo) : fetchedAgo;
+          expect(st.age_s).toBe(basisAgo);
+          expect(st.state).toBe(cls.basis === "immutable" ? "fresh" : classifyAge(cls, basisAgo));
+        },
+      ),
+    );
   });
 });

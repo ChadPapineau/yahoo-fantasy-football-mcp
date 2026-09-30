@@ -1,7 +1,9 @@
 // schema.ts — every env/config key, its default and its precedence: env > <config>/config.json >
 // defaults (plan 03 §3; plan 04 §1 "README table generated from it"). Also the platform key grammar
-// (plan 02 §5), kept here because config is the leaf layer every other layer may import
-// (src/mcp/bounds.ts re-exports it). Secrets never come from config.json and are never enumerable.
+// (plan 02 §5) and the nflverse id grammar (gsis ids, team abbreviations — research 04 §D), kept
+// here because config is the leaf layer every other layer may import (src/mcp/bounds.ts re-exports
+// them; domain/sources/providers import them directly). Secrets never come from config.json and are
+// never enumerable. config.json is additive: unknown keys warn, never fail (plan 03 §7).
 import { z } from "zod/v4";
 import {
   assertNotSynced,
@@ -44,6 +46,62 @@ export const MANUAL_KEY_RE = Object.freeze({
 export function isLeagueKey(s: string): boolean {
   return YAHOO_KEY_RE.league.test(s) || MANUAL_KEY_RE.league.test(s);
 }
+
+/**
+ * The longest string each key grammar admits (derived from the regexes above, pinned by a property
+ * test): manual league `manual.l.` + 32 = 41; manual team 41 + `.t.` + 3 = 47; manual player
+ * `manual.p.` + 32 = 41. The zod `.max()` of every key schema uses these, so a valid key can never
+ * fail on length before the grammar check (critic C-11).
+ */
+export const KEY_MAX_CHARS = Object.freeze({ league: 41, team: 47, player: 41 });
+
+// --- nflverse ids (research 04 §D; plan 05 §2 domain/crosswalk "unknown abbreviation fails") ------
+
+/** nflverse team abbreviations (research 04 §D: nflverse uses `LA` for the Rams, `LV`, `JAX`). */
+export const NFL_TEAMS = [
+  "ARI",
+  "ATL",
+  "BAL",
+  "BUF",
+  "CAR",
+  "CHI",
+  "CIN",
+  "CLE",
+  "DAL",
+  "DEN",
+  "DET",
+  "GB",
+  "HOU",
+  "IND",
+  "JAX",
+  "KC",
+  "LA",
+  "LAC",
+  "LV",
+  "MIA",
+  "MIN",
+  "NE",
+  "NO",
+  "NYG",
+  "NYJ",
+  "PHI",
+  "PIT",
+  "SEA",
+  "SF",
+  "TB",
+  "TEN",
+  "WAS",
+] as const;
+/** An nflverse team abbreviation. */
+export type NflTeam = (typeof NFL_TEAMS)[number];
+
+/** Whether `s` is an nflverse team abbreviation. */
+export function isNflTeam(s: string): s is NflTeam {
+  return (NFL_TEAMS as readonly string[]).includes(s);
+}
+
+/** nflverse gsis id grammar (`00-0012345`). */
+export const GSIS_ID_RE = /^00-[0-9]{7}$/;
 
 // --- keys ------------------------------------------------------------------------------------
 
@@ -184,10 +242,14 @@ export interface ConfigIssue {
   readonly reason: string;
 }
 
-/** Configuration is invalid; startup exits 2 with one stderr line per issue (plan 03 §1.1). */
+/**
+ * Configuration is invalid; startup exits 2 with one stderr line per issue (plan 03 §1.1). If one
+ * ever surfaces inside a tool call it maps to INTERNAL, never VALIDATION: the model's arguments are
+ * not at fault and a VALIDATION result would send it into argument retries (critic C-13).
+ */
 export class ConfigError extends Error {
-  /** Error-contract code (plan 01 §4.3). */
-  readonly ffCode = "VALIDATION" as const;
+  /** Error-contract code (plan 01 §4.3): not the caller's fault, not retryable. */
+  readonly ffCode = "INTERNAL" as const;
   /** Process exit code for the CLI (plan 03 §1.3: bad config → exit 2). */
   readonly exitCode = 2 as const;
   /** Every problem found (all are reported, not just the first). */
@@ -266,10 +328,21 @@ const MAX_LEAGUE_KEYS = 20;
 const FILE_KEYS = CONFIG_KEY_SPECS.filter((s) => s.fileSettable).map((s) => s.key);
 const SECRET_KEYS = new Set(CONFIG_KEY_SPECS.filter((s) => s.secret).map((s) => s.key));
 
-/** config.json: a flat object of file-settable keys, string values only, unknown keys rejected. */
-export const configFileSchema = z.strictObject(
+/**
+ * config.json: a flat object of file-settable keys with string values. Unknown keys are stripped
+ * here and reported by `loadConfig` as a warning — plan 03 §7 "Config: additive only; unknown keys
+ * warn, never fail" (a file written by a newer version, or kept across a rollback, must not stop
+ * the server). Secret-looking keys and wrongly typed values stay hard errors.
+ */
+export const configFileSchema = z.object(
   Object.fromEntries(FILE_KEYS.map((k) => [k, z.string().max(MAX_VALUE_LEN).optional()])),
 );
+
+/** The fixed issue text for a secret (or secret-looking key) found in config.json. */
+const SECRETS_IN_FILE =
+  "secrets are not allowed in config.json (use the environment or a _FILE path)";
+/** The fixed warning for unknown config.json keys (plan 03 §7: additive; never echoes the key). */
+export const UNKNOWN_FILE_KEYS_WARNING = "unknown key(s) in config.json are ignored";
 
 /** A syntactically plausible secret-looking key name, for the "secrets never in config.json" rule. */
 const SECRETISH = /secret|token|password|passwd|api[_-]?key|credential/i;
@@ -303,14 +376,19 @@ export function loadConfig(input: ConfigInput): Config {
       issues.push({ key: "config.json", reason: "must be a JSON object of string values" });
     } else {
       const raw = input.file as Record<string, unknown>;
+      let unknownKeys = 0;
       for (const k of Object.keys(raw)) {
         if (SECRET_KEYS.has(k as ConfigKey) || SECRETISH.test(k)) {
-          issues.push({
-            key: "config.json",
-            reason: "secrets are not allowed in config.json (use the environment or a _FILE path)",
-          });
+          if (!issues.some((i) => i.key === "config.json" && i.reason === SECRETS_IN_FILE))
+            issues.push({ key: "config.json", reason: SECRETS_IN_FILE });
+        } else if ((CONFIG_KEYS as readonly string[]).includes(k)) {
+          if (!FILE_KEYS.includes(k as ConfigKey))
+            warnings.push(`${k} is env-only; its config.json value is ignored`);
+        } else {
+          unknownKeys++;
         }
       }
+      if (unknownKeys > 0) warnings.push(UNKNOWN_FILE_KEYS_WARNING);
       const parsed = configFileSchema.safeParse(raw);
       if (parsed.success) {
         fileVals = parsed.data;
@@ -320,10 +398,7 @@ export function loadConfig(input: ConfigInput): Config {
             typeof iss.path[0] === "string" && FILE_KEYS.includes(iss.path[0] as ConfigKey)
               ? iss.path[0]
               : "config.json";
-          const reason =
-            iss.code === "unrecognized_keys"
-              ? "unknown key(s) in config.json"
-              : "value must be a string of at most 4096 characters";
+          const reason = "value must be a string of at most 4096 characters";
           if (!issues.some((i) => i.key === key && i.reason === reason))
             issues.push({ key, reason });
         }

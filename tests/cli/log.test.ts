@@ -12,9 +12,11 @@ import {
   DEFAULT_MAX_STRING,
   HARD_MAX_STRING,
   MIN_SECRET_LENGTH,
+  PRECUT_SLACK,
   REDACTION_PATTERNS,
   SecretRegistry,
   createLogger,
+  redactAndTruncate,
   redactString,
   redactValue,
   truncate,
@@ -485,4 +487,87 @@ describe("stdout is the MCP transport: never written", () => {
     expect(closed.code).toBe(0);
     expect(closed.stdout).toBe("");
   }, 30_000);
+});
+
+describe("linear-time redaction (critic C-11b: the email pattern was quadratic)", () => {
+  const time = (f: () => unknown) => {
+    const t = performance.now();
+    f();
+    return performance.now() - t;
+  };
+  const reg = () => new SecretRegistry();
+
+  it("1 MB of 'a' and address-like runs log fast (were 4.1 s at 60 000 chars)", () => {
+    const lines: string[] = [];
+    const log = createLogger({ level: "debug", sink: (l) => lines.push(l), now: () => TS });
+    const inputs = [
+      "a".repeat(1_000_000),
+      `a@${"b.".repeat(300_000)}`,
+      "a.".repeat(500_000),
+      `${"x".repeat(100_000)}@${"y-".repeat(100_000)}`,
+      "code=".repeat(200_000),
+      "https://".repeat(100_000),
+    ];
+    for (const v of inputs) {
+      expect(
+        time(() => {
+          log.info("big", { v });
+        }),
+      ).toBeLessThan(250);
+    }
+    expect(lines).toHaveLength(inputs.length);
+  });
+  it("the email pattern itself is bounded: 60 000 address-like chars redact in well under 250 ms", () => {
+    const s = `${"a".repeat(30_000)}@${"b".repeat(30_000)}`;
+    expect(time(() => redactString(s, reg()))).toBeLessThan(250);
+    expect(time(() => redactString("a@b.".repeat(15_000), reg()))).toBeLessThan(250);
+  });
+  it("still redacts ordinary emails, including ones next to punctuation", () => {
+    const e = FAKE.email;
+    for (const s of [`<${e}>`, `(${e})`, `mailto:${e}`, `x ${e}, y`, `"${e}"`]) {
+      expect(redactString(s, reg())).not.toContain(e);
+      expect(redactString(s, reg())).toContain("[redacted:email]");
+    }
+  });
+  it("pre-cut cannot let a registered secret survive in the kept prefix", () => {
+    const r = reg();
+    const secret = J("SEC", "q".repeat(40), "RET");
+    r.add("client_secret", secret);
+    const max = 100;
+    // the secret straddles the cap at every offset around it
+    for (let at = max - secret.length - 2; at <= max + 2; at++) {
+      const s = `${"a".repeat(Math.max(0, at))}${secret}${"z".repeat(PRECUT_SLACK * 3)}`;
+      const out = redactAndTruncate(s, r, max);
+      expect(out).not.toContain(secret.slice(0, 12));
+      expect(out).toMatch(/…\[truncated \d+ chars\]$/);
+    }
+  });
+  it("a long value is cut to the cap with the ORIGINAL length reported (surrogates never split)", () => {
+    const s = `${"x".repeat(DEFAULT_MAX_STRING - 1)}😀${"y".repeat(20_000)}`;
+    const out = redactAndTruncate(s, reg(), DEFAULT_MAX_STRING);
+    expect(out.startsWith("x".repeat(DEFAULT_MAX_STRING - 1))).toBe(true);
+    expect(out).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    const n = Number(/truncated (\d+) chars/.exec(out)?.[1]);
+    expect(n).toBe(s.length - (DEFAULT_MAX_STRING - 1));
+    // a short value is untouched
+    expect(redactAndTruncate("hello", reg(), DEFAULT_MAX_STRING)).toBe("hello");
+  });
+  it("a redaction that shrinks the pre-cut prefix below the cap still reports truncation", () => {
+    const tokenish = `Bearer ${"t".repeat(PRECUT_SLACK * 2)}`;
+    const out = redactAndTruncate(tokenish, reg(), DEFAULT_MAX_STRING);
+    expect(out).toContain("[redacted:token]");
+    expect(out).toMatch(/truncated \d+ chars\]$/);
+    expect(out).not.toContain("tttttttttt");
+  });
+  it("a registered identifier (e.g. the manual league's team name) is redacted (critic C-23b)", () => {
+    const lines: string[] = [];
+    const log = createLogger({ level: "debug", sink: (l) => lines.push(l), now: () => TS });
+    log.registerSecret("identifier", "Team A Placeholder Name");
+    log.info("tool.call", {
+      args: { team: "Team A Placeholder Name" },
+      note: "for Team A Placeholder Name",
+    });
+    expect(lines[0]).not.toContain("Team A Placeholder Name");
+    expect(lines[0]).toContain("[redacted:identifier]");
+  });
 });

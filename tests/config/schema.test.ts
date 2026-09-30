@@ -9,11 +9,16 @@ import {
   CONFIG_KEYS,
   CONFIG_KEY_SPECS,
   ConfigError,
+  GSIS_ID_RE,
+  KEY_MAX_CHARS,
   MANUAL_KEY_RE,
+  NFL_TEAMS,
+  isNflTeam,
   YAHOO_KEY_RE,
   configFileSchema,
   isLeagueKey,
   loadConfig,
+  UNKNOWN_FILE_KEYS_WARNING,
   loadConfigFromProcess,
   readConfigFile,
   secretValues,
@@ -45,7 +50,8 @@ function issuesOf(fn: () => unknown): { key: string; reason: string }[] {
   } catch (e) {
     if (e instanceof ConfigError) {
       expect(e.exitCode).toBe(2);
-      expect(e.ffCode).toBe("VALIDATION");
+      // INTERNAL, never VALIDATION: a config problem is not the model's arguments (critic C-13).
+      expect(e.ffCode).toBe("INTERNAL");
       return [...e.issues];
     }
     throw e;
@@ -98,10 +104,10 @@ describe("precedence: env > config.json > default", () => {
   it("an empty file value falls through to the default", () => {
     expect(loadConfig(input({}, { FF_TOOLSET: "" })).toolset).toBe("core");
   });
-  it("FF_CONFIG_DIR is env-only (config.json lives inside it)", () => {
-    expect(issuesOf(() => loadConfig(input({}, { FF_CONFIG_DIR: "/elsewhere" })))).toEqual([
-      { key: "config.json", reason: "unknown key(s) in config.json" },
-    ]);
+  it("FF_CONFIG_DIR is env-only (config.json lives inside it): the file value warns and is ignored", () => {
+    const c = loadConfig(input({}, { FF_CONFIG_DIR: "/elsewhere" }));
+    expect(c.configDir).toBe(path.join(home, ".config", "fantasy-football-mcp"));
+    expect(c.warnings).toEqual(["FF_CONFIG_DIR is env-only; its config.json value is ignored"]);
   });
 });
 
@@ -336,13 +342,33 @@ describe("config.json shape", () => {
       { key: "config.json", reason: "must be a JSON object of string values" },
     ]);
   });
-  it("rejects unknown keys and non-string values", () => {
+  it("rejects non-string values; an unknown key alone never fails (plan 03 §7: additive)", () => {
     const issues = issuesOf(() => loadConfig(input({}, { FF_TOOLSETT: "full", FF_TOOLSET: 1 })));
-    expect(issues).toContainEqual({ key: "config.json", reason: "unknown key(s) in config.json" });
-    expect(issues).toContainEqual({
-      key: "FF_TOOLSET",
-      reason: "value must be a string of at most 4096 characters",
-    });
+    expect(issues).toEqual([
+      { key: "FF_TOOLSET", reason: "value must be a string of at most 4096 characters" },
+    ]);
+  });
+  it("an unknown config.json key (a newer version's, or after a rollback) warns and still loads", () => {
+    const hostile = "FF_FUTURE_KEY\u202e<script>";
+    const c = loadConfig(
+      input({}, { FF_FUTURE_KEY: "x", [hostile]: { nested: true }, FF_TOOLSET: "full" }),
+    );
+    expect(c.toolset).toBe("full");
+    expect(c.warnings).toEqual([UNKNOWN_FILE_KEYS_WARNING]);
+    expect(c.warnings.join("")).not.toContain("FUTURE");
+    // two unknown keys still produce ONE warning, and the value is never echoed
+    expect(JSON.stringify(c)).not.toContain("nested");
+  });
+  it("a secret-looking key is still a hard error even alongside unknown keys", () => {
+    const issues = issuesOf(() =>
+      loadConfig(input({}, { zzz: "1", my_token: "x", your_secret: "y" })),
+    );
+    expect(issues).toEqual([
+      {
+        key: "config.json",
+        reason: "secrets are not allowed in config.json (use the environment or a _FILE path)",
+      },
+    ]);
   });
   it("rejects over-long file values", () => {
     expect(issuesOf(() => loadConfig(input({}, { FF_TOOLSET: "f".repeat(5000) })))[0]?.key).toBe(
@@ -455,5 +481,31 @@ describe("readConfigFile / loadConfigFromProcess", () => {
     mkdirSync(path.join(d, "config.json", "nested"), { recursive: true });
     const issues = issuesOf(() => loadConfigFromProcess({ env: {}, home, repoRoot: ROOT }));
     expect(issues[0]?.key).toBe("config.json");
+  });
+});
+
+describe("nflverse ids and key lengths live in the leaf layer (critics C-19b, C-11)", () => {
+  it("NFL_TEAMS has the 32 nflverse abbreviations (LA not LAR, WAS, JAX, LV)", () => {
+    expect(NFL_TEAMS).toHaveLength(32);
+    expect(new Set(NFL_TEAMS).size).toBe(32);
+    for (const t of ["LA", "WAS", "JAX", "LV", "KC"]) expect(isNflTeam(t)).toBe(true);
+    for (const t of ["LAR", "WSH", "JAC", "OAK", "kc", "", "KC ", "__proto__", "toString"])
+      expect(isNflTeam(t)).toBe(false);
+  });
+  it("GSIS_ID_RE is anchored and exact", () => {
+    expect(GSIS_ID_RE.test("00-0012345")).toBe(true);
+    for (const bad of ["00-001234", "00-00123456", "01-0012345", "00-0012345\n", " 00-0012345"])
+      expect(GSIS_ID_RE.test(bad)).toBe(false);
+  });
+  it("KEY_MAX_CHARS is exactly the longest string each manual grammar admits", () => {
+    const slug32 = "a".repeat(32);
+    expect(`manual.l.${slug32}`).toHaveLength(KEY_MAX_CHARS.league);
+    expect(MANUAL_KEY_RE.league.test(`manual.l.${slug32}`)).toBe(true);
+    expect(MANUAL_KEY_RE.league.test(`manual.l.${slug32}a`)).toBe(false);
+    expect(`manual.l.${slug32}.t.999`).toHaveLength(KEY_MAX_CHARS.team);
+    expect(MANUAL_KEY_RE.team.test(`manual.l.${slug32}.t.999`)).toBe(true);
+    expect(`manual.p.${slug32}`).toHaveLength(KEY_MAX_CHARS.player);
+    expect(MANUAL_KEY_RE.player.test(`manual.p.${slug32}`)).toBe(true);
+    expect(MANUAL_KEY_RE.player.test(`manual.p.${slug32}a`)).toBe(false);
   });
 });

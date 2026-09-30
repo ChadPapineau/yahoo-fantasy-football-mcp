@@ -2,7 +2,23 @@
 // id → deterministic name+team+position match → manual override; persist every learned pair; never
 // accept name-only), plan 01 §5.2 `crosswalk` row and §5.5 (delta-only writes), plan 07 G1
 // `crosswalk` counts and C1 `crosswalk: { method, confidence }`, plan 05 §2 `domain/crosswalk`.
+// Rules added in the contract revision: team defences never enter the matcher (their identity is
+// the nflverse team — ProjectionSubject `defense`; critic C-13); `last_seen` is excluded from change
+// detection and refreshed coarsely by a best-effort `touch` (critic C-21); the upsert is a required
+// write and returns a Promise (critic C-04b); roster reads carry a DatasetStamp (critic C-08b).
+import type { NflTeam } from "../../config/schema.js";
+import type { BestEffortOutcome, DatasetResult } from "../analytics/types.js";
 import type { IsoInstant, PlatformId, PlatformPlayer } from "../league/types.js";
+
+/**
+ * Positions that are team units, not players: never matched, never paired. A DEF on a platform
+ * roster resolves by its team abbreviation to `{ kind: "defense", nfl_team }` and is never counted
+ * in `unmatched_rostered` (plan 10 A5a).
+ */
+export const TEAM_UNIT_POSITIONS: readonly string[] = Object.freeze(["DEF", "DST", "D/ST"]);
+
+/** `last_seen` is rewritten only when it is older than this (7 days): no daily full rewrite. */
+export const LAST_SEEN_GRANULARITY_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** How a pair was established (plan 07 C1). `none` = unmatched. */
 export type CrosswalkMethod = "id" | "match" | "override" | "none";
@@ -22,6 +38,7 @@ export interface CrosswalkPair {
   /** 1 for id/override; the matcher's score for `match`. */
   readonly confidence: number;
   readonly first_seen: IsoInstant;
+  /** NOT part of change detection; refreshed by `touch` at LAST_SEEN_GRANULARITY_MS grain. */
   readonly last_seen: IsoInstant;
 }
 
@@ -33,7 +50,7 @@ export interface NflRosterPlayer {
   /** Raw full name. */
   readonly full_name: string;
   /** nflverse team abbreviation. */
-  readonly team: string;
+  readonly team: NflTeam;
   readonly position: string;
   readonly jersey_number: number | null;
   /** The platform ids nflverse carries (research 04 §D step 1). */
@@ -103,15 +120,28 @@ export interface CrosswalkRepository {
   get(platform: PlatformId, platformPlayerId: string): CrosswalkPair | null;
   /** Reverse lookup: every platform key paired with a gsis id. */
   byGsis(gsisId: string): readonly CrosswalkPair[];
-  /** Writes only new or changed pairs (plan 01 §5.5: delta, never a full rewrite); returns rows written. */
-  upsertDelta(pairs: readonly CrosswalkPair[]): number;
+  /**
+   * Writes only new or changed pairs (plan 01 §5.5: delta, never a full rewrite). "Changed" compares
+   * gsis_id, method, source and confidence — never `last_seen`. Resolves to rows written.
+   */
+  upsertDelta(pairs: readonly CrosswalkPair[]): Promise<number>;
+  /** Best-effort: sets `last_seen = at` only on pairs whose `last_seen` is older than the granularity. */
+  touch(
+    platform: PlatformId,
+    platformPlayerIds: readonly string[],
+    at: IsoInstant,
+  ): BestEffortOutcome;
   /** Counts for `ff status`. */
   count(platform: PlatformId): number;
 }
 
-/** The nflverse roster port the matcher reads (over the attached `nflverse:roster_weekly` file). */
+/**
+ * The nflverse roster port the matcher reads (over the attached `nflverse:roster_weekly` file). Reads
+ * carry the dataset stamp so a tool can report roster_weekly freshness and tell "never loaded"
+ * (stamp null → STALE_ONLY) from an empty season.
+ */
 export interface RosterWeeklyReader {
   /** The latest row per gsis id for a season. */
-  latest(season: number): readonly NflRosterPlayer[];
-  byPlatformId(platform: "yahoo" | "sleeper" | "espn", id: string): NflRosterPlayer | null;
+  latest(season: number): DatasetResult<NflRosterPlayer>;
+  byPlatformId(platform: "yahoo" | "sleeper" | "espn", id: string): DatasetResult<NflRosterPlayer>;
 }

@@ -2,7 +2,10 @@
 // stderr", §7 fields + redaction rules; plan 05 §2 `cli/log`; plan 05 §7: a 100 %-coverage module).
 // Every field passes through redaction: registered secret values, token/key shapes (the patterns of
 // scripts/dev/scan-secrets.mjs), OAuth/query parameters, Authorization values, emails, URL query
-// strings; long strings are truncated. Nothing is ever written to stdout.
+// strings; long strings are truncated. Nothing is ever written to stdout. Redaction is linear-time:
+// every string is pre-cut to `maxString + longest registered secret + 4096` BEFORE the patterns run
+// (nothing past `maxString` survives truncation anyway), and the email pattern is length-bounded, so
+// a hostile 8 MB field cannot stall the stdio loop (critic C-11b: 60 000 chars took 4.1 s before).
 import type { LogLevel } from "../config/schema.js";
 
 /** Level order, most severe first (plan 01 §7). */
@@ -82,6 +85,11 @@ export class SecretRegistry {
   get size(): number {
     return this.entries.length;
   }
+
+  /** Length of the longest registered value (0 when none) — bounds the redaction pre-cut. */
+  get longest(): number {
+    return this.entries[0]?.value.length ?? 0;
+  }
 }
 
 /** One pattern-based redaction: a regex and its replacement (plan 01 §7; scan-secrets.mjs shapes). */
@@ -124,8 +132,9 @@ export const REDACTION_PATTERNS: readonly PatternRule[] = Object.freeze([
     replace: "$1[redacted]$2",
   },
   {
+    // Bounded quantifiers + a left boundary: no quadratic backtracking on long address-like runs.
     id: "email",
-    re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g,
+    re: /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,8}\.[A-Za-z]{2,24}(?![A-Za-z])/g,
     replace: "[redacted:email]",
   },
   {
@@ -150,11 +159,31 @@ export const REDACTION_PATTERNS: readonly PatternRule[] = Object.freeze([
 const SECRET_KEY_RE =
   /authorization|cookie|password|passwd|secret|token|api[_-]?key|credential|guid|email|private[_-]?key/i;
 
+/** Slack kept past the cap before redaction, so a pattern straddling the cut still matches. */
+export const PRECUT_SLACK = 4096;
+
 /** Redacts one string: registered values, then every pattern. Pure apart from the registry. */
 export function redactString(s: string, secrets: SecretRegistry): string {
   let out = secrets.apply(s);
   for (const rule of REDACTION_PATTERNS) out = out.replace(rule.re, rule.replace);
   return out;
+}
+
+/**
+ * Redacts then truncates to `max`, pre-cutting first so the work is linear in `max`, not in the
+ * input: the kept prefix is at most `max` chars, and a secret or pattern ending inside it starts at
+ * most `longest secret + PRECUT_SLACK` chars earlier than the cut — so no secret can survive in the
+ * kept prefix. The reported dropped length is the ORIGINAL string's.
+ */
+export function redactAndTruncate(s: string, secrets: SecretRegistry, max: number): string {
+  const keep = max + secrets.longest + PRECUT_SLACK;
+  if (s.length <= keep) return truncate(redactString(s, secrets), max);
+  const red = redactString(s.slice(0, keep), secrets);
+  const cutAt = Math.min(red.length, max);
+  let cut = cutAt;
+  const code = red.charCodeAt(cut - 1);
+  if (code >= 0xd800 && code <= 0xdbff) cut -= 1;
+  return `${red.slice(0, cut)}…[truncated ${String(s.length - cut)} chars]`;
 }
 
 /** Truncates to `max` UTF-16 units without splitting a surrogate pair, noting the dropped length. */
@@ -180,7 +209,7 @@ export function redactValue(
 ): unknown {
   if (typeof v === "string") {
     if (v.length > HARD_MAX_STRING) return `[dropped ${String(v.length)} chars]`;
-    return truncate(redactString(v, secrets), maxString);
+    return redactAndTruncate(v, secrets, maxString);
   }
   if (typeof v === "number") return Number.isFinite(v) ? v : String(v);
   if (typeof v === "boolean" || v === null) return v;
@@ -214,7 +243,7 @@ export function redactValue(
   const out: Record<string, unknown> = {};
   const keys = Object.keys(v);
   for (const k of keys.slice(0, MAX_OBJECT_KEYS)) {
-    const safeKey = truncate(redactString(k, secrets), MAX_KEY_CHARS);
+    const safeKey = redactAndTruncate(k, secrets, MAX_KEY_CHARS);
     const child = (v as Record<string, unknown>)[k];
     out[safeKey] =
       SECRET_KEY_RE.test(k) && child !== null && child !== undefined
