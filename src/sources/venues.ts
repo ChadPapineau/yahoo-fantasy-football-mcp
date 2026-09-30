@@ -113,10 +113,13 @@ export const VENUES: readonly VenueReference[] = Object.freeze([
 /**
  * Games whose nflverse stadium fields name the wrong venue and whose name cannot reveal it (2025's
  * international games are filed under the home team's own stadium id AND name). Source: the NFL's
- * 2025 International Series as publicly reported (Dublin wk 4; London wk 5–7; Berlin wk 10; Madrid
- * wk 11). game_id → stadium_id.
+ * 2025 International Series as publicly reported (São Paulo wk 1; Dublin wk 4; London wk 5–7; Berlin
+ * wk 10; Madrid wk 11). game_id → stadium_id. tests/sources/nflverse/sources.test.ts holds the
+ * property (no non-Super-Bowl neutral-site game resolves to its home team's own stadium) that finds
+ * the next one.
  */
 export const GAME_VENUE_OVERRIDES: Readonly<Record<string, string>> = Object.freeze({
+  "2025_01_KC_LAC": "SAO00",
   "2025_04_MIN_PIT": "DUB00",
   "2025_05_MIN_CLE": "LON02",
   "2025_06_DEN_NYJ": "LON02",

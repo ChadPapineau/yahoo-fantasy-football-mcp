@@ -121,11 +121,38 @@ describe("nflverse:schedules", () => {
       { season: 2025, n: 285 },
       { season: 2026, n: 272 },
     ]);
-    // the six 2025 international games carry the home team's stadium upstream → overridden
+    // the 2025 international games carry the home team's stadium upstream → overridden
     for (const [gameId, venue] of Object.entries(GAME_VENUE_OVERRIDES)) {
       const row = w.all("SELECT venue_id FROM ds_games WHERE game_id = ?", gameId)[0];
       expect(row?.venue_id, gameId).toBe(venue);
     }
+  });
+
+  it("[QA-1-039] no neutral-site game resolves to its home team's own stadium (Super Bowl aside)", async () => {
+    // Property, not a list: nflverse files some international games under the home team's stadium
+    // id AND name (2025_01_KC_LAC São Paulo → LAX01 "SoFi Stadium"). Whatever the next such game
+    // is, a `location = 'Neutral'` game that is not a Super Bowl is never played at the home
+    // team's own stadium — its venue_id must differ from where that team plays its home games.
+    const { w } = await run(schedulesSource, [2025, 2026]);
+    const home = new Map<string, string>();
+    for (const r of w.all(
+      `SELECT season, home_team, venue_id, COUNT(*) AS n FROM ds_games
+       WHERE location = 'Home' AND venue_id IS NOT NULL
+       GROUP BY season, home_team, venue_id ORDER BY n ASC`,
+    )) {
+      home.set(`${String(r.season)}:${String(r.home_team)}`, String(r.venue_id)); // most frequent last
+    }
+    const neutral = w.all(
+      `SELECT game_id, season, home_team, venue_id FROM ds_games
+       WHERE location = 'Neutral' AND game_type <> 'SB'`,
+    );
+    expect(neutral.length).toBeGreaterThanOrEqual(7); // the 2025 International Series alone
+    const atHome = neutral
+      .filter((g) => g.venue_id === home.get(`${String(g.season)}:${String(g.home_team)}`))
+      .map((g) => `${String(g.game_id)} → ${String(g.venue_id)}`);
+    expect(atHome).toEqual([]);
+    const sp = w.all("SELECT venue_id FROM ds_games WHERE game_id = '2025_01_KC_LAC'")[0];
+    expect(sp?.venue_id).toBe("SAO00");
   });
 });
 
