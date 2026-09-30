@@ -2,6 +2,7 @@
 
 **Author:** `product-planner` · **Date:** 2026-09-29 · **Brief:** `docs/scratch/briefs/product-planner.md`
 **Inputs (cited, not restated):** `docs/HANDOFF.md` (write access unavailable; two open decisions; Desktop elicitation unverified); plan 01–06 (the structural plan; plan 06 §4 build order is the substrate of Phase 0–1); plan 07 (tool priorities), plan 08 (engine gate), plan 09 (Skills priorities, eval lanes); `docs/research/05-strategy-and-analytics.md` §16 (data-needs order; the honest MVP cut #1–#5), §12 (calibration), and each section's "Evaluation"; `04-data-sources.md` §C/§D/§G; `03-yahoo-api.md` §F (unverified items that phases must close).
+**Yahoo-dependency:** `read` — Phase 1b, Z4/D0, A2/A16. `write` — Phase W. **`none`** — Phase 0 (except D0), Phase 1a, and Phases 2–3's analytics and backtests: everything that stays valuable under denial (§0 D0 paragraph). *(tag added round 1, D.2 item 1: what survives a Yahoo denial is visible at a glance.)*
 
 **Effort scale:** S ≈ days · M ≈ 1–3 weeks · L ≈ 4–8 weeks of a single senior engineer with agents. No dates (brief).
 

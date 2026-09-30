@@ -2,6 +2,7 @@
 
 **Author:** `architecture-planner-core` · **Date:** 2026-09-29 · **Brief:** `docs/scratch/briefs/architecture-planner-core.md`
 **Inputs (not re-derived here):** `docs/HANDOFF.md`; `docs/research/03-yahoo-api.md` (03); `02-prior-art-lessons.md` (02); `04-data-sources.md` (04); `05-strategy-and-analytics.md` (05) §0/§12/§15/§16/§19; the mcp-builder references (`mcp_best_practices.md`, `node_mcp_server.md`, `evaluation.md`); the MCP specification **revision 2026-07-28** (read 2026-09-29 at modelcontextprotocol.io — the latest published revision; `draft` also exists); the TypeScript SDK README + `docs/protocol-versions.md` (read 2026-09-29); the npm registry (read 2026-09-29).
+**Yahoo-dependency:** `read` — `YahooProvider`, auth placement, the limiter and the Yahoo cache (§5.3, §6, §8–§9). **`none`** for the store, every `DataSource`, the scoring engine, the `FantasyPlatform` seam itself, the envelope and the error contract — which is what `ManualLeagueProvider` (X1) and `SleeperProvider` (X2) run on if Yahoo never grants read. *(tag added round 1, D.2 item 1: what survives a Yahoo denial is visible at a glance.)*
 
 ## How to read this document
 

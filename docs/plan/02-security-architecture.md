@@ -2,6 +2,7 @@
 
 **Author:** `architecture-planner-core` · **Date:** 2026-09-29 · **Brief:** `docs/scratch/briefs/architecture-planner-core.md`
 **Inputs:** `docs/HANDOFF.md`; `docs/research/03-yahoo-api.md` §A (auth), §B.6 (errors), §C (writes), §D.1 (limits); `02-prior-art-lessons.md` §3–§6; `04-data-sources.md` §B10, §G; `05-strategy-and-analytics.md` §10; plan 01 (this plan uses its layers, envelope and error codes); MCP specification 2026-07-28 pages *tools*, *elicitation*, *mrtr*, *authorization*, *stdio*, and `docs/2026-07-28/tutorials/security/security_best_practices` (all read 2026-09-29); TypeScript SDK v2 `docs/servers/{elicitation,input-required,tools}.md` and `docs/protocol-versions.md` (read 2026-09-29).
+**Yahoo-dependency:** `read` — §2 OAuth, §3 tokens, §5 path builder and XML parsing. `write` — §4 gate, S5–S7, S12–S13 (designed now, inert until Yahoo grants `fspt-w`; Phase W). **`none`** — §6 injection defences, §7 supply chain, §8 rows 13–20. *(tag added round 1, D.2 item 1: what survives a Yahoo denial is visible at a glance.)*
 
 Legend as in plan 01: **[V-03 §x]** research doc; **[V-spec]** spec 2026-07-28; **[V-sdk]** SDK docs; **[V-web]** a web search result *snippet* (page not opened — weakest verification); **[A]** assumed, listed in §10.
 

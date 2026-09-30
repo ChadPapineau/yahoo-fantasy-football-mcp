@@ -2,6 +2,7 @@
 
 **Author:** `architecture-planner-core` · **Date:** 2026-09-29 · **Brief:** `docs/scratch/briefs/architecture-planner-core.md`
 **Inputs:** plans 01–03 (module map, supply-chain controls, doctor); `docs/HANDOFF.md` (public repo, no identifiers, no branch protection today); `docs/research/02-prior-art-lessons.md` §4 #8–#12; the mcp-builder `node_mcp_server.md` project-structure and tsconfig guidance (adapted, not copied — it targets SDK v1 and Node 16 module resolution); TypeScript SDK v2 README (`zod/v4`, Node ≥ 20 [V-npm]). Legend as in plan 01.
+**Yahoo-dependency:** **`none`** — repo layout and CI need no Yahoo access; the `secrets` rules only *scan* for Yahoo credential and key shapes; fixtures are recorded elsewhere (plan 05 §3.1). *(tag added round 1, D.2 item 1: what survives a Yahoo denial is visible at a glance.)*
 
 ---
 

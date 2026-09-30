@@ -2,6 +2,7 @@
 
 **Author:** `product-planner` · **Date:** 2026-09-29 · **Brief:** `docs/scratch/briefs/product-planner.md`
 **Inputs (cited, not restated):** plan 01 §4.1 (prompts must state the untrusted-text rule), plan 02 §4 (gate), §6.3 (the sentence), §6.4 (Skill rules a–d), plan 04 §1 (`skills/<name>/SKILL.md`), §4.2 (`docs.yml` skills job), §6 (generated docs), plan 05 §6 (evals are manual, tokens), plan 07 (tool names, `Rec`, §5.3 never-refetch rules); `docs/research/06-skills-and-mcp-design.md` §A.4 (frontmatter, size, discovery), §A.5 (plugin), §D (the 14 candidates and their evals — this plan finalises them), §E (layout, versioning, install); `05-strategy-and-analytics.md` §0 (output contract), §17/§18 (pitfalls and clean negatives the guardrails encode).
+**Yahoo-dependency:** `read` — `onboard` in Yahoo mode, `weekly`, `apply` read-only mode. `write` — `apply` write mode (Phase W). **`none`** — `start-sit`, `stream-kdef`, `retro` run over Phase 1a's sources and the manual league; `onboard`'s manual-YAML mode. *(tag added round 1, D.2 item 1: what survives a Yahoo denial is visible at a glance.)*
 
 **Convention.** Skill names are the doc 06 §D names (short, kebab-case). Tool references inside Skill text are fully qualified as `fantasy-football-mcp-server:ff_<tool>` (06 §A.4 platform rule); this document writes `ff_<tool>` for brevity. Priorities are plan 07's.
 
