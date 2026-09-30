@@ -90,7 +90,11 @@ export interface RecordRecommendationInput {
   readonly alternatives: readonly Alternative[];
   readonly source_calls: readonly SourceCall[];
   readonly followed_hint: FollowedHint;
-  /** Deduplication key (≤ 64 chars): a second record with the same key returns the first. */
+  /**
+   * Deduplication key (≤ 64 chars). A second record returns the first only when its whole
+   * RECORD_DEDUP_SCOPE matches (same league, season, week, kind AND client_ref), never on the key
+   * alone (QA-1-061).
+   */
   readonly client_ref: string | null;
   /** Model-authored note, ≤ 200 chars (untrusted on read). */
   readonly note: string | null;
@@ -111,8 +115,71 @@ export interface RecordResult {
   readonly recorded_at: IsoInstant;
   readonly week: Week;
   readonly kind: RecommendationKind;
-  /** True when `client_ref` matched an existing row (idempotent). */
+  /** True when an existing row had the same RECORD_DEDUP_SCOPE (idempotent retry). */
   readonly deduplicated: boolean;
+}
+
+// --- deduplication scope (plan 07 E12 `idempotentHint: true`, "dedup on client_ref"; QA-1-061) --------
+
+/**
+ * The fields that make two E12 records the SAME record. Idempotency exists for retries, and a retry
+ * repeats the season, week and kind as well as the `client_ref`; a record that differs in any of them
+ * is a different recommendation and is stored under a new `log_id`. The key alone is not a scope: a
+ * manual league key spans seasons (critic C-04) and the Skills reuse refs such as
+ * `start-sit-w4-flex` every year, so a (league_key, client_ref) scope returned last season's log_id
+ * with `deduplicated: true` and silently dropped this season's call (QA-1-061) — the retrospective can
+ * only score what was logged (plan 09 §2). Order matters: it is the column order of the store's
+ * lookup and unique index (the column names equal the field names).
+ */
+export const RECORD_DEDUP_SCOPE = Object.freeze([
+  "league_key",
+  "season",
+  "week",
+  "kind",
+  "client_ref",
+] as const);
+/** One field of RECORD_DEDUP_SCOPE. */
+export type RecordDedupField = (typeof RECORD_DEDUP_SCOPE)[number];
+
+/** A record's deduplication scope (only records with a `client_ref` have one). */
+export interface RecordDedupScope {
+  readonly league_key: string;
+  readonly season: number;
+  readonly week: Week;
+  readonly kind: RecommendationKind;
+  readonly client_ref: string;
+}
+
+/** The deduplication scope of a record, or null when it has no `client_ref` (never deduplicated). */
+export function recordDedupScope(
+  input: Pick<RecordRecommendationInput, RecordDedupField>,
+): RecordDedupScope | null {
+  if (input.client_ref === null) return null;
+  return Object.freeze({
+    league_key: input.league_key,
+    season: input.season,
+    week: input.week,
+    kind: input.kind,
+    client_ref: input.client_ref,
+  });
+}
+
+/** The scope's values in RECORD_DEDUP_SCOPE order: the parameters of the store's dedup lookup. */
+export function recordDedupParams(scope: RecordDedupScope): readonly (string | number)[] {
+  return Object.freeze(RECORD_DEDUP_SCOPE.map((f) => scope[f]));
+}
+
+/**
+ * Whether `b` deduplicates onto `a`: both carry a `client_ref` and every RECORD_DEDUP_SCOPE field is
+ * equal. A record without a `client_ref` never matches, not even itself.
+ */
+export function sameRecordDedupScope(
+  a: Pick<RecordRecommendationInput, RecordDedupField>,
+  b: Pick<RecordRecommendationInput, RecordDedupField>,
+): boolean {
+  const sa = recordDedupScope(a);
+  const sb = recordDedupScope(b);
+  return sa !== null && sb !== null && RECORD_DEDUP_SCOPE.every((f) => sa[f] === sb[f]);
 }
 
 /** One `ff_list_recommendations` item (plan 07 E14). */
@@ -290,7 +357,11 @@ export interface RecommendationQuery {
  * attempts for ≤ 1 s, then rejects with StoreBusyError — plan 01 §5.3, plan 03 §1.2).
  */
 export interface RecommendationLogRepository {
-  /** Inserts (or resolves to the existing row for the same league + `client_ref`). */
+  /**
+   * Inserts, or resolves to the existing row with the same RECORD_DEDUP_SCOPE (league, season, week,
+   * kind and `client_ref` — sameRecordDedupScope), returning it with `deduplicated: true`. A matching
+   * `client_ref` in another season, week or kind is a new row; a null `client_ref` always inserts.
+   */
   record(
     input: RecordRecommendationInput,
     recordedAt: IsoInstant,
