@@ -257,12 +257,12 @@ describe("rows 2, 3, 13 — client configs", () => {
     const spec = {
       command: "/n",
       args: ["/a/dist/cli.js", "serve"],
-      env: { YAHOO_CLIENT_SECRET: "hunter2-value", FF_LOG_LEVEL: "info", EMPTY_TOKEN: " " },
+      env: { YAHOO_CLIENT_SECRET: "xxxx-xxxx-xxxx", FF_LOG_LEVEL: "info", EMPTY_TOKEN: " " },
     };
     const readable = scanClientConfig("desktop", desktopConfig(s, { [SERVER_NAME]: spec }, 0o644));
     const r = checkClientSecrecy([readable]);
     expect(r.status).toBe("fail");
-    expect(JSON.stringify(r)).not.toContain("hunter2");
+    expect(JSON.stringify(r)).not.toContain("xxxx-xxxx-xxxx");
     expect(r.details.join()).toContain("YAHOO_CLIENT_SECRET");
     expect(r.details.join()).not.toContain("EMPTY_TOKEN");
     const priv = scanClientConfig("desktop", desktopConfig(s, { [SERVER_NAME]: spec }, 0o600));
@@ -571,13 +571,13 @@ describe("rows 12, 19, 20, 21, 22", () => {
       file,
       [
         "2026 info started",
-        "2026 Error: spawn ENOENT access_token=abcdef123456 x".padEnd(400, "z"),
+        "2026 Error: spawn ENOENT access_token=xxxxxxxxxxxx x".padEnd(400, "z"),
         "2026 Server transport closed unexpectedly, exit code 1",
       ].join("\n"),
     );
     const r = checkClientLog(io, file);
     expect(r.status).toBe("warn");
-    expect(r.details.join("\n")).not.toContain("abcdef123456");
+    expect(r.details.join("\n")).not.toContain("xxxxxxxxxxxx");
     expect(r.details.join("\n")).toContain("access_token=[redacted]");
     expect(r.details.every((d) => d.length < 260)).toBe(true);
     writeFileSync(file, "x\nclient disconnected, exit 0\n");
