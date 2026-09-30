@@ -122,6 +122,13 @@ export interface Rec {
 /** Projection model versions (plan 07 E1): v1 = trailing nflverse lines + position CVs. */
 export type ModelVersion = "v1-trailing" | "v2-opportunity";
 
+/**
+ * Where a `p_active` came from (plan 07 D2's vocabulary): the designation's base rate, the practice
+ * trend, a provider-stamped game-day status (within 3 h of kickoff — OBJ-16), or nothing known.
+ */
+export type PActiveBasis =
+  "designation_base_rate" | "trend_model" | "yahoo_gameday_status" | "none";
+
 /** One projected week for one player. */
 export interface ProjectionWeek {
   readonly week: Week;
@@ -130,6 +137,8 @@ export interface ProjectionWeek {
   readonly p_active: number | null;
   readonly opponent: string | null;
   readonly implied_total: number | null;
+  /** How `p_active` was derived (additive, optional — the analytics engine always sets it). */
+  readonly p_active_basis?: PActiveBasis;
 }
 
 /** A shrinkage applied to a rate: observed n, prior strength k (plan 07 E1 `shrinkage[]`). */
