@@ -1,38 +1,65 @@
 // types.ts — the store contract (plan 01 §5.1 one store file + immutable per-source dataset files
 // attached read-only, §5.3 best-effort vs required writes with STORE_BUSY, §5.5 publish-by-rename
 // and DETACH/ATTACH re-attach, §8.2 migration-001 table list; plan 03 L7 consistent backups, L9
-// bounded lock waits; plan 05 §2 `store`). The store implements the domain's repository ports; the
-// domain never imports this file (plan 01 §1.1).
+// bounded lock waits, §1.2 the stdio loop never blocked > one statement / 100 ms; plan 05 §2
+// `store`). The store implements the domain's repository ports; the domain never imports this file
+// (plan 01 §1.1). Only implementation-side items live here; the ports tools read are in src/domain.
 import type { Clock } from "../domain/clock.js";
-import type { DatasetReaders, ProjectionRepository } from "../domain/analytics/types.js";
+import type {
+  AttachedDataset,
+  BestEffortOutcome,
+  DatasetReaders,
+  ProjectionRepository,
+  RefreshLogRepository,
+  StoreStats,
+  WriteJournalRepository,
+} from "../domain/analytics/types.js";
+import type { DatasetSourceId } from "../config/freshness.js";
 import type { CrosswalkRepository, RosterWeeklyReader } from "../domain/crosswalk/types.js";
 import type {
+  FaPoolSnapshotRepository,
   IsoInstant,
-  LeagueRules,
-  PlatformPlayer,
-  Roster,
-  RosterSlots,
-  Transaction,
+  LeagueSettingsRepository,
+  RosterSnapshotRepository,
+  ScoreboardSnapshotRepository,
+  TransactionsSeenRepository,
   Week,
 } from "../domain/league/types.js";
 import type { RecommendationLogRepository } from "../domain/reclog/types.js";
-import type { ScoringSettings } from "../domain/scoring/types.js";
+
+export type {
+  AttachedDataset,
+  BestEffortOutcome,
+  JournalStatus,
+  RefreshLogRepository,
+  RefreshLogRow,
+  StoreStats,
+  WriteJournalRepository,
+} from "../domain/analytics/types.js";
+export type {
+  FaPoolSnapshot,
+  FaPoolSnapshotRepository,
+  LeagueSettingsRepository,
+  LeagueSettingsRow,
+  RosterSnapshot,
+  RosterSnapshotRepository,
+  ScoreboardSnapshot,
+  ScoreboardSnapshotRepository,
+  SettingsFlag,
+  TransactionsSeenRepository,
+} from "../domain/league/types.js";
 
 // --- lock and write policy (plan 01 §5.3; plan 03 L9) -------------------------------------------------
 
 /** SQLite `busy_timeout` on the server connection: every ms of wait blocks the stdio loop. */
 export const BUSY_TIMEOUT_MS = 100;
-/** Total retry budget for a REQUIRED write before STORE_BUSY. */
+/** Total retry budget for a REQUIRED write before STORE_BUSY (spent in yielding 100 ms steps). */
 export const REQUIRED_WRITE_BUDGET_MS = 1000;
 /** Upper bound for a DETACH/ATTACH re-attach on the fixture sizes (plan 05 §2 `store`). */
 export const REATTACH_BUDGET_MS = 50;
 
 /** The two classes of server write (plan 01 §5.3, round 1 OBJ-11). */
 export type WriteClass = "best_effort" | "required";
-
-/** A best-effort (cache) write's outcome: a lock timeout is a counted miss, never an error. */
-export type BestEffortOutcome =
-  { readonly written: true } | { readonly written: false; readonly reason: "busy" };
 
 /**
  * A REQUIRED write (write_journal, recommendation_log, crosswalk, league_settings, refresh_log,
@@ -77,6 +104,8 @@ export class StoreVersionError extends Error {
 /**
  * The store tables migration 001 creates (plan 01 §8.2, T12). The `ds_*` dataset tables are NOT
  * here: since round 2 (OBJ-27) they live in per-source dataset files, never in store.sqlite.
+ * `recommendation_outcome` (critic C-02b) holds the retrospective's scored outcome per log row so
+ * the log row itself stays immutable.
  */
 export const MIGRATION_001_TABLES = [
   "schema_version",
@@ -85,6 +114,7 @@ export const MIGRATION_001_TABLES = [
   "crosswalk",
   "write_journal",
   "recommendation_log",
+  "recommendation_outcome",
   "projection",
   "points_cache",
   "refresh_log",
@@ -98,15 +128,24 @@ export const MIGRATION_001_TABLES = [
 /** A store table. */
 export type StoreTable = (typeof MIGRATION_001_TABLES)[number];
 
-/** Never pruned (plan 01 §5.1 T5): the migration comments each CREATE TABLE saying so. */
+/**
+ * Never pruned (plan 01 §5.1 T5; plan 10 T12 adds `projection` — the retrospective's pre-game
+ * distributions): the migration comments each CREATE TABLE saying so.
+ */
 export const NEVER_PRUNED_TABLES: readonly StoreTable[] = [
   "recommendation_log",
+  "recommendation_outcome",
   "league_settings",
   "write_journal",
+  "projection",
 ];
 /** Prunable caches (plan 06 §1.2 `store prune`); `ds_news` rows and old backups are pruned too. */
 export const PRUNABLE_TABLES: readonly StoreTable[] = ["yahoo_cache", "points_cache"];
-/** Which write class each table family belongs to (plan 01 §5.3). */
+/**
+ * Which write class each table family belongs to (plan 01 §5.3). `projection` stays best-effort
+ * (append-only; a busy lock during `ff refresh` must not fail E1/E2 — the retrospective counts only
+ * persisted rows; decision recorded for critic C-03b).
+ */
 export const WRITE_CLASS: Readonly<Record<Exclude<StoreTable, "schema_version">, WriteClass>> =
   Object.freeze({
     yahoo_cache: "best_effort",
@@ -117,6 +156,7 @@ export const WRITE_CLASS: Readonly<Record<Exclude<StoreTable, "schema_version">,
     crosswalk: "required",
     write_journal: "required",
     recommendation_log: "required",
+    recommendation_outcome: "required",
     refresh_log: "required",
     job_lock: "required",
     roster_snapshot: "required",
@@ -126,6 +166,14 @@ export const WRITE_CLASS: Readonly<Record<Exclude<StoreTable, "schema_version">,
   });
 
 // --- dataset files (plan 01 §5.5, round 2 OBJ-27) ---------------------------------------------------------
+
+/**
+ * SQLite's attached-database limit as bundled in node:sqlite (verified on Node 24.21: the 11th
+ * ATTACH fails "too many attached databases - max 10"; critic C-15b).
+ */
+export const MAX_ATTACHED = 10;
+/** Attach slots kept free (e.g. for `VACUUM INTO`/backup or a re-attach swap). */
+export const RESERVED_ATTACH_SLOTS = 1;
 
 /** SQLite column affinity for a dataset column. */
 export type DatasetColumnType = "TEXT" | "INTEGER" | "REAL" | "BLOB";
@@ -137,7 +185,10 @@ export interface DatasetColumn {
   readonly nullable: boolean;
 }
 
-/** One `ds_*` table a source publishes into its dataset file. */
+/**
+ * One `ds_*` table a source publishes into its dataset file. A per-season source's tables carry a
+ * `season` column in `primary_key` (critic C-06b: one file holds every season the source keeps).
+ */
 export interface DatasetTableSpec {
   /** Must start with `ds_`. */
   readonly name: `ds_${string}`;
@@ -165,6 +216,8 @@ export interface DatasetWriter {
 export interface PublishStats {
   readonly rows: number;
   readonly tables: readonly { readonly name: string; readonly rows: number }[];
+  /** The seasons the file holds (recorded in refresh_log). */
+  readonly seasons: readonly number[];
   /** sha256 of the sorted column list — the schema fingerprint recorded in refresh_log. */
   readonly columns_hash: string;
 }
@@ -180,99 +233,45 @@ export type PublishOutcome =
   | { readonly ok: false; readonly error: string };
 
 /**
- * Publishes a dataset atomically (implemented once, used by every source via `ff refresh`): create
- * the staging file, let `fill` write it, `fsync`, `rename()` over `<cache>/ds/<stem>.sqlite`,
- * fsync the directory, then record refresh_log (a required write). Any failure deletes the staging
- * file and leaves the previous dataset file untouched (plan 05 §2 `sources/*`).
+ * Publishes a dataset atomically (implemented once, used by every source via `ff refresh`; obtained
+ * from `StoreFactory.openPublisher` — critic C-07b). `publish` takes the source's `job_lock`, creates
+ * the staging file, lets `fill` write it, `fsync`s, `rename()`s over `<cache>/ds/<stem>.sqlite`,
+ * fsyncs the directory, then records refresh_log (a required write) with `checked_at = finished`.
+ * Any failure deletes the staging file and leaves the previous dataset file untouched (plan 05 §2
+ * `sources/*`). `recordUnchanged` is the skip path: the release version equals the attached one, so
+ * no file is written and only refresh_log `checked_at` advances (the "release" age basis).
  */
 export interface DatasetPublisher {
   publish(
-    sourceId: string,
+    sourceId: DatasetSourceId,
     version: string,
     releaseUpdatedAt: IsoInstant | null,
     fill: (writer: DatasetWriter) => Promise<PublishStats>,
   ): Promise<PublishOutcome>;
-}
-
-/** One dataset file currently ATTACHed read-only on the server connection. */
-export interface AttachedDataset {
-  readonly source: string;
-  /** SQLite schema name (`ds_nflverse__stats_player_week`). */
-  readonly schema: string;
-  readonly file: string;
-  readonly file_version: string;
-  /** Identity of the attached inode, for the cheap `stat` change check. */
-  readonly inode: number;
-  readonly mtime_ms: number;
-  readonly size_bytes: number;
-  readonly attached_at: IsoInstant;
+  recordUnchanged(sourceId: DatasetSourceId, version: string, checkedAt: IsoInstant): Promise<void>;
+  /** Releases the publisher's connection; idempotent. */
+  close(): void;
 }
 
 /** What a re-attach pass did. */
 export interface ReattachReport {
-  readonly reattached: readonly string[];
-  readonly unchanged: readonly string[];
+  readonly reattached: readonly DatasetSourceId[];
+  readonly unchanged: readonly DatasetSourceId[];
   /** Sources refresh_log lists as current whose file is missing (→ STALE_ONLY with a refresh hint). */
-  readonly missing: readonly string[];
+  readonly missing: readonly DatasetSourceId[];
+  /** Sources detached to free a slot (LRU) because more are current than MAX_ATTACHED allows. */
+  readonly detached: readonly DatasetSourceId[];
   readonly elapsed_ms: number;
 }
 
 // --- repositories (one per table family) -------------------------------------------------------------------
-
-/** One refresh_log row (plan 01 §5.5). */
-export interface RefreshLogRow {
-  readonly source: string;
-  readonly file: string | null;
-  readonly file_version: string | null;
-  readonly release_updated_at: IsoInstant | null;
-  readonly rows: number | null;
-  readonly columns_hash: string | null;
-  readonly started_at: IsoInstant;
-  readonly finished_at: IsoInstant;
-  readonly ok: boolean;
-  /** Fixed-vocabulary error summary (never an upstream body). */
-  readonly error: string | null;
-  /** Last time the release version was checked successfully, even when unchanged (the "release" age basis). */
-  readonly checked_at: IsoInstant;
-}
-
-/** refresh_log (required). */
-export interface RefreshLogRepository {
-  record(row: RefreshLogRow): void;
-  /** The newest successful row per source (what is attached / should be attached). */
-  current(): readonly RefreshLogRow[];
-  latest(source: string): RefreshLogRow | null;
-  /** Consecutive failures since the last success. */
-  consecutiveFailures(source: string): number;
-}
-
-/** A normalised league-settings snapshot (plan 01 §5.2; referenced by the log, never pruned). */
-export interface LeagueSettingsRow {
-  readonly league_key: string;
-  readonly settings_hash: string;
-  readonly scoring: ScoringSettings;
-  readonly slots: RosterSlots;
-  readonly rules: LeagueRules;
-  readonly fetched_at: IsoInstant;
-}
-
-/** A settings health flag (plan 03 §5 rows 19–20; plan 08 §6.3). */
-export interface SettingsFlag {
-  readonly league_key: string;
-  readonly kind: "scoring_mismatch" | "scoring_mismatch_league" | "settings_changed";
-  readonly detail: readonly string[];
-  readonly raised_at: IsoInstant;
-  readonly acknowledged: boolean;
-}
-
-/** league_settings (required). */
-export interface LeagueSettingsRepository {
-  put(row: LeagueSettingsRow): void;
-  byHash(settingsHash: string): LeagueSettingsRow | null;
-  latest(leagueKey: string): LeagueSettingsRow | null;
-  raiseFlag(flag: SettingsFlag): void;
-  openFlags(leagueKey: string): readonly SettingsFlag[];
-}
+//
+// The port interfaces tools read (refresh log, league settings + flags, snapshots, transactions,
+// write journal, store stats) live in src/domain (league/types.ts, analytics/types.ts) so src/mcp can
+// type against them (critic C-10b); they are re-exported above. Required writes return a Promise
+// (critic C-04b): the store retries in BUSY_TIMEOUT_MS steps, YIELDING to the event loop between
+// attempts (setTimeout), for at most REQUIRED_WRITE_BUDGET_MS, then rejects with StoreBusyError — so
+// no single wait blocks the stdio loop longer than one statement or 100 ms (plan 03 §1.2).
 
 /** points_cache (best-effort): league-scored points memo keyed by settings hash + player-week. */
 export interface PointsCacheRepository {
@@ -313,80 +312,9 @@ export interface LimiterStateRepository {
 
 /** job_lock (required): single-flight for refresh jobs across processes. */
 export interface JobLockRepository {
-  /** True when acquired; a lock older than `staleAfterMs` or owned by a dead pid is broken. */
-  acquire(job: string, pid: number, now: IsoInstant, staleAfterMs: number): boolean;
-  release(job: string, pid: number): void;
-}
-
-/** Write-journal states (plan 02 §4.5). Phase W — the table exists from migration 001. */
-export type JournalStatus =
-  | "prepared"
-  | "denied"
-  | "expired"
-  | "voided_precondition"
-  | "sent"
-  | "applied"
-  | "rejected_validation"
-  | "rejected_not_provisioned"
-  | "sent_unknown"
-  | "confirmed_applied"
-  | "confirmed_not_applied";
-
-/** write_journal (required; read-only use in this build: counts for `ff status`). */
-export interface WriteJournalRepository {
-  countByStatus(): Readonly<Partial<Record<JournalStatus, number>>>;
-  oldestPendingAgeSeconds(now: IsoInstant): number | null;
-}
-
-/** A roster snapshot (plan 06 §1.3; `ff://roster/snapshot`). */
-export interface RosterSnapshot {
-  readonly team_key: string;
-  readonly week: Week;
-  readonly taken_at: IsoInstant;
-  readonly roster: Roster;
-}
-
-/** roster_snapshot (required). */
-export interface RosterSnapshotRepository {
-  put(s: RosterSnapshot): void;
-  /** The newest two snapshots (newest first) for diffs. */
-  latestTwo(teamKey: string): readonly RosterSnapshot[];
-}
-
-/** A scoreboard snapshot (pre-week platform win probability, for later calibration — tension T11). */
-export interface ScoreboardSnapshot {
-  readonly league_key: string;
-  readonly week: Week;
-  readonly taken_at: IsoInstant;
-  /** The serialised matchups. */
-  readonly matchups_json: string;
-}
-
-/** scoreboard_snapshot (required). */
-export interface ScoreboardSnapshotRepository {
-  put(s: ScoreboardSnapshot): void;
-  forWeek(leagueKey: string, week: Week): readonly ScoreboardSnapshot[];
-}
-
-/** A free-agent pool snapshot (plan 06 §1.3). */
-export interface FaPoolSnapshot {
-  readonly league_key: string;
-  readonly taken_at: IsoInstant;
-  readonly players: readonly PlatformPlayer[];
-}
-
-/** fa_pool_snapshot (required). */
-export interface FaPoolSnapshotRepository {
-  put(s: FaPoolSnapshot): void;
-  latestTwo(leagueKey: string): readonly FaPoolSnapshot[];
-}
-
-/** transactions_seen (required, append-only): history beyond the platform's "most recent N". */
-export interface TransactionsSeenRepository {
-  /** Appends unseen transactions (dedup by key); returns how many were new. */
-  appendNew(leagueKey: string, txns: readonly Transaction[], seenAt: IsoInstant): number;
-  list(leagueKey: string, since: IsoInstant | null, limit: number): readonly Transaction[];
-  oldestSeen(leagueKey: string): IsoInstant | null;
+  /** Resolves true when acquired; a lock older than `staleAfterMs` or owned by a dead pid is broken. */
+  acquire(job: string, pid: number, now: IsoInstant, staleAfterMs: number): Promise<boolean>;
+  release(job: string, pid: number): Promise<void>;
 }
 
 /** Every repository the store serves, by table family. */
@@ -430,16 +358,6 @@ export interface BackupResult {
   readonly method: "backup_api" | "vacuum_into";
 }
 
-/** Store health for `ff status` / `ff_get_status` (plan 01 §7). */
-export interface StoreStats {
-  readonly path: string;
-  readonly size_bytes: number;
-  readonly schema_version: number;
-  /** Best-effort writes skipped because the lock was busy, since open. */
-  readonly cache_misses_busy: number;
-  readonly attached: readonly AttachedDataset[];
-}
-
 /** An open store (one `DatabaseSync` connection, WAL, busy_timeout 100 ms). */
 export interface Store {
   readonly path: string;
@@ -449,9 +367,13 @@ export interface Store {
   readonly datasets: DatasetReaders;
   /** The crosswalk's roster port, over the attached `nflverse:roster_weekly` file. */
   readonly rosterWeekly: RosterWeeklyReader;
-  /** Currently attached dataset files. */
+  /** Currently attached dataset files (≤ MAX_ATTACHED − RESERVED_ATTACH_SLOTS). */
   attachments(): readonly AttachedDataset[];
-  /** Compares refresh_log / inode+mtime with what is attached and DETACH/ATTACHes what changed. */
+  /**
+   * Compares refresh_log / inode+mtime with what is attached and DETACH/ATTACHes what changed. When
+   * more sources are current than there are slots, datasets attach ON DEMAND at first read and the
+   * least recently used one is detached (critic C-15b) — a reader never fails for want of a slot.
+   */
   reattachIfChanged(): ReattachReport;
   /** A consistent backup to `destPath` (under the process-wide lock). */
   backup(destPath: string): Promise<BackupResult>;
@@ -460,7 +382,18 @@ export interface Store {
   close(): void;
 }
 
-/** Opens stores (the one place that touches `node:sqlite`). */
+/** Options for the refresh process's publisher. */
+export interface PublisherOpenOptions {
+  /** Absolute path of store.sqlite (refresh_log and job_lock live there). */
+  readonly storePath: string;
+  /** Absolute `<cache>/ds/` directory the staging and published files live in. */
+  readonly datasetDir: string;
+  readonly clock: Clock;
+}
+
+/** Opens stores and publishers (the one place that touches `node:sqlite`). */
 export interface StoreFactory {
   open(opts: StoreOpenOptions): Store;
+  /** The refresh-process role (`ff refresh`): a DatasetPublisher; the server never opens one. */
+  openPublisher(opts: PublisherOpenOptions): DatasetPublisher;
 }

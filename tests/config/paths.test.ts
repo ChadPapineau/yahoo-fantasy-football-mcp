@@ -13,6 +13,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -32,6 +33,7 @@ import {
   defaultLeagueFilePath,
   ensureSecureDir,
   expandHome,
+  insecureAncestors,
   isInside,
   packageRoot,
   readSecureFile,
@@ -100,7 +102,7 @@ describe("expandHome / resolveAbsolute", () => {
       expect(err.message).not.toContain("\0");
       expect(err.message).toContain("FF_CACHE_DIR");
       expect(err.detail).not.toContain("/tmp");
-      expect(err.ffCode).toBe("VALIDATION");
+      expect(err.ffCode).toBe("INTERNAL");
     }
   });
 });
@@ -504,5 +506,72 @@ describe("writeSecureFileAtomic (wx temp + fsync + rename, 0600)", () => {
     }).toThrow();
     expect(readdirSync(d)).toEqual(["is-a-dir"]);
     expect(statSync(target).isDirectory()).toBe(true);
+  });
+});
+
+describe("hardening (critic C-20): FIFOs never block; insecure ancestors are refused", () => {
+  it("a FIFO planted at league.yaml is refused as not_regular_file without blocking", () => {
+    const f = path.join(tmp.dir, "league.yaml");
+    execFileSync("mkfifo", [f]);
+    const started = Date.now();
+    expect(refusal(() => readSecureFile(f, { requirePrivate: true }))).toBe("not_regular_file");
+    expect(refusal(() => readSecureFile(f, { requirePrivate: false }))).toBe("not_regular_file");
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+  it("refuses a dir under a world-writable, non-sticky ancestor (it could be swapped)", () => {
+    const shared = path.join(tmp.dir, "shared");
+    mkdirSync(shared);
+    chmodSync(shared, 0o777);
+    const d = path.join(shared, "conf");
+    mkdirSync(d, { mode: 0o700 });
+    expect(insecureAncestors(d)).toEqual([shared]);
+    expect(
+      refusal(() => {
+        ensureSecureDir(d, { create: false });
+      }),
+    ).toBe("insecure_ancestor");
+    // creating beneath it is refused too (after the create, before any use)
+    expect(
+      refusal(() => {
+        ensureSecureDir(path.join(shared, "new", "conf"), { create: true });
+      }),
+    ).toBe("insecure_ancestor");
+  });
+  it("a group-writable ancestor is refused; the sticky bit (like /tmp) makes it safe", () => {
+    const g = path.join(tmp.dir, "grp");
+    mkdirSync(g);
+    chmodSync(g, 0o770);
+    const d = path.join(g, "conf");
+    mkdirSync(d, { mode: 0o700 });
+    expect(
+      refusal(() => {
+        ensureSecureDir(d, { create: false });
+      }),
+    ).toBe("insecure_ancestor");
+    chmodSync(g, 0o1777);
+    expect(insecureAncestors(d)).toEqual([]);
+    expect(
+      refusal(() => {
+        ensureSecureDir(d, { create: false });
+      }),
+    ).toBe("no-throw");
+  });
+  it("a 0755 chain is fine and the dir itself is not counted as its own ancestor", () => {
+    const d = path.join(tmp.dir, "ok");
+    mkdirSync(d, { mode: 0o700 });
+    expect(insecureAncestors(d)).toEqual([]);
+    expect(insecureAncestors("/")).toEqual([]);
+  });
+  it("PathSecurityError is INTERNAL, never VALIDATION (a 0644 league.yaml is not the model's fault)", () => {
+    const f = path.join(tmp.dir, "league.yaml");
+    writeFileSync(f, "x: 1\n");
+    chmodSync(f, 0o644);
+    try {
+      readSecureFile(f, { requirePrivate: true });
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(PathSecurityError);
+      expect((e as PathSecurityError).ffCode).toBe("INTERNAL");
+    }
   });
 });
