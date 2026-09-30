@@ -208,7 +208,7 @@ Phase 1 is one product — `v0.1.0` is tagged when **both** halves are green —
 
 **Trigger.** Yahoo grants read/write for the client id (HANDOFF item 4; 03 §F.18). Until then nothing in this phase is scheduled; the seam is designed (plan 02 §4) and `FF_WRITE_ENABLED` is documented as inert.
 
-**Prerequisites (before `FF_WRITE_ENABLED=1` is supported anywhere)** *(added round 1, OBJ-01)*: (a) the refresh token moves to the Keychain `SecretSource` (plan 01 §11; plan 02 §3.3) with an access prompt; (b) the README states that writes are **unsupported in any reach session** — Claude Code with unrestricted `Bash`, or any session where another MCP server or tool gives the model file or shell access (plan 02 §0, §3.4) — and prints the offered `permissions.deny` set for Claude Code; (c) `ff doctor` #13's Claude Code warning is in place (plan 03 §5).
+**Prerequisites (before `FF_WRITE_ENABLED=1` is supported anywhere)** *(added round 1, OBJ-01)*: (a) the refresh token moves to the Keychain `SecretSource` (plan 01 §11; plan 02 §3.3) — this **removes it from disk and backups**; in a reach session it is a hurdle (`node -e` instead of `cat`), not a proof *(round 2, OBJ-25)*; (b) the README states that writes are **unsupported in any reach session** — Claude Code with unrestricted `Bash`, or any session where another MCP server or tool gives the model file or shell access (plan 02 §0, §3.4) — and prints the offered `permissions.deny` set for Claude Code; (c) `ff doctor` #13's Claude Code warning is in place (plan 03 §5).
 
 **Scope.** `fspt-w` in `ff auth`; plan 02 §4 gate (`PreparedWrite`, ticket, precondition hash, three channels — channel 2 without a pending file, channel 3 TTY-only; journal states); plan 07 §3.F tools; `journal reconcile` job (plan 06 §1.3); `apply` write mode (plan 09 §3.6); Desktop and Code elicitation smoke; `fixtures/yahoo/writes/` recorded from the **first real writes** (plan 05 §3.1 has no write fixtures today — they can only be recorded once writes exist).
 
@@ -222,9 +222,10 @@ Phase 1 is one product — `v0.1.0` is tagged when **both** halves are green —
 - W7 Skills Lane 2 AP-1 and AP-3 pass; every non-`apply` Skill still has zero `ff_commit_*` calls under the injection cases (NC-1, AP-4, SS-4).
 - W8 03 §F items 5, 11, 12 (read-only app's response to PUT/POST, roster PUT partial vs full, the FAAB drop-key typo) are closed with fixtures and their `todo` tests un-skipped.
 - W9 `ff_get_status.capabilities.write` reflects the observed state after the first write; `ff doctor` #13 message updated.
-- W10 *(added round 1, OBJ-01)* Plan 05 §4.3's round-1 rows green: no file written under `<config>/` during channel 2 (`fs` spy); `ff confirm`/`ff auth` on a pipe → exit 2, zero writes; `doctor` #13 warns under `CLAUDECODE=1` + `FF_WRITE_ENABLED=1` and under a two-entry `claude_desktop_config.json` fixture (the sibling-server heuristic, plan 02 A-11); the refresh token is read from the Keychain `SecretSource` and `tokens.json` no longer contains it (grep test).
+- W10 *(added round 1, OBJ-01)* Plan 05 §4.3's round-1 rows green: no file written under `<config>/` during channel 2 (`fs` spy); `ff confirm`/`ff auth` on a pipe → exit 2, zero writes; `doctor` #13 warns under `CLAUDECODE=1` + `FF_WRITE_ENABLED=1` and under a two-entry `claude_desktop_config.json` fixture (the sibling-server heuristic, plan 02 A-11); the refresh token is read from the Keychain `SecretSource` and `tokens.json` no longer contains it (grep test — the off-disk benefit, plan 02 §3.3; hygiene, not a proof against a reach session).
+- W11 *(added round 2, OBJ-25)* **Signed helper — priced, never assumed:** if a stronger claim than "hurdle" is wanted, a separately code-signed helper binary with its own Keychain identity and a user-presence prompt (Touch ID) per read; effort ~S–M; decided at Phase W start and recorded in HANDOFF; no security sentence in plans 01–10 relies on it.
 
-**Exit gate.** W1–W4, W7–W10 in CI; W5–W6 with evidence. Tag a minor.
+**Exit gate.** W1–W4, W7–W10 in CI; W5–W6 with evidence; W11 decided (yes/no) at Phase W start. Tag a minor.
 
 ### 3.5 Phase 4 — Later (M each; unordered until pulled)
 
