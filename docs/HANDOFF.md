@@ -253,6 +253,21 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
    would rather pay for a consensus feed as a baseline/comparator, say so
    (`04` §C, `05` §16 item 12).
 
+9. **A17 needs Chad (manual, ~10 minutes).** The automated half is green: in fixture mode
+   `ff_debug_echo`'s nonce is only in `structuredContent`, and the C10 list tools omit it. The
+   question only a real client answers: does Claude Code, and does Claude Desktop, show the model
+   the `structuredContent` copy as well as the text (two copies per result → plan 07 §5.1's token
+   budgets halve)? Run the server in fixture mode in each client, call `ff_debug_echo`, ask the
+   model whether it can see the nonce; record each answer under "Stack facts" here. Plan 07 §5.1
+   is then re-based on measured tokens per client (its measured chars are already recorded there).
+10. **A15 reading to confirm.** Plan 10 says "every P0 tool < 500 ms". `ff_project_players` for
+    the 16-player fixture roster at the default 4000 sims takes ~830 ms warm (gate measurement); the tests hold it to a
+    pro-rata share of the separate "32 players × 4000 < 3 s" clause (measured 1.4–1.5 s). Literally
+    read, A15 fails for that one tool; under the implementers' reading it passes. Options: accept
+    the reading (amend A15's wording), or default `n_sims` lower for a single-roster call.
+11. `tools/list` under `core` is 19,483 of its 20,000-char, downward-only ceiling (2.6 % headroom):
+    the next tool added to `core` must shrink a schema or go to `full`.
+
 ## Open items
 
 - [x] research waves 1–3 complete and verified (docs 00–06)
@@ -289,3 +304,10 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   independent gate re-ran everything from a clean install — green first time, **1,014 tests**,
   ~99.5 % coverage, CI green. Orchestrator re-verified in a fresh clone outside iCloud and moved
   the build there; added the domain `Math.random`/`Date.now` ban and the conflict-copy guard.
+- 2026-09-30 — **Stage B fixer round 1** (gate RED on the Mac only): the A4a p95 contention test
+  moved to the `process` project (`*.perf.test.ts` rule, partition test); the unit project's hang
+  detector is 30 s (CPU-bound tests hit the 5 s default at load 22–45); a real single-flight race
+  in `ff refresh` fixed (the "unchanged" check re-made under the job lock); the A6 size ledger now
+  reaches the CI job summary and plan 07 §5.1; `ff refresh` prints its schema warnings.
+  `test:coverage` + `check:coverage` green 3/3 in sequence locally at load ≤ 38. A17's manual
+  half and the A15 reading are Chad's (items 9–10 above).
