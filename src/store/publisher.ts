@@ -212,7 +212,7 @@ export function openPublisher(
     db.close();
     throw e;
   }
-  const deps: RepoDeps = { db, writes: new WriteExecutor() };
+  const deps: RepoDeps = { db, writes: new WriteExecutor(undefined, db) };
   const jobLock = jobLockRepository(deps);
   const clock = opts.clock;
   let closed = false;
