@@ -55,6 +55,14 @@ for c in "${changed[@]}"; do
   (( ok )) || { print -u2 "commit-paths: unexpected path in commit: $c — nothing committed"; exit 4; }
 done
 
+# iCloud/Finder conflict copies ("types 2.ts", "coverage 2") must never be committed
+for c in "${changed[@]}"; do
+  base=${c:t}
+  if [[ $base =~ ' [0-9]+(\.[^.]+)*$' ]]; then
+    print -u2 "commit-paths: refusing a conflict-copy name (iCloud/Finder duplicate?): $c — nothing committed"; exit 8
+  fi
+done
+
 files=()
 for c in "${changed[@]}"; do [[ -f $c ]] && files+=("$c"); done
 if (( ${#files} )); then
