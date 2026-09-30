@@ -9,15 +9,62 @@ Off-limits (owned by `ci-bootstrap`, in flight in the same tree): `.github/**`,
 
 ## RESUME HERE
 
-**Round:** 1 (attack). **Status:** plans 01–10 read; notes below. Research
-pass (HANDOFF, research 02–06, 01 verdict table, MCP reference) next; then
-primary-source checks (SDK v2 transitive deps on npm; MCP spec 2026-07-28
-claims; nflverse/ffopportunity currency for 2026).
+**Round:** 1 (attack) — **DONE and pushed.** `docs/plan/adversarial-log.md`
+§ `## Round 1 — objections` holds 23 objections (2 blocking: OBJ-01 gate
+forgeable in Claude Code; OBJ-02 no date/gate/fallback on Yahoo approval + phase
+sizing vs the calendar; 16 significant; 5 marginal), a verification table
+(§1.0), the tensions verdict (§1.3), what was not attacked (§1.4), and the
+staked objection (§1.5 = OBJ-02).
 
-**Next step:** finish the research pass, verify the load-bearing claims listed
-above, then write `docs/plan/adversarial-log.md` § `## Round 1 — objections`
-(table + details, `OBJ-nn` · target · claim · evidence · severity · satisfying
-bar), commit, push, reply with SHA + table + the one objection staked on.
+**Next step (round 2):** wait for the orchestrator to append
+`## Round 1 — defence`. Then: (1) re-read the *revised* plan files (diff them
+against `7663b6a` — `git diff 7663b6a -- docs/plan/0*.md`) and the defence;
+(2) open `## Round 2 — verdicts` with one row per OBJ-01…23:
+withdrawn / conceded-by-defence / pressed + one line why; (3) raise anything
+the revisions broke as OBJ-24+; (4) say explicitly whether the remainder is
+marginal. Do NOT re-litigate items that were answered with evidence. Watch for:
+whether the defence re-verifies fast-xml-parser `processEntities` (OBJ-14's
+[knowledge] half) and the nflverse parquet codec (OBJ-20) — both are cheap to
+settle and I could not reach the sources this session (404s on the paths I
+tried; try `docs/v4, v5` literal dir name in the fast-xml-parser repo, and the
+`nflverse/nflverse-pbp` pipeline scripts for the parquet writer).
+
+**If resuming cold:** `git log --oneline -5 -- docs/plan/adversarial-log.md`
+tells you which rounds have landed; the last `## Round N — …` heading in the
+file tells you whose move it is (`objections`/`verdicts` = mine, `defence` =
+orchestrator's).
+
+**Pushed SHAs:** 97f3085 (scratch start) · ebe848d (reading notes) ·
+round-1 log: see git log (recorded below after push).
+
+## Verification results (2026-09-30, primary sources) — keep for round 2
+
+- SDK v2: `@modelcontextprotocol/server@2.2.0` → `zod ^4.2.0`, `core 2.2.0`;
+  `core` → `zod` only. **Clean.** `@modelcontextprotocol/client@2.2.0` exists
+  (deps jose, cross-spawn, eventsource, pkce-challenge, eventsource-parser,
+  core) and holds `InMemoryTransport.createLinkedPair()` (SDK `docs/testing.md`).
+- `fast-xml-parser@5.11.2` deps: strnum, is-unsafe, xml-naming,
+  fast-xml-builder, @nodable/entities, path-expression-matcher. No install
+  scripts. `processEntities` default NOT re-verified (docs 404 on
+  `docs/v4/2.XMLparseOptions.md`; the `docs/` listing shows entries
+  `v3`, `v4, v5` (sic), `v6`).
+- Node: v22.x docs "Stability: 1.1 – Active development … still experimental";
+  v24.x "1.2 – Release candidate" (v24.15.0). `backup()` v22.16.0 / v23.8.0.
+- mermaid-cli 11.17.0: puppeteer is a **peerDependency** `^23||^24||^25`;
+  12.0.0 same shape (`^25`). puppeteer 25.12.0 `postinstall: node install.mjs`.
+  `.github/workflows/docs.yml` (ci-bootstrap) runs `npx --yes -p …@11.17.0`
+  from the repo root; no `.npmrc` exists yet.
+- GitHub protected branches: "After all required status checks pass, any
+  commits must either be pushed to another branch and then merged or pushed
+  directly to the protected branch."
+- Claude Code hooks: `Elicitation` event; hook may return
+  `{action: accept|decline|cancel, content}`; config in `~/.claude/settings.json`,
+  `.claude/settings.json`, `.claude/settings.local.json`, plugin
+  `hooks/hooks.json`, Skill/subagent frontmatter.
+- hyparquet: native = uncompressed + snappy; others via `hyparquet-compressors`;
+  zero deps. nflverse parquet codec NOT verified (repo paths 404).
+- Claude Code MCP page: fetched truncated; `readOnlyHint` auto-approval (06 U-1)
+  still unresolved.
 
 **If resuming cold:** check whether `docs/plan/adversarial-log.md` exists on
 `origin/main`. If it does, round 1 is at least partly landed — read it and the
