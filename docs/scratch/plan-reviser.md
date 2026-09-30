@@ -20,7 +20,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 | 5 | OBJ-09 / plans 01, 03, 04, 06 (Node >= 24.15, RC cite, CI matrix, fnm) | [x] | b5c8968 |
 | 6 | OBJ-14 / plans 02, 04 (+05, 10 A18) (fast-xml-parser flags, allow-list tree, pin-time rule) | [x] | 1cc2dfc |
 | 7 | OBJ-06/07/15 / plans 01, 02, 07 (+05, 09, 10) (untrusted_fields labelling, wrappers, structuredContent, rec-log source) | [x] | 0b4489a |
-| 8 | OBJ-04/05 / plans 07, 10 (Dist.basis, A7, mean default, delta_pwin, E13, n≥30 table, params → Phase 3) | [ ] | — |
+| 8 | OBJ-04/05 / plans 07, 10 (+08, 09) (Dist.basis, A7, mean default, delta_pwin, E13, n≥30 table, params → Phase 3) | [x] | e04efde |
 | 9 | OBJ-10/11/16/17/19/22/23 / plans 01, 02, 03, 05, 07, 08 | [ ] | — |
 | 10 | OBJ-12 / docs.yml + plan 04 §4.2 + plan 10 Z3 — PROVE GREEN | [ ] | — |
 | 11 | OBJ-13 / plan 04 §5, plan 10 Z1 | [ ] | — |
@@ -35,6 +35,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 (none yet)
 
 ### Choices I had to make
+- G8: the §2.1 per-week n estimates (player-weeks ~150–190/wk, designations ~8–15/wk, swaps ~3–6/wk …) are mine, tagged [A-7]; E13's `n_by_metric[]` corrects them. The coarse `delta_pwin` shape is `{ sign, band: small|medium|large }` and `coin_flip` widens to `|ΔP(win)| < 0.04` in `position_cv` mode (defence said 'widened', no number).
 - G7: `meta.untrusted_fields[]` entries become `{ path, source }` objects (were bare path strings) — the minimum that lets the OBJ-15 ruling ('listed … with `source: "store.recommendation_log"`') be true. The defence scoped bare strings to *player names* only; dataset text (nflverse `desc`, depth-chart labels, Sleeper notes) stays wrapped.
 - G7: plan 02 §6.3's verbatim sentence gained 'and the fields listed in `meta.untrusted_fields`' + 'player names, earlier recommendations' so it covers the path-listed classes; plan 09 carries the same wording.
 - G7: the wrappers-on/off eval switch is described as 'a fixture-mode-only switch' (no env-var name invented); `ff_debug_echo` is named G3 in plan 07 §3.G and never appears in the production expected-tools lists.
