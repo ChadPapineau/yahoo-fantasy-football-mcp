@@ -1,0 +1,17 @@
+{
+  // Emit src/ -> dist/ for the published binary (docs/plan/04 §1, §3). Tests, fixtures and
+  // scripts never reach dist/.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "allowJs": false,
+    "rootDir": "src",
+    "outDir": "dist",
+    "sourceMap": true,
+    "declaration": false,
+    "removeComments": false,
+    "newLine": "lf"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "coverage", "tests", "fixtures", "scripts"]
+}
