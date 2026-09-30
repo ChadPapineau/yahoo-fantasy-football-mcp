@@ -91,7 +91,50 @@ describe("duplicates and null keys", () => {
     ]);
   });
 
-  it("a stats row without player_id is neither stored nor aggregated", async () => {
+  it("a team-level row (no player_id) credits the team defence, nothing else (2026 BUF w2 safety)", async () => {
+    const { dir, w } = env();
+    await statsPlayerWeekSource.publish(
+      [tempFile(dir, "p.parquet", await rewrite(STATS), 2026)],
+      w,
+    );
+    const buf = w.all(
+      "SELECT def_safeties, player_rows FROM ds_team_defense_week WHERE team = 'BUF' AND week = 2",
+    )[0];
+    const rawRows = (await fixtureRows(STATS)).filter((r) => r.team === "BUF" && r.week === 2);
+    const credited = (rs: readonly Row[], c: string) =>
+      rs.reduce((a, r) => a + (typeof r[c] === "number" ? r[c] : 0), 0);
+    const playerRows = rawRows.filter((r) => r.player_id !== null);
+    const teamRows = rawRows.filter((r) => r.player_id === null);
+    expect(teamRows).toHaveLength(1);
+    expect(credited(teamRows, "def_safeties")).toBe(1); // the unattributed team safety
+    expect(buf?.def_safeties).toBe(credited(playerRows, "def_safeties") + 1);
+    expect(buf?.player_rows).toBe(playerRows.length);
+    // a hostile team row: defence credits count, its offence yardage and a bogus opponent do not
+    const bytes = await rewrite(STATS, {
+      rows: (rows) =>
+        rows.map((r) =>
+          r.player_id === null && r.team === "BUF"
+            ? { ...r, def_interceptions: 2, passing_yards: 999, rushing_yards: 999 }
+            : r,
+        ),
+    });
+    const e2 = env();
+    await statsPlayerWeekSource.publish([tempFile(e2.dir, "q.parquet", bytes, 2026)], e2.w);
+    const det = e2.w.all(
+      "SELECT opp_passing_yards, opp_rushing_yards FROM ds_team_defense_week WHERE team = 'DET' AND week = 2",
+    )[0];
+    const offence = e2.w.all(
+      "SELECT SUM(passing_yards) AS p, SUM(rushing_yards) AS r FROM ds_player_week WHERE team = 'BUF' AND week = 2",
+    )[0];
+    expect(det?.opp_passing_yards).toBe(offence?.p);
+    expect(det?.opp_rushing_yards).toBe(offence?.r);
+    const buf2 = e2.w.all(
+      "SELECT def_interceptions FROM ds_team_defense_week WHERE team = 'BUF' AND week = 2",
+    )[0];
+    expect(buf2?.def_interceptions).toBe(credited(playerRows, "def_interceptions") + 2);
+  });
+
+  it("a player row whose player_id is blanked is not stored; its offence yardage is not aggregated", async () => {
     const { dir, w } = env();
     const bytes = await rewrite(STATS, {
       rows: (rows) =>

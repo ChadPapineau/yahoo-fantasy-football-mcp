@@ -1,6 +1,9 @@
 // vitest.config.ts — test runner + coverage gate. Implements docs/plan/05 §0 T1, §1 (the pyramid:
 // tests/**) and §7 (coverage thresholds, read from scripts/ci/coverage-gate.json so vitest and
-// scripts/ci/check-coverage.mjs can never disagree).
+// scripts/ci/check-coverage.mjs can never disagree). Two projects: `unit` (everything in-process —
+// `npm test` / `npm run test:coverage`) and `process` (tests/process + tests/e2e: real child
+// processes, the built dist/, wall-clock latency — `npm run test:process`, the CI `process` job,
+// plan 05 §4.2). Child processes add no coverage, so the gate is measured on `unit` alone.
 import { readFileSync } from "node:fs";
 import { defineConfig } from "vitest/config";
 
@@ -18,12 +21,29 @@ const gate = JSON.parse(
 // implies every file under it does; check-coverage.mjs re-checks per file from the summary.
 const perFile = Object.fromEntries(gate.perFile100.map((g) => [g, { lines: 100, branches: 100 }]));
 
+/** The process-level suites (plan 05 §4.2): spawned servers and the built package. */
+const PROCESS_TESTS = ["tests/process/**/*.test.ts", "tests/e2e/**/*.test.ts"];
+
 export default defineConfig({
   test: {
-    include: ["tests/**/*.test.ts"],
     environment: "node",
     pool: "forks",
     restoreMocks: true,
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "unit",
+          include: ["tests/**/*.test.ts"],
+          exclude: [...PROCESS_TESTS, "**/node_modules/**"],
+        },
+      },
+      {
+        extends: true,
+        // one file at a time: process tests measure wall-clock latency and spawn servers
+        test: { name: "process", include: PROCESS_TESTS, fileParallelism: false },
+      },
+    ],
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],

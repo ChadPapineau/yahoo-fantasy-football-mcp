@@ -1,7 +1,9 @@
 // team-defense.ts — `ds_team_defense_week` derived at load from the stats_player_week rows (tables.ts
 // DS_TEAM_DEFENSE_WEEK: SUM of TEAM_DEFENSE_SUM_COLUMNS per season/week/team over the rows accepted
 // into ds_player_week, plus the opponent offence's passing/sack/rushing yards from the opponent's
-// rows in the same game; plan 08 §3.2 dst_* inputs). Memory: one accumulator per team-week.
+// rows in the same game; plan 08 §3.2 dst_* inputs). A team-level row (no player_id — nflverse's
+// unattributed team credits, e.g. the BUF week-2 2026 safety) adds its TEAM_DEFENSE_SUM_COLUMNS only:
+// no player count and no offence yardage. Memory: one accumulator per team-week.
 import { TEAM_DEFENSE_SUM_COLUMNS } from "../../store/datasets/tables.js";
 import { asInt, asReal, asText } from "./rows.js";
 
@@ -32,6 +34,19 @@ export class TeamDefenseAggregator {
 
   /** Adds one accepted player row (raw upstream values). */
   add(raw: Readonly<Record<string, unknown>>): void {
+    this.accumulate(raw, true);
+  }
+
+  /**
+   * Adds a team-level row (no player_id): its team-defence credits (a safety, a block, a return TD
+   * nflverse could not attribute to a player) count for the team; it is not a player row and its
+   * offence yardage is not the opponent's yards allowed.
+   */
+  addTeamRow(raw: Readonly<Record<string, unknown>>): void {
+    this.accumulate(raw, false);
+  }
+
+  private accumulate(raw: Readonly<Record<string, unknown>>, player: boolean): void {
     const season = asInt(raw.season);
     const week = asInt(raw.week);
     const team = asText(raw.team);
@@ -54,7 +69,7 @@ export class TeamDefenseAggregator {
       };
       this.groups.set(k, acc);
     }
-    acc.rows++;
+    if (player) acc.rows++;
     for (const f of ["season_type", "opponent_team", "game_id"] as const) {
       const v = asText(raw[f]);
       if (v === null) continue;
@@ -63,6 +78,7 @@ export class TeamDefenseAggregator {
     }
     for (const c of TEAM_DEFENSE_SUM_COLUMNS)
       acc.sums[c] = (acc.sums[c] ?? 0) + (asReal(raw[c]) ?? 0);
+    if (!player) return;
     acc.pass += asReal(raw.passing_yards) ?? 0;
     acc.sackYds += asReal(raw.sack_yards_lost) ?? 0;
     acc.rush += asReal(raw.rushing_yards) ?? 0;

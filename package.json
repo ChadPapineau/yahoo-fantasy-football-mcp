@@ -24,13 +24,18 @@
     "lint": "eslint --max-warnings=0 .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "test": "vitest run --project unit",
+    "test:coverage": "vitest run --project unit --coverage",
+    "test:process": "vitest run --project process",
+    "test:all": "vitest run",
     "check:no-scripts": "node scripts/ci/check-no-scripts.mjs",
     "check:licenses": "node scripts/ci/check-licenses.mjs",
     "check:runtime-tree": "node scripts/ci/check-runtime-tree.mjs",
     "check:coverage": "node scripts/ci/check-coverage.mjs",
-    "pack:scan": "node scripts/ci/scan-tarball.mjs"
+    "pack:scan": "node scripts/ci/scan-tarball.mjs",
+    "smoke": "node tests/smoke/run-smoke.mjs",
+    "build:skills": "node scripts/skills/build-skills.mjs",
+    "check:skills": "node scripts/skills/build-skills.mjs --check && node scripts/skills/check-skills.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.2.0",

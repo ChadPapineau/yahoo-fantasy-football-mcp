@@ -1,8 +1,9 @@
 // stats-player-week.ts — `nflverse:stats_player_week` (plan 08 §3.2 the Phase-1 stat source; plan
 // 10 §3.1a): `stats_player/stats_player_week_{season}.parquet` → `ds_player_week` (identity +
 // PLAYER_WEEK_STAT_COLUMNS verbatim) and `ds_team_defense_week` aggregated from the same rows
-// (team-defence DT lines; tables.ts DS_TEAM_DEFENSE_WEEK). Rows without a player_id (all-zero team
-// placeholders, 3 in 2026) are dropped and are not aggregated.
+// (team-defence DT lines; tables.ts DS_TEAM_DEFENSE_WEEK). Rows without a player_id (team-level rows,
+// 3 in 2026 — one carries BUF's week-2 safety) are not stored as players, but their team-defence
+// credits are aggregated (TeamDefenseAggregator.addTeamRow).
 import {
   DS_PLAYER_WEEK,
   DS_TEAM_DEFENSE_WEEK,
@@ -11,7 +12,7 @@ import {
 import type { DataSource } from "../source.js";
 import { eachRow, inFileSeason, makeNflverseSource } from "./base.js";
 import { unmappedStatColumns } from "./columns.js";
-import { TableLoader, asInt, buildRow } from "./rows.js";
+import { TableLoader, asInt, asText, buildRow } from "./rows.js";
 import { TeamDefenseAggregator } from "./team-defense.js";
 
 /** The stored stat columns toStatLine does not read (usage shares, attempts, fantasy points, …). */
@@ -31,6 +32,7 @@ export const statsPlayerWeekSource: DataSource = makeNflverseSource({
     await eachRow("nflverse:stats_player_week", files, (raw, file) => {
       if (!inFileSeason(players, asInt(raw.season), file)) return;
       if (players.add(buildRow(DS_PLAYER_WEEK, raw))) agg.add(raw);
+      else if (asText(raw.player_id) === null) agg.addTeamRow(raw);
     });
     for (const row of agg.rows()) defense.add(row);
     const warnings =
