@@ -11,8 +11,8 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | repo-security-auditor | a57af5ca8474df500 | 1 | ✅ done (SHAs verified on origin; leak claims spot-checked in clones) | `docs/research/01-repo-security-audit.md`, `docs/research/02-prior-art-lessons.md`, `docs/scratch/repo-security-auditor.md` | `fb69384` | — |
 | yahoo-api-specialist | a38988c557adbd317 | 1 | ✅ done (SHAs verified; read-only/write-unavailable claim verified on sports.yahoo.com/developer/access) | `docs/research/03-yahoo-api.md`, `docs/scratch/yahoo-api-specialist.md` | `473a6d9` | — |
 | data-source-evaluator | a3b161a00df32916a | 2 | 🟢 running | `docs/research/04-data-sources.md`, `docs/scratch/data-source-evaluator.md` | — | `docs/scratch/data-source-evaluator.md` §RESUME HERE |
-| fantasy-strategy-analyst | a370e42955935355b | 2 | 🟢 running | `docs/research/05-strategy-and-analytics.md`, `docs/scratch/fantasy-strategy-analyst.md` | — | `docs/scratch/fantasy-strategy-analyst.md` §RESUME HERE |
-| skills-mcp-researcher | — | 3 | ⚪ not started | `docs/research/06-skills-and-mcp-design.md`, `docs/scratch/skills-mcp-researcher.md` | — | brief: `docs/scratch/briefs/skills-mcp-researcher.md` |
+| fantasy-strategy-analyst | a370e42955935355b | 2 | ✅ done (SHAs verified; Questionable-tag 71% claim spot-checked at source) | `docs/research/05-strategy-and-analytics.md`, `docs/scratch/fantasy-strategy-analyst.md` | `d9bd716` | — |
+| skills-mcp-researcher | a5edf2189cef8e218 | 3 | 🟢 running | `docs/research/06-skills-and-mcp-design.md`, `docs/scratch/skills-mcp-researcher.md` | — | `docs/scratch/skills-mcp-researcher.md` §RESUME HERE |
 | architecture-planner-core | — | 3 | ⚪ not started | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | — | brief: `docs/scratch/briefs/architecture-planner-core.md` |
 | product-planner | — | 4 | ⚪ not started | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | — | brief: `docs/scratch/briefs/product-planner.md` |
 | devils-advocate | — | 5 | ⚪ not started | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | brief: `docs/scratch/briefs/devils-advocate.md` |
@@ -36,3 +36,8 @@ only if the ID is gone.
   Orchestrator spot-checked both credential-leak claims in the scratch clones
   (file names only): confirmed.
 - 2026-09-29 — wave 2 spawned: `data-source-evaluator`, `fantasy-strategy-analyst`.
+- 2026-09-29 — `fantasy-strategy-analyst` ✅ (`c0763f9`…`d9bd716`), 1,394 lines.
+  Orchestrator spot-checked the Questionable-tag base rate at its source
+  (Footballguys Injury Index): 71 % played, Doubtful 5.9 % — confirmed.
+- 2026-09-29 — wave 3 (first slot) spawned: `skills-mcp-researcher`.
+  `architecture-planner-core` waits for `04-data-sources.md`.
