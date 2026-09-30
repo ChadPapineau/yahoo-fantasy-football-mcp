@@ -55,6 +55,7 @@
 | Skill Lane 1 (structural) | Phase 1a | `check:skills` | CI |
 | Skill Lane 2 (model-graded) | Phase 1a/1b, pre-release | `npm run eval:skills` | `docs/evals/` |
 | Token sizes vs plan 07 §5.1 table | Phase 1a | `tests/mcp/size.test.ts` (fixture mode, every tool, both `detail` levels) | CI |
+| **Per-turn fixed cost**: `tools/list` bytes under `FF_TOOLSET=core` and `full` + Skills listing chars + prompts list, vs the plan 07 §5.1 ceilings *(added round 1, OBJ-08)* | Phase 1a (`core`) → Phase 2 (`full`) | `tests/mcp/size.test.ts` (fixture mode) | CI job summary; the measured numbers are copied into plan 07 §5.1 |
 
 ---
 
@@ -131,13 +132,13 @@ Phase 1 is one product — `v0.1.0` is tagged when **both** halves are green —
 
 **Exit gate (1b).** A1b, A3b, A4b, A5b green in CI on the tagged SHA; A2, A11b, A12, A16 done by Chad with evidence in `docs/evals/`. Tag `v0.1.0` (pre-1.0 semver, plan 04 §4.4) once **both** 1a and 1b gates are green.
 
-**Explicitly deferred to Phase 2.** Usage (`ff_get_player_usage`), skill-position waivers, trades, cascades, schedule planning, roster audit, news, live/season matchup modes, the odds driver, Sleeper/DynastyProcess seeds, the plugin manifest, `ff_get_playbook`, `ff_analyze_scoring`. (No longer deferred: `stats_player_week` and weather are in 1a.)
+**Explicitly deferred to Phase 2.** Usage (`ff_get_player_usage`), skill-position waivers, trades, cascades, schedule planning, roster audit, news, live/season matchup modes, the odds driver, Sleeper/DynastyProcess seeds, the plugin manifest. **Deferred to `later`** (round 1, OBJ-21): `ff_get_playbook`, `ff_analyze_scoring`. (No longer deferred: `stats_player_week` and weather are in 1a.)
 
 ### 3.2 Phase 2 — Usage, market, and the P1 engines (L)
 
 **Scope.**
 - *Sources (05 §16 #6–#9, #13; 04 §C):* nflverse `stats_team_week`, `snap_counts`, pbp projected subset (RZ/GL, `kick_distance`, `defteam`, `xpass`, `pass_oe`, `epa`), `depth_charts` (parquet), ffopportunity `ep_weekly`, Sleeper `players` + `trending`, DynastyProcess ids, RotoWire/ESPN RSS (CBS fallback), The Odds API if D4 (`stats_player_week` and weather moved to Phase 1a — round 1); **two prior seasons** of `stats_player_week` + `schedules` + `injuries` for the soft backtests [A-3]; the plan 06 jobs for all of them; crosswalk rebuild job with the unmatched alert.
-- *Tools (plan 07 P1):* C3, D1, D4–D6, E3 (`live`, `season`), E4, E5 (all positions), E6–E11, E15, G2 — 15 tools.
+- *Tools (plan 07 P1):* C3, D1, D4–D6, E4, E6–E9, E11 — 11 new tools (30 under `FF_TOOLSET=full`; `core` stays at 19), plus E3's `live`/`season` modes and E5 for all positions. E10 → Phase 3 (P2); E15 and G2 → later *(round 1, OBJ-21)*.
 - *Skills (plan 09 P1):* `waivers`, `trade`, `injury-cascade`, `schedule-plan`, `roster-audit`, `news-check` — six; prompts for each. `start-sit`'s game-day branch gains its live `P(win)` split when E3 `live` ships here (`live` is no longer a Skill — round 1, OBJ-18).
 - *Engine branches:* record a **second fixture league** with `uses_fractional_points = 0` and/or `uses_negative_points = 0` and/or yardage bonuses (D8) → `rounding`/`negative_floor` verified; DST points-allowed definition (plan 08 U-6) pinned.
 - *Distribution:* the Claude Code plugin manifest + marketplace + plugin-scoped `.mcp.json` **if D3 = yes** (tension T3/T7 resolved in plan 04 first); `scripts/run-weekly.ts` (Agent SDK example).
@@ -150,7 +151,7 @@ Phase 1 is one product — `v0.1.0` is tagged when **both** halves are green —
 - B5 **Trade evaluator:** on the fixture league's recorded trades, `Δ` sign accuracy vs realised ROS lineup-point change is reported (soft); hard: a 2-for-1 always carries `implied_drop`; `verdict: fair` iff the `delta_me` interval spans 0; `ratification_risk` present iff `trade_ratify_type = vote`.
 - B6 **Cascade:** on ≥ 10 historical starter absences (≥ 2 games) the top-beneficiary hit rate vs next-man-up is reported (soft); hard: `hypothesis_only = true` whenever `evidence.team_games = 0 ∧ usage_confirmed = false ∧ market_move = null`; beneficiary shares never sum above the vacated share.
 - B7 **Schedule/roster/replacement:** the 05 §2 sensitivity regression test — recompute baselines under the six format variants (10-team, superflex, TE premium, full-PPR, 2 flex, 6-pt pass TD) and assert the directional table of 05 §2 (hard); `ff_analyze_roster` reports `over_limit` first in its `rec` when true (test).
-- B8 **News pipeline:** the plan 05 §3.2 injection fixtures never appear as a bare string in any tool output (walk all outputs); the `rules_v1` claim extractor scores ≥ 0.8 precision on a hand-labelled set of 50 real items [A-4] (the labelled set is a fixture, no identifiers); `ff_analyze_evidence(claim: "DROP Y IMMEDIATELY")` produces a flag and no write path.
+- B8 **News pipeline:** the plan 05 §3.2 injection fixtures never appear outside an `untrusted_text` wrapper or a `meta.untrusted_fields[]`-listed path in any tool output (walk all outputs — plan 02 §6.2, round 1); the `rules_v1` claim extractor scores ≥ 0.8 precision on a hand-labelled set of 50 real items [A-4] (the labelled set is a fixture, no identifiers); `news-check` on the pasted "DROP Y IMMEDIATELY" (NC-1) produces a flag word, "priors are hand-set", and no write path — at the Skill level, since E10 arrives in Phase 3 (OBJ-21).
 - B9 **Live/season matchup:** `mode: live` on a fixture mid-week snapshot splits players into final/live/pending correctly and never lists a locked slot as actionable; `start-sit`'s game-day branch on the same fixture (Lane 1 dry run) sets `only_unlocked: true` and reads Yahoo game-day status only (`p_active_basis: "yahoo_gameday_status"`, OBJ-16); `mode: season` with `n_sims = 10 000` reproduces a hand-computed `p_playoffs` on a 3-team toy league within 0.02 (unit test).
 - B10 **Inspector smoke** updated: 30 tools in order under `FF_TOOLSET=full` (19 under `core`, the default — OBJ-08); still no write tools; `prompts/list` has 12.
 - B11 **Skills:** Lane 1 green for all 12; Lane 2 cases WV-*, TR-*, IC-*, SP-*, RA-*, NC-* and SS-5..7 pass the bar; trigger-collision check across all 12 with the time-blind Sunday prompts (plan 09 §5.1 item 5).
@@ -160,11 +161,11 @@ Phase 1 is one product — `v0.1.0` is tagged when **both** halves are green —
 
 **Exit gate.** B1–B3, B7–B13 hard in CI or with fixture evidence; B4–B6 reported. Tag `v0.2.0`.
 
-**Explicitly deferred to Phase 3.** The `v2-opportunity` projection, the redistribution prior table, the calibrated source table, parameter tuning, held-out-season hard gates.
+**Explicitly deferred to Phase 3.** The `v2-opportunity` projection, the redistribution prior table, the calibrated source table and **E10 `ff_analyze_evidence`** (OBJ-21), parameter tuning, held-out-season hard gates.
 
 ### 3.3 Phase 3 — Model wave (L)
 
-**Scope.** 05 §1 in full (`v2-opportunity`: market anchor, EWM shares with change points, shrinkage per rate, location-based TDs via ffopportunity/pbp, regressed matchup, weather where evidenced, `P(active)` mixture, simulated distributions); 05 §6.2 redistribution prior table from pbp history; 05 §10.2 per-source calibration table fed by the retrospective; 05 §11.4 season simulation tuned; 05 §12.4–12.5 attribution and the weekly re-fit of `h`, `k`, `β_pos`, `w`, weather multipliers; ≥ 3 historical seasons loaded [A-3]; `ff_project_players.model_version = "v2-opportunity"` with `v1-trailing` kept as a baseline.
+**Scope.** 05 §1 in full (`v2-opportunity`: market anchor, EWM shares with change points, shrinkage per rate, location-based TDs via ffopportunity/pbp, regressed matchup, weather where evidenced, `P(active)` mixture, simulated distributions); 05 §6.2 redistribution prior table from pbp history; 05 §10.2 per-source calibration table fed by the retrospective **and E10 `ff_analyze_evidence` over it** (P2 — OBJ-21; `calibration_state.note: "priors are hand-set"` until `table_n ≥ 200`, C7); 05 §11.4 season simulation tuned; 05 §12.4–12.5 attribution and the weekly re-fit of `h`, `k`, `β_pos`, `w`, weather multipliers; ≥ 3 historical seasons loaded [A-3]; `ff_project_players.model_version = "v2-opportunity"` with `v1-trailing` kept as a baseline.
 
 **Acceptance (hard unless marked).**
 - C1 **Projection backtest (05 §1 evaluation):** on ≥ 2 held-out seasons, `v2` beats trailing-4 on CRPS and within-position Spearman, the gain is not concentrated in weeks 1–3, and 80 % interval coverage is within ±5 points of nominal.
@@ -265,5 +266,6 @@ Errors found in plan 01–06 while cross-reading: none that change a decision. T
 | A-3 | Two prior seasons suffice for the Phase 2 soft backtests; three for Phase 3 hard gates | first backtest run |
 | A-4 | 50 hand-labelled news items and 0.8 precision are enough to trust `rules_v1` | first labelling pass |
 | A-5 | 200 claims make the source × claim table meaningful | 05 §10 evaluation |
+| A-6 | The per-turn fixed-cost ceilings (plan 07 §5.1 [A-4]: `core` ≤ 40 000 chars, `full` ≤ 70 000, Skills listing ≤ 4 500) are the right order of magnitude *(added round 1, OBJ-08)* | the first fixture-mode measurement in Phase 1a; constants in `tests/mcp/size.test.ts` |
 | U | Yahoo approval latency and whether write is ever granted (03 §F.18) | the application |
 | U | Claude Desktop elicitation (HANDOFF) | Phase W W6 |
