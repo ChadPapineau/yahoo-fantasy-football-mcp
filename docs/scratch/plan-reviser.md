@@ -15,7 +15,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 | R | Read: adversarial-log (all), plan 10 §4, plans 01–10, HANDOFF, docs.yml | [x] | — |
 | 1 | OBJ-02 / plan 10 (Phase 1a/1b split, D0, X1/X2, EV para) + plan 01 §8 providers (brief says §3; seam is §8); OBJ-03 stats_player_week → 1a (plan 07 E1, plan 08 §3.2) | [x] | 59d0d99 |
 | 2 | OBJ-01 / plan 02 (§0 rule, §1, §4.2 per-client column, §8 #2/#5, S3/S6) + "cannot"/"never" audit (S5, §7 qualified; §6.2 "no code path" waits for G7) | [x] | d5f7934 |
-| 3 | OBJ-18 / plan 09 (`live` → `start-sit` branch; 12 Skills) + xrefs in 07/10 | [ ] | — |
+| 3 | OBJ-18 / plan 09 (`live` → `start-sit` branch; 12 Skills) + xrefs in 07/10 | [x] | 22b5553 |
 | 4 | OBJ-08 + OBJ-21 / plans 07, 10 (`FF_TOOLSET`, outputSchema, E15/E10/G2, ledger, Skill desc ≤350) | [ ] | — |
 | 5 | OBJ-09 / plans 01, 03, 04 (Node >= 24.15, RC cite, CI matrix, fnm) | [ ] | — |
 | 6 | OBJ-14 / plans 02, 04 (fast-xml-parser flags, allow-list tree, pin-time rule) | [ ] | — |
