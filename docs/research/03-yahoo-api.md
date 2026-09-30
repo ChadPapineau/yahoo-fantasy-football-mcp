@@ -236,7 +236,7 @@ Sub-resources chainable on the collection: `/stats;type=week;week=N`, `/stats;ty
 
 Stat categories are identified by integer `stat_id`. Two places carry them: the game-wide universe `game/nfl/stat_categories` ("Detailed description of all available stat categories for the game") and, per league, `league/{league_key}/settings` → `stat_categories.stats[]` (the categories this league tracks) and `stat_modifiers.stats[]` (the point value per unit) [V-official S-DOCS]. Per-stat fields: `stat_id, enabled, name, display_name, sort_order, position_type, stat_position_types[{position_type, is_only_display_stat}]`, and (yfpy) `abbr, group, is_excluded_from_display, bonuses[{target, points}]` [V-community S-YFPY `Stat`, `Bonus`].
 
-**NFL stat ids from Yahoo's official settings sample** [V-official S-DOCS, `league/{league_key}/settings` sample, a public league with default scoring]. The modifier column is that sample league's value (it happens to be half-PPR, 4-pt pass TD, −1 INT, −2 fumble lost — i.e. the same shape as Chad's league — but **the product must always read the league's own `stat_modifiers`**):
+**NFL stat ids from Yahoo's official settings sample** [V-official S-DOCS, `league/{league_key}/settings` sample, a public league with default scoring]. The modifier column is that sample league's value (it happens to be half-PPR, 4-pt pass TD, −1 INT, −2 fumble lost — i.e. the same shape as the validation league described in the brief — but **the product must always read the league's own `stat_modifiers`**):
 
 | stat_id | name | display | pos | modifier |
 |---|---|---|---|---|
