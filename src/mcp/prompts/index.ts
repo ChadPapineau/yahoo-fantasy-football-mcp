@@ -36,7 +36,7 @@ export const PROMPTS = Object.freeze([
   },
 ]);
 
-/** The prompt's user text: the rule, the Skill body, and the arguments as plain key=value. */
+/** The prompt's user text: the rule (once), the Skill body, and the arguments as plain key=value. */
 export function promptText(
   texts: ServerTexts,
   skill: "start_sit" | "stream" | "retro",
@@ -48,7 +48,9 @@ export function promptText(
     .filter((e): e is [string, string] => typeof e[1] === "string")
     .map(([k, v]) => `${k}=${v}`)
     .join(" ");
-  return `${UNTRUSTED_TEXT_RULE}\n\n${body.trim()}${argLine === "" ? "" : `\n\nArguments: ${argLine}`}\n`;
+  // the Skills carry the sentence verbatim in their guardrails (plan 09 §2): state it once either way
+  const head = body.includes(UNTRUSTED_TEXT_RULE) ? "" : `${UNTRUSTED_TEXT_RULE}\n\n`;
+  return `${head}${body.trim()}${argLine === "" ? "" : `\n\nArguments: ${argLine}`}\n`;
 }
 
 /** Registers the three Phase-1a prompts. */
