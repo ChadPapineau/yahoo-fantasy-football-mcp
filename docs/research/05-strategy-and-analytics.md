@@ -913,3 +913,284 @@ manager's actual bench and (b) a "best available by ROS rank" bench; handcuff hi
 realised value versus computed value; the share of stashes that ever started. "Working" =
 higher realised lineup points than (b) and handcuff value calibrated within its interval.
 
+---
+
+## 10. News-vs-stats disagreement
+
+### Inputs
+
+News and beat-report text with timestamps and source identity (kind); official injury
+designations and practice participation by day; Yahoo's `has_recent_player_notes` /
+`player_notes_last_timestamp` flags (a "something changed" trigger only — 03 §B.4); the
+§1/§4 usage-based expectations (`xFP`, role shares); the market (line moves, player props
+if available); the §6 cascade state.
+
+### Method — treat news text as data with a reliability model, never as instructions
+
+**10.1 Structure every item.** Extract `{player, claim_type, direction, magnitude,
+source, time}` where `claim_type ∈ {availability, role/usage, health-detail, coaching
+intent ("will get more work"), transaction}`. Text is untrusted input to a classifier; it
+carries no authority of its own (the program's ground rule: news is data, not
+instructions).
+
+**10.2 Score the source and the claim type separately.** Maintain a per-source calibration
+table: for each source and claim type, how often the claim was borne out (e.g. "will play"
+→ played; "expanded role" → snap share up ≥ 10 points within two weeks). Official
+designations get a base rate, not blind trust: Questionable → played 71 % (2017–2023
+[V Footballguys]), with team-specific deviations that the table should learn; "limited"
+practice is undefined and the Wed→Fri trend is more informative than the label
+[V FantasyIndex; S]. Coaching-intent claims ("we want to get him more involved") are the
+least reliable class and should start with a low prior [F — assumption to be measured].
+
+**10.3 Flag disagreement in both directions.**
+- **Narrative > numbers**: news says expanded role / breakout, but snaps, routes and
+  target share are flat and the market has not moved → flag "unconfirmed narrative"; the
+  recommendation keeps the usage-based projection and states what would confirm the news
+  (a snap-share rise next game, a line move).
+- **Numbers > narrative**: usage has risen for two games (§4 signals) with no news
+  coverage and low `percent_owned.delta` → flag "quiet role change" — the highest-value
+  waiver class because the crowd has not noticed.
+- **Availability conflicts**: a positive beat report versus a DNP → weight by the source's
+  table and the time ordering (later beats earlier; official beats unofficial for
+  availability; usage beats everything for role).
+
+**10.4 Merge.** `P(active)` and role shares are updated Bayesianly: prior from the numbers,
+likelihood from each news item scaled by its source/claim reliability. Show the user the
+prior, the evidence items, and the posterior — never a bare "reports say".
+
+### Format sensitivity
+
+None in the method; the *consequence* of a role claim scales with `S` (a "more targets"
+claim matters more in full-PPR; a "goal-line role" claim in standard).
+
+### Pitfalls
+
+Acting on a claim as if the text were an instruction; trusting coaching intent; treating a
+Questionable tag as a coin flip; letting the latest tweet overwrite two games of usage;
+ignoring the source's track record; missing that a quiet usage change is the signal and
+silence is the opportunity.
+
+### Output shape
+
+`{flag: unconfirmed_narrative | quiet_role_change | availability_conflict, prior, evidence[]:
+{source, claim, reliability, time}, posterior, what_would_confirm[], recommendation
+consequence}` plus the common contract.
+
+### Evaluation
+
+The per-source calibration table *is* the evaluation: Brier score of source claims by
+type; precision of "quiet role change" flags at producing a top-24/12 finish within four
+weeks; whether merging news improves `P(active)` Brier over designation-only. "Working" =
+news-augmented `P(active)` beats designation-only, and flagged narratives that never
+confirmed did not move the projection.
+
+---
+
+## 11. Head-to-head win probability
+
+### Inputs
+
+Both lineups' §1 distributions (means, variances, and the correlation table from §3.3),
+kickoff schedule and which games are final / in progress, live box-score stats for players
+whose games are under way (kind), Yahoo's own `win_probability` and `team_projected_points`
+per matchup team (03 §B.2 — a cross-check, not an input to the model), lock rules.
+
+### Method
+
+**11.1 Pre-week.** With totals `M` and `O` and the covariance from shared games/teams,
+`P(win) = Φ((μ_m − μ_o) / sqrt(σ_m² + σ_o² − 2 cov(M, O)))` under the normal approximation
+of the sums; player distributions are right-skewed but sums of 9–10 of them are close
+enough to normal for a first pass. **Prefer Monte Carlo** when correlation or skew matters:
+draw each player from §1's simulated distribution with the §3.3 correlation structure
+(jointly Gaussian copula is the standard device [V Hunter et al. model lineups as jointly
+Gaussian]), score with the engine, and take the win frequency. Ties: `is_tied` exists in
+Yahoo's matchup model; count half.
+
+**11.2 Live in-week updates.** As games finish, replace a player's distribution with a
+point mass at his actual (provisional) score; for games in progress, condition on the
+partial score and time remaining (a simple model: remaining expectation = full-game
+expectation × fraction of game remaining, variance scaled likewise; a better model uses the
+live game state and the player's live usage). Recompute `P(win)` after each update. Yahoo's
+weekly stats are provisional until the next week's first kickoff (03 §D.2), so the product
+should label post-game numbers as provisional until then.
+
+**11.3 What the number feeds.** §3.2 (variance preference), §5.5 (risk appetite), §7 and §9
+(`P(alive at w)`, via a season simulation that chains weekly `P(win)` through the
+schedule and the playoff format), and §12 (calibration).
+
+**11.4 Season simulation.** For `P(playoffs)` and `P(alive at w)`: simulate the remaining
+schedule with weekly `P(win)` from projected lineups (using a mean-reverting estimate of
+each team's strength for weeks without projections), apply the league's tie-breakers and
+playoff format (`num_playoff_teams`, reseeding — 03 §B.2). Run ≥ 10,000 paths.
+
+### Format sensitivity
+
+Points leagues (no H2H): `P(win)` is replaced by rank-in-week or season-points objectives.
+Median-score leagues (`uses_median_score` — 03 §B.2) add a second "opponent": the league
+median, whose distribution is the median of the other teams' simulated totals.
+Multi-week championships: sum distributions across weeks.
+
+### Pitfalls
+
+Reporting `P(win)` without the interval that comes from projection uncertainty (the model's
+own error is larger than the sampling error); ignoring covariance when both sides start
+players from the same game; treating provisional scores as final; using Yahoo's
+`win_probability` as ground truth (it is a cross-check whose method is unknown); forgetting
+lineup lock (a live update cannot be acted on for locked slots).
+
+### Output shape
+
+`{P(win), interval, μ_m, σ_m, μ_o, σ_o, cov, method: normal|mc, live: {players_final,
+players_live, players_pending}, yahoo_cross_check: {win_probability, team_projected_points},
+actionable_slots[]}` plus the common contract.
+
+### Evaluation
+
+Brier score and reliability diagram of pre-week `P(win)` over all matchups in replayed
+seasons, against Yahoo's `win_probability` and against a 50 % baseline; the same for live
+updates at fixed checkpoints (after Thursday, after the 1 pm window, after Sunday night).
+"Working" = Brier below Yahoo's and calibration within ±5 points per decile.
+
+---
+
+## 12. Post-week retrospective and calibration
+
+### What to log (the enabling condition — nothing below works without it)
+
+Every recommendation, at the moment it is made: `log_id`, decision type, the full output
+contract (§0), the alternatives considered with their metrics, the inputs' `as_of`
+timestamps and freshness, the league `S`/`R`/`N`, and **whether the user followed it**
+(readable next week from the roster/transactions). After the week finalises (03 §D.2):
+realised points per player, realised H2H result, realised transactions league-wide.
+
+### Method
+
+**12.1 Score probabilities with strictly proper rules** [V Gneiting & Raftery 2007]:
+- `P(win)`, `P(active)`, `P(win | bid)`, `P(role holds)`: **Brier score**, with the
+  reliability–resolution–uncertainty decomposition and a **reliability diagram** (predicted
+  vs realised by decile). Propriety matters: the product must have no incentive to shade
+  its own probabilities to look better.
+- Full projection distributions: **CRPS** (the integral of Brier over all thresholds);
+  quantiles: **pinball loss** at p10/p50/p90; **interval coverage** at 80 %.
+
+**12.2 Score rankings.** Spearman rank correlation of projected vs realised points within
+position per week; and the FantasyPros-style "accuracy gap" (expected points of the rank
+slot minus realised) for comparability with public expert leaderboards [V FantasyPros
+methodology].
+
+**12.3 "Did the call matter?"** For each start/sit and waiver recommendation compute
+`regret = realised(best alternative offered) − realised(recommended)` and the binary
+"changed the H2H result". Aggregate: mean regret vs the consensus baseline; the share of
+calls that were decisive (expect low; report it, do not hide it).
+
+**12.4 Attribution.** Decompose projection error into the layers of §1: opportunity error
+(expected vs realised targets/carries), efficiency error, TD error, matchup/weather
+multiplier error, availability error. This tells the tuning loop *which* `k`, `β_pos`, `h`
+to move, rather than "the projection was off".
+
+**12.5 Feed lessons forward.** Re-fit the tuned parameters on a rolling window each week
+(with a floor on window size to avoid overfitting the last week — the very pitfall the
+product warns users about); update the per-source news table (§10); update FAAB
+price-of-a-point and rival bid distributions (§4); re-estimate the correlation table
+(§3.3) yearly; refresh the "does not predict" list (§18) with the product's own numbers.
+
+**12.6 Report to the user.** A weekly retrospective: what was recommended, what happened,
+the regret, the calibration state, and one-line "what changed in the model because of it".
+Honest phrasing rules: a single week is one draw; the product should refuse to draw
+conclusions from `n < ~30` calls of a type.
+
+### Format sensitivity
+
+None; every metric is computed under the league's `S`.
+
+### Pitfalls
+
+Scoring means with MAE only (ignores the distribution); scoring probabilities with accuracy
+(not proper); judging a start/sit call by the outcome ("it worked") instead of by its
+regret distribution; re-tuning on last week; scoring recommendations the user did not
+follow as if they had; comparing against no baseline.
+
+### Output shape
+
+`{week, calls: [{log_id, type, followed, regret, decisive}], metrics: {brier by probability
+type, crps, pinball, coverage, spearman by position, accuracy_gap}, attribution, parameter
+changes[], sample-size caveats}`.
+
+### Evaluation (of the evaluator)
+
+The retrospective must reproduce known quantities on synthetic data: a perfectly calibrated
+synthetic forecaster scores Brier = uncertainty term, a random one scores worse; CRPS of the
+true distribution beats any misspecified one. These are unit tests for the metric code.
+
+---
+
+## 13. Draft assistance (lower priority)
+
+### Inputs
+
+`S`, `R`, `N`, `draft_type`, keeper/auction flags (`is_auction_draft` — 03 §B.2), preseason
+§1 season projections with distributions (per-game × expected games, with injury priors),
+ADP for the platform (Yahoo `draft_analysis {average_pick, average_round, percent_drafted,
+average_cost}` — 03 §B.4), the live draft state (`draftresults` read-only — picks made,
+rosters so far).
+
+### Method
+
+**13.1 VBD tiers under this league's baselines.** §2's starter baseline with flex
+allocation and the bench effect, computed for `S`/`R`/`N`; `xVBD` (Stuart) rather than
+plain VBD so upside is priced [V Footballguys]; tiers by Gaussian mixture on the projected
+values (Chen's method applied to projections rather than expert ranks [V borischen.co]).
+
+**13.2 ADP vs value.** For each player: `value − expected value at that ADP slot`, where the
+expected value curve by ADP and position is fit on history (log fits, as Stuart did on
+2000–2012 [V]: RB steepest decline, WR gentler, K/DEF flat). A positive gap is a target; the
+size of the gap versus the pick's alternatives is the pick recommendation. Report
+`P(available at my next pick)` from ADP spread (assume a normal around ADP with the
+platform's observed SD).
+
+**13.3 Positional runs.** Detect from the live draft (`draftresults`): if the last `k` picks
+concentrated in one position and the next tier boundary at that position is within the
+picks before my turn, the value of taking the position now rises by the drop across the
+tier boundary — a computed number, not "a run is happening".
+
+**13.4 Roster-construction targets for the format.** Derived, not asserted: from §2's
+streamability, K and DEF go in the last two rounds (the top-drafted kicker averaged < 5 VBD
+[V Stuart]); in 12-team 1-QB the QB baseline is high enough that late-round QB is the
+documented default [S Zachariason; S PFF] unless a QB's `xVBD` clears the flex-eligible
+alternatives; in superflex, QBs are the scarce asset and two starters are mandatory; TE
+premium pulls elite TEs forward. Strategy labels the community uses — **Zero RB**
+[V Siegele 2013: invest early picks in WRs, embrace RB fragility], **Hero RB**, **late-round
+QB** — are *patterns* that fall out of the value curves in some formats and not others; the
+product should show the curve and name the pattern it implies, never impose the label.
+Weekly-variance evidence for construction [V Underdog]: QB is the least volatile position
+(CV 0.36–0.39), TE the most (0.63–0.70); a roster of high-CV starters needs more bench
+cover.
+
+**13.5 Auction.** Value in dollars = `xVBD share of the total surplus × total budget`,
+re-priced live as money leaves the room (remaining budget ÷ remaining surplus).
+
+### Format sensitivity
+
+The whole section is driven by §2's format table; 10-team compresses tiers; superflex makes
+QBs round-1 picks; TE premium creates a TE tier gap; 6-pt pass TD raises QB values but not
+enough to change the 1-QB conclusion unless `xVBD` says so.
+
+### Pitfalls
+
+Consensus rankings in a non-consensus format; VBD with a static baseline; ignoring
+`P(available)`; drafting K/DEF early; treating strategy labels as rules; season totals
+without injury/games-played priors; ADP from a different platform or scoring.
+
+### Output shape
+
+At each pick: `{best_available_by_xVBD[], tiers, ADP_gaps[], P(available at next pick),
+run_alert: {position, Δ across tier}, roster_targets_so_far vs plan}` plus the common
+contract.
+
+### Evaluation
+
+Replay historical drafts: realised season value of "xVBD-best-available" picks vs ADP-order
+picks at the same slots; tier-boundary accuracy (do realised values cluster as predicted?);
+`P(available)` calibration. "Working" = higher realised VBD than ADP order across ≥ 2
+seasons under the league's `S`.
+
