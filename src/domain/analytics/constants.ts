@@ -225,8 +225,13 @@ export const GAME_DAY_WINDOW_MS = 3 * 60 * 60 * 1000;
 /** Inactives are published about 90 minutes before kickoff (plan 07 D2) — conditionals' `decided_by`. */
 export const INACTIVES_LEAD_MS = 90 * 60 * 1000;
 
-/** Simulation sizes (plan 07 E1 `n_sims`: 1000..20000, default 4000). */
-export const SIMS = Object.freeze({ min: 1000, max: 20000, default: 4000 });
+/**
+ * Simulation sizes (plan 07 E1 `n_sims`: 1000..20000, default 4000). `stored`: the samples kept per
+ * stored projection (plan 08 §5) — a prefix of the iid draws; the retrospective, the only reader,
+ * scores at most 500 (`RETRO_SAMPLE_CAP`). Storing all n_sims made the never-pruned table grow by
+ * megabytes per call and cost E1 a third of its A15 latency.
+ */
+export const SIMS = Object.freeze({ min: 1000, max: 20000, default: 4000, stored: 1000 });
 
 /**
  * Same-team weekly correlations (research 05 §3.3, 2022–2025 full-PPR [V RotoWire]): QB–WR +0.31,

@@ -14,7 +14,9 @@ import type {
   ProjectionRepository,
   ScheduleReader,
 } from "../../../src/domain/analytics/types.js";
+import { SIMS } from "../../../src/domain/analytics/constants.js";
 import { fixedClock, seededRng } from "../../../src/domain/clock.js";
+import { RETRO_SAMPLE_CAP } from "../../../src/mcp/tools/reclog.js";
 import type { RosterEntry } from "../../../src/domain/league/types.js";
 import type { ScoringSettings, StoredProjection } from "../../../src/domain/scoring/types.js";
 import {
@@ -165,6 +167,25 @@ describe("projectPlayers — fixture week 3", () => {
       (w[0]?.points.mean ?? 0) + (w[1]?.points.mean ?? 0),
       3,
     );
+  });
+
+  it("stores a SIMS.stored-sample prefix at any n_sims — enough for the retrospective (A15)", () => {
+    const puts: StoredProjection[] = [];
+    const repo: ProjectionRepository = {
+      put: (p): BestEffortOutcome => {
+        puts.push(p);
+        return { written: true };
+      },
+      latest: () => null,
+      getAsOf: () => null,
+    };
+    const one = targets.slice(0, 1);
+    projectPlayers(req({ targets: one, n_sims: 4000, repository: repo }));
+    projectPlayers(req({ targets: one, n_sims: SIMS.min, repository: repo }));
+    expect(puts.map((p) => p.samples.length)).toEqual([SIMS.stored, SIMS.min]);
+    expect(SIMS.stored).toBeGreaterThanOrEqual(SIMS.min);
+    // the only reader scores at most RETRO_SAMPLE_CAP of them
+    expect(RETRO_SAMPLE_CAP).toBeLessThanOrEqual(SIMS.stored);
   });
 
   it("a defence projects from the opponent's implied total; a kicker loses long FGs in wind", () => {

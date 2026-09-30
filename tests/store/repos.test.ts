@@ -346,6 +346,45 @@ describe("projections (best-effort, append-only, getAsOf)", () => {
     expect(p.latest(subj, 2026, 4, "v1-trailing")?.samples).toHaveLength(2);
   });
 
+  it("stores samples in the compact column form and still reads a legacy JSON-array row (A15)", () => {
+    const subj = { kind: "player", gsis_id: "00-0034857" } as const;
+    const keys = ["rec", "rec_td", "rec_yd"];
+    const samples = Array.from({ length: 4000 }, (_, i) => ({
+      values: { rec: i / 7, rec_td: i / 1000, rec_yd: i * 1.1 },
+      present: keys,
+      position_type: "O" as const,
+      provisional: false,
+      source: "projection:v1-trailing",
+    }));
+    expect(s.repos.projections.put({ ...projection(iso(0), 1), samples })).toEqual({
+      written: true,
+    });
+    const raw = new DatabaseSync(t.storePath);
+    const stored = raw.prepare("SELECT samples_json FROM projection").get() as {
+      samples_json: string;
+    };
+    expect(stored.samples_json.startsWith('{"enc":"f64le-b64:1"')).toBe(true);
+    expect(stored.samples_json.length * 3).toBeLessThan(JSON.stringify(samples).length);
+    // a row written before the compact form: a plain JSON array
+    raw
+      .prepare(
+        `INSERT INTO projection (subject_key, season, week, model_version, made_at, made_ms,
+         inputs_as_of, expectation_json, samples_json) VALUES (?, 2026, 5, 'v1-trailing', ?, ?, ?, '{}', ?)`,
+      )
+      .run(
+        "p:00-0034857",
+        iso(0),
+        Date.parse(iso(0)),
+        iso(0),
+        JSON.stringify(projection(iso(0), 7).samples),
+      );
+    raw.close();
+    expect(s.repos.projections.latest(subj, 2026, 4, "v1-trailing")?.samples).toEqual(samples);
+    expect(s.repos.projections.latest(subj, 2026, 5, "v1-trailing")?.samples).toEqual(
+      projection(iso(0), 7).samples,
+    );
+  });
+
   it("stores defences and rejects invalid subjects", () => {
     const d = { ...projection(iso(0), 5), subject: { kind: "defense", nfl_team: "DET" } as const };
     s.repos.projections.put(d);

@@ -1,5 +1,6 @@
 // samples.test.ts — src/domain/scoring/engine.ts `scoreSamples`: plan 08 §2, §5, E5 (score the
 // SAMPLES: E[bonus] ≠ bonus(E)), E8 (`basis` stamped on the Dist), bracket/bonus probabilities.
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { score, scoreSamples } from "../../../src/domain/scoring/engine.js";
 import { ScoringError } from "../../../src/domain/scoring/errors.js";
@@ -222,5 +223,43 @@ describe("scoreSamples — volume", () => {
     expect(JSON.stringify(scoreSamples(lines, S, "player_sim"))).toBe(JSON.stringify(a));
     expect(elapsed).toBeLessThan(1000);
     expect(Math.abs(a.dist.mean - a.mean_of_exact)).toBeLessThan(1e-9);
+  });
+});
+
+describe("scoreSamples — the sample path computes exactly what score() does (A15 fast path)", () => {
+  // scoreSamples skips contributions/ignored and allocates bonus bookkeeping lazily; every number
+  // must still be bit-identical to score() on the same line
+  const s = sampleSettings({
+    bonuses: { "9": [{ target: 100, points: 10 }], "12": [{ target: 120, points: 3 }] },
+  });
+  const O = ["pass_yd", "pass_td", "pass_int", "rush_yd", "rush_td", "rec", "rec_yd", "fum_lost"];
+  const oLine = fc
+    .dictionary(fc.constantFrom(...O), fc.double({ min: 0, max: 400, noNaN: true }))
+    .map((v) => lineOf("O", v));
+  const dtLine = fc
+    .record({ dst_pa: fc.integer({ min: 0, max: 50 }), dst_sack: fc.integer({ min: 0, max: 8 }) })
+    .map((v) => lineOf("DT", v));
+
+  it("property: a one-sample batch reproduces score(); bonus hits match its contributions", () => {
+    fc.assert(
+      fc.property(fc.oneof(oLine, dtLine), (l) => {
+        const one = score(l, s);
+        const r = scoreSamples([l], s, "position_cv");
+        expect(r.dist.mean).toBe(one.points);
+        expect(r.dist.p50).toBe(one.points);
+        expect(r.mean_of_exact).toBe(one.points_exact);
+        for (const [c, p] of Object.entries(r.bonus_probability))
+          expect(p).toBe(
+            one.contributions.some((x) => x.kind === "bonus" && x.canonical === c) ? 1 : 0,
+          );
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it("score() still reports contributions and ignored stats (the detail path is unchanged)", () => {
+    const r = score(lineOf("O", { rush_yd: 120, zz_unknown: 4 }), s);
+    expect(r.contributions.map((c) => c.kind).sort()).toEqual(["bonus", "linear"]);
+    expect(r.ignored).toEqual(["zz_unknown"]);
   });
 });
