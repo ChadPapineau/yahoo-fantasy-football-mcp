@@ -31,6 +31,7 @@ rule, 2026-09-24). Waves start when a slot frees.
 | 4 | `product-planner` | `docs/plan/07-tool-catalog.md`, `08-scoring-engine.md`, `09-skills-bundle.md`, `10-phasing-and-acceptance.md`, `docs/scratch/product-planner.md` | plan 01–06, docs 04–06 |
 | 4 | `ci-bootstrap` | `.github/**`, `.gitleaks.toml`, `scripts/**`, `docs/scratch/ci-bootstrap.md` | plan 04 §CI, plan 06 §4 step 1 (docs-only automation; no product code) |
 | 5 | `devils-advocate` (multi-round, orchestrator defends) | `docs/plan/adversarial-log.md` | the whole plan |
+| 5 | `plan-reviser` (between rounds; applies the orchestrator's rulings) | `docs/plan/01-*`…`10-*`, `docs/plan/changelog.md`, `.github/workflows/docs.yml` (OBJ-12 only) | the defence §D.1 + plan 10 §4 tensions |
 | 6 | `docs-writer` | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` | refined plan |
 
 The plan is split by file ownership so the core planner can run alongside

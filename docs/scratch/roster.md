@@ -16,7 +16,8 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | architecture-planner-core | a45fab2bbf0065893 | 3 | ✅ done (SHAs verified; SDK v2 2.2.0 = npm `latest` and `node:sqlite` on Node 22.23 checked live — the latter still prints ExperimentalWarning) | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | `c5ea355` | — |
 | product-planner | a47f1502e3ab64907 | 4 | ✅ done (SHAs verified; identifier scan clean; 13 tensions + 10 open decisions in plan 10 §4–§5) | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | `b830114` | — |
 | ci-bootstrap | afe971bb2e5796cc9 | 4 | ✅ done (orchestrator verified: `docs` + `secrets` green on `f3a0a48`; full-history scan green; 20 files tracked) | `.github/**`, `.gitleaks.toml`, `scripts/**`, `docs/scratch/ci-bootstrap.md` | `f3a0a48` | — |
-| devils-advocate | a2ed55e691cda6d2a | 5 | 🟢 running (round 1) | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | `docs/scratch/devils-advocate.md` §RESUME HERE; resume the same ID via SendMessage for round 2+ |
+| devils-advocate | a2ed55e691cda6d2a | 5 | ⛔ round 1 delivered (`52337a3`, 23 objections); defence pushed (`f2abb64`); **waiting on `plan-reviser`** before round 2 | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | `dfde1b6` | resume the same ID via SendMessage once the round-1 revisions are on `main` |
+| plan-reviser | a4ae16bdc0e7b6482 | 5 | 🟢 running | `docs/plan/01-*`…`10-*`, `docs/plan/changelog.md`, `.github/workflows/docs.yml` (OBJ-12 only), `docs/scratch/plan-reviser.md` | — | `docs/scratch/plan-reviser.md` §RESUME HERE (checklist of 14 groups) |
 | docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md`, `docs/scratch/docs-writer.md` | — | brief: `docs/scratch/briefs/docs-writer.md` |
 
 ## Cutoff procedure
@@ -77,3 +78,13 @@ only if the ID is gone.
   back: `.gitignore` `secrets.*` swallowed `secrets.yml` (fixed by the
   orchestrator); Chad's ruleset `gh` command is in
   `docs/scratch/ci-bootstrap.md` § "For Chad".
+- 2026-09-30 — `devils-advocate` round 1 delivered (`52337a3`): 23
+  objections (2 blocking: the "unforgeable gate" claim in Claude Code; no
+  dated gate/fallback on Yahoo approval). Orchestrator verified two open
+  facts at source (nflverse parquet = snappy; fast-xml-parser
+  `processEntities: true` default — plan A-9 inverted) and pushed the
+  defence (`f2abb64`): 21 concede/concede-modified, 1 justified with
+  evidence (OBJ-20), all 13 tensions accepted.
+- 2026-09-30 — wave 5 (second slot) spawned: `plan-reviser` — applies the
+  rulings across plan 01–10 + `docs.yml` (OBJ-12) and starts
+  `docs/plan/changelog.md`. Advocate resumes for round 2 when it lands.
