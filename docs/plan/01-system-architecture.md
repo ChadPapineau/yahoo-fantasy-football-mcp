@@ -156,6 +156,7 @@ Reading the arrows: the **domain never imports a wire type** (no `fantasy_conten
 - The 2026-07-28 revision is **stateless**: no `initialize`; every request carries protocol version and client capabilities in `_meta`; `server/discover` advertises versions and capabilities; results carry `resultType` [V-spec changelog 1–3, 8]. Consequence for us: **no per-connection state, ever**. Anything that must survive between two tool calls (a prepared write, a pagination cursor) is an explicit, server-minted handle stored in SQLite [V-spec tools "Stateful Tools"]. The confirmation token in plan 02 is exactly such a handle.
 - Logging as a *protocol feature* is deprecated in 2026-07-28 ("log to `stderr` (stdio)" is the suggested migration) [V-spec changelog Deprecated 1]. We never emit `notifications/message`; stderr is the log.
 - `tools/list`, `prompts/list`, `resources/list`, `resources/read` results **MUST** carry `ttlMs` and `cacheScope` [V-spec caching]. We return `ttlMs: 300000, cacheScope: "private"` for lists (the tool set can change when provisioning changes — plan 02 §5) and per-resource TTLs from the freshness table (§5.4); everything is `"private"` because every payload is one user's league.
+- `server/discover` (and the legacy `initialize` result) carries **`instructions`** — "Optional natural-language guidance for LLMs on how to use this server effectively" [V-spec server/discover, 2026-09-30] — holding the plan 02 §6.3 untrusted-text sentence **once**; clients need not call `server/discover` and forwarding is [U] per client, so the rule is also carried by `ff://docs/tool-outputs` and every Skill (plan 02 §6.3, *round 2 OBJ-28*).
 - Tool ordering in `tools/list` is deterministic (spec SHOULD; it "improves LLM prompt cache hit rates") [V-spec tools "Capabilities"]: registration order is fixed by a single `src/mcp/registry.ts` list. The list is filtered, in order, by **`FF_TOOLSET`** (`core` — the default — registers the 19 P0 tools; `full` adds the P1/P2 analytics; plan 07 C3, *round 1, OBJ-08*) and then by capability (write tools, plan 02 S5); the order of the survivors never changes.
 
 ### 3.2 Streamable HTTP — not offered in v1, and what would have to change
@@ -181,7 +182,7 @@ Not achievable under the verified constraints: it needs a **publicly reachable h
 
 ## 4. MCP surface conventions
 
-These conventions bind every tool the product planner defines (plan 07+). They are enforced by a single registration helper (`defineTool()` in `src/mcp/define.ts`) so a tool cannot be registered without annotations, the envelope, and — except for the large list tools named in plan 07 C10, whose `data` shape is documented in `ff://docs/tool-outputs` instead *(round 1, OBJ-08)* — an output schema.
+These conventions bind every tool the product planner defines (plan 07+). They are enforced by a single registration helper (`defineTool()` in `src/mcp/define.ts`) so a tool cannot be registered without annotations, the envelope, and — except for the large list tools named in plan 07 C10, whose `data` shape is documented in `ff://docs/tool-outputs` instead *(round 1, OBJ-08)* — an output schema; and whose description ends with the ≤ 40-char pointer `Untrusted fields: see server instructions.` (plan 02 §6.3, *round 2 OBJ-28*).
 
 ### 4.1 Naming
 
