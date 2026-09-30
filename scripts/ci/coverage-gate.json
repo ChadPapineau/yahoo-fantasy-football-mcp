@@ -1,0 +1,14 @@
+{
+  "$comment": "Coverage gate — docs/plan/05 §7 (T7). Single source for vitest.config.ts thresholds and scripts/ci/check-coverage.mjs. Only ever raised, never lowered to pass a build.",
+  "global": { "lines": 90, "branches": 85, "functions": 90, "statements": 90 },
+  "perFile100": [
+    "src/domain/scoring/**",
+    "src/domain/gate/**",
+    "src/providers/yahoo/path.ts",
+    "src/providers/yahoo/errors.ts",
+    "src/auth/token-store.ts",
+    "src/cli/log.ts",
+    "src/domain/reclog/metrics.ts"
+  ],
+  "exclude": ["src/cli.ts", "src/cli/cli.ts", "src/**/*.d.ts", "src/**/generated/**"]
+}
