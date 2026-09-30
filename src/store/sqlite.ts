@@ -165,6 +165,15 @@ export function immediate<T>(db: DatabaseSync, fn: () => T): T {
   }
 }
 
+/**
+ * After a best-effort write finds the lock busy, further best-effort writes within this window are
+ * counted as misses WITHOUT waiting (a circuit breaker): a 3-s foreign writer lock then costs the
+ * stdio loop ~100 ms per 350 ms instead of 100 ms per cache write (plan 05 §2 contention test:
+ * 50 cache-missing reads under a 3-s lock, every cache write a miss, p95 < 300 ms). Decision
+ * recorded: the plan fixes the 100 ms wait, not how often a known-busy lock is re-tried.
+ */
+export const BEST_EFFORT_BACKOFF_MS = 250;
+
 /** Monotonic milliseconds (lock-wait accounting only; never a stored instant). */
 const monoMs = (): number => performance.now();
 
@@ -176,6 +185,7 @@ const monoMs = (): number => performance.now();
  */
 export class WriteExecutor {
   private misses = 0;
+  private busyUntil = Number.NEGATIVE_INFINITY;
   constructor(private readonly budgetMs: number = REQUIRED_WRITE_BUDGET_MS) {}
 
   /** Best-effort writes skipped because the lock was busy. */
@@ -184,12 +194,17 @@ export class WriteExecutor {
   }
 
   bestEffort(fn: () => void): BestEffortOutcome {
+    if (monoMs() < this.busyUntil) {
+      this.misses += 1;
+      return { written: false, reason: "busy" };
+    }
     try {
       fn();
       return { written: true };
     } catch (e) {
       if (!isBusyError(e)) throw e;
       this.misses += 1;
+      this.busyUntil = monoMs() + BEST_EFFORT_BACKOFF_MS;
       return { written: false, reason: "busy" };
     }
   }
