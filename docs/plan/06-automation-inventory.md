@@ -29,7 +29,7 @@ Columns: **Trigger** (launchd calendar in local time, or Actions); **Inputs**; *
 |---|---|---|---|---|---|---|
 | Lint + format + commit-format | every push/PR (`ci.yml`) | repo | pass/fail | red check | N | 🔧 (needs `src/`) — but the *workflow file* and `check-commits` script ✅ |
 | Typecheck | same | repo | pass/fail | red check | N | 🔧 |
-| Unit/property/contract/fault tests + coverage gate | same, matrix node 22/24 | repo, fixtures | coverage artifact, job summary | red check; gate below plan 05 §7 | N | 🔧 |
+| Unit/property/contract/fault tests + coverage gate | same, node 24 (plan 04 R5, round 1) | repo, fixtures | coverage artifact, job summary | red check; gate below plan 05 §7 | N | 🔧 |
 | Process/lifecycle tests | same (ubuntu); weekly + release (macOS) | built binary | pass/fail | red check | N | 🔧 |
 | Inspector smoke (fixture mode) | same | `dist/`, `fixtures/yahoo` | tool list + call assertions | red check | N | 🔧 |
 | `npm audit` gate (runtime, high+) | same | lockfile | report | red check | N | ✅ workflow; meaningful once `package.json` exists |
