@@ -1,0 +1,32 @@
+{
+  "@context": [
+    "https://geojson.org/geojson-ld/geojson-context.jsonld",
+    {
+      "@version": "1.1",
+      "wx": "https://api.weather.gov/ontology#"
+    }
+  ],
+  "id": "https://api.weather.gov/points/41.5061,-81.6995",
+  "type": "Feature",
+  "geometry": {
+    "type": "Point",
+    "coordinates": [-81.6995, 41.5061]
+  },
+  "properties": {
+    "@id": "https://api.weather.gov/points/41.5061,-81.6995",
+    "@type": "wx:Point",
+    "cwa": "CLE",
+    "forecastOffice": "https://api.weather.gov/offices/CLE",
+    "gridId": "CLE",
+    "gridX": 83,
+    "gridY": 65,
+    "forecast": "https://api.weather.gov/gridpoints/CLE/83,65/forecast",
+    "forecastHourly": "https://api.weather.gov/gridpoints/CLE/83,65/forecast/hourly",
+    "forecastGridData": "https://api.weather.gov/gridpoints/CLE/83,65",
+    "observationStations": "https://api.weather.gov/gridpoints/CLE/83,65/stations",
+    "forecastZone": "https://api.weather.gov/zones/forecast/OHZ010",
+    "county": "https://api.weather.gov/zones/county/OHC035",
+    "timeZone": "America/New_York",
+    "radarStation": "KCLE"
+  }
+}
