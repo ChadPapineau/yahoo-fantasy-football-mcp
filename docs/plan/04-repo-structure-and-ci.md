@@ -10,10 +10,10 @@
 | # | Decision | Why | Alternative considered | What would change it |
 |---|---|---|---|---|
 | R1 | **Single npm package, no workspaces** | one deployable, one lockfile to audit, one `npm ci`; the ESPN seam is an interface, not a package | Turborepo/workspaces (`server`, `skills`, `espn`) | publishing the Skills bundle or a provider separately — then split, the module boundaries (plan 01 §1.1) are already package-shaped |
-| R2 | **TypeScript strict ESM, `module: NodeNext`, `target: ES2023`, Node ≥ 22.13** | the SDK v2 is ESM with `zod/v4`; `NodeNext` is the resolution Node actually performs; ES2023 is fully supported by Node 22 | CommonJS; bundling with esbuild | Nothing |
+| R2 | **TypeScript strict ESM, `module: NodeNext`, `target: ES2023`, Node ≥ 24.15** *(revised round 1, OBJ-09)* | the SDK v2 is ESM with `zod/v4`; `NodeNext` is the resolution Node actually performs; ES2023 is fully supported by Node 24; the floor is `node:sqlite`'s release-candidate line (plan 01 D2 — v22 warns at every start) | CommonJS; bundling with esbuild; Node 22 with the warning | Nothing downward |
 | R3 | **ESLint 9 flat config + typescript-eslint (type-checked), Prettier, import-boundary rules per directory** | boundaries in plan 01 §1.1 must be mechanical; `no-console` outside `src/cli/` protects stdout (plan 01 §2) | Biome (single tool) | Biome gaining type-aware rules equivalent to `no-floating-promises` |
 | R4 | **Conventional Commits, checked by a 30-line script in CI** (PR title + every commit on the PR) | changelog and release notes derive from it; a `commitlint` install brings ~100 transitive dev packages for a regex | commitlint | Nothing |
-| R5 | **CI on every push and PR: ubuntu, Node 22 and 24 matrix**; macOS job weekly and on release only | Linux minutes are cheap and cover everything but launchd/`osascript`; macOS covers those on a cadence | macOS on every push | a macOS-only bug slipping through more than once |
+| R5 | **CI on every push and PR: ubuntu, Node 24 only** (25 is added to the matrix when it becomes LTS); macOS job weekly and on release only *(revised round 1, OBJ-09: was a 22 + 24 matrix)* | Linux minutes are cheap and cover everything but launchd/`osascript`; macOS covers those on a cadence; testing on 22 would test a `node:sqlite` API the maintainers may still change and admit a floor the product rejects | macOS on every push; a 22 + 24 matrix | a macOS-only bug slipping through more than once; Node 25 LTS |
 | R6 | **Secret scanning = gitleaks** (pinned action) with repo-specific rules for Yahoo credential shapes **and** Yahoo league/team keys | single binary, no runtime, custom TOML rules, scans history; the two leaked prior-art repos would have been caught [V-01 #1, #7]; league ids are identifiers this public repo must not carry [V-HANDOFF] | trufflehog (heavier, verification calls out); GitHub push protection alone (secret shapes only, no custom "identifier" rules) | Nothing — both can coexist; push protection should also be turned on |
 | R7 | **Mermaid validation with `@mermaid-js/mermaid-cli` pinned, run only when `docs/**` changes** | it is the reference renderer (what GitHub's renderer agrees with most closely); the docs are the plan, and a diagram that does not render is a failed deliverable (brief) | `@mermaid-js/parser` (covers a subset of diagram types) | a lighter parser covering flowchart, sequence, and state diagrams |
 | R8 | **Release = tag `vX.Y.Z` → CI builds, tests, checks CHANGELOG, `npm pack --dry-run`, scans the tarball for identifiers, publishes a GitHub Release with the tarball**; npm publish is manual by Chad with `--provenance` (deferred) | no agent publishes anything (docs/15 rule); the tarball scan is the last line against shipping a fixture with a real id | automated `npm publish` from CI | Chad deciding to publish to npm at all |
@@ -26,7 +26,7 @@
 
 ```
 yahoo-fantasy-football-mcp/
-├── package.json                 # name: fantasy-football-mcp · bin: ff · type: module · engines.node >=22.13
+├── package.json                 # name: fantasy-football-mcp · bin: ff · type: module · engines.node >=24.15
 ├── package-lock.json            # committed; npm ci only
 ├── .npmrc                       # save-exact=true · ignore-scripts=true · fund=false · audit=true
 ├── tsconfig.json                # strict ESM (§3)
@@ -140,13 +140,13 @@ That is it: **four direct runtime packages** (five with `core` transitively). Ev
 
 **Dev dependencies:** `typescript`, `vitest` + `@vitest/coverage-v8`, `fast-check`, `eslint` + `typescript-eslint` + `eslint-plugin-import-x` (boundaries), `prettier`, `tsx`, `@types/node`. Run via `npx` with pinned versions in CI only: `@modelcontextprotocol/inspector`, `@mermaid-js/mermaid-cli`.
 
-`package.json` essentials: `"type": "module"`, `"bin": { "ff": "dist/cli.js" }`, `"engines": { "node": ">=22.13" }`, `"files": ["dist", "skills", "README.md", "LICENSE", "CHANGELOG.md"]` (fixtures and tests never ship), scripts: `build`, `typecheck`, `lint`, `format:check`, `test`, `test:coverage`, `test:process`, `smoke` (Inspector CLI), `eval` (manual, tokens), `check:commits`, `check:licenses`, `check:no-scripts`, `check:mermaid`, `check:skills`, `check:docs` (generated README table current), `pack:scan`.
+`package.json` essentials: `"type": "module"`, `"bin": { "ff": "dist/cli.js" }`, `"engines": { "node": ">=24.15" }` (round 1, OBJ-09), `"files": ["dist", "skills", "README.md", "LICENSE", "CHANGELOG.md"]` (fixtures and tests never ship), scripts: `build`, `typecheck`, `lint`, `format:check`, `test`, `test:coverage`, `test:process`, `smoke` (Inspector CLI), `eval` (manual, tokens), `check:commits`, `check:licenses`, `check:no-scripts`, `check:mermaid`, `check:skills`, `check:docs` (generated README table current), `pack:scan`.
 
 ---
 
 ## 3. TypeScript, lint, format, commits
 
-**`tsconfig.json`** (differences from the house reference are deliberate: it shows `Node16` + `ES2022`; we are on Node 22+ and SDK v2):
+**`tsconfig.json`** (differences from the house reference are deliberate: it shows `Node16` + `ES2022`; we are on Node 24+ and SDK v2):
 
 ```jsonc
 {
@@ -173,7 +173,7 @@ That is it: **four direct runtime packages** (five with `core` transitively). Ev
 
 ## 4. CI
 
-All workflows: `permissions: contents: read` by default; actions pinned by **commit SHA** (not tag); `concurrency` cancels superseded runs; `npm ci` with the committed lockfile; Node from `.nvmrc`/matrix.
+All workflows: `permissions: contents: read` by default; actions pinned by **commit SHA** (not tag); `concurrency` cancels superseded runs (PRs only — a cancelled run on `main` is a commit without a verdict, as `docs.yml` already does); `npm ci` with the committed lockfile; Node from `.nvmrc` (`24`, matching `engines`).
 
 ### 4.1 `ci.yml` — every push to any branch, every PR
 
@@ -181,7 +181,7 @@ All workflows: `permissions: contents: read` by default; actions pinned by **com
 |---|---|---|
 | `lint` | `npm ci` → `npm run lint` → `npm run format:check` → `npm run check:commits` (PRs) | any lint/format/commit-format error |
 | `typecheck` | `npm run typecheck` (`tsc --noEmit -p tsconfig.json`, includes tests) | any type error |
-| `test` (matrix node 22, 24) | `npm run test:coverage` → upload `coverage/` artifact → `scripts/check-coverage.ts` reads `coverage-summary.json` against the gate (plan 05 §7) | any test fails; coverage below gate; a per-file 100 % module below 100 % |
+| `test` (node 24 — R5) | `npm run test:coverage` → upload `coverage/` artifact → `scripts/check-coverage.ts` reads `coverage-summary.json` against the gate (plan 05 §7) | any test fails; coverage below gate; a per-file 100 % module below 100 % |
 | `process` | `npm run build` → `npm run test:process` (spawns the built binary: startup < 1 s, stdin-EOF exit 0, SIGTERM exit 0, orphan exit, two-process lock race, listener closes) | any process test fails |
 | `smoke` | `npm run build` → `npx -y @modelcontextprotocol/inspector@<pin> --cli node dist/cli.js serve --method tools/list` in **fixture mode** (`FF_FIXTURE_DIR=fixtures/yahoo`, no credentials) → assert the expected tool names and that no write tool is listed | list differs from `tests/smoke/expected-tools.json` |
 | `supply-chain` | `npm audit --omit=dev --audit-level=high` (gate) · `npm audit` (report only) · `npm run check:no-scripts` (no `install`/`postinstall`/`preinstall` and no `binding.gyp`/`prebuild-install` in `npm ls --omit=dev`) · `npm run check:licenses` (allow-list: MIT, ISC, BSD-2/3-Clause, Apache-2.0, 0BSD, CC0-1.0, Unlicense; anything else fails with the package name) · `npm ls --omit=dev --depth=0` diff against the §2 allow-list | any high/critical runtime advisory; any install script; any license outside the list; any undeclared runtime dependency |

@@ -141,7 +141,7 @@ Emits a JSON snippet with **resolved absolute paths** — `command` = `process.e
 }
 ```
 
-Paste target: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) **[A-5: path from general knowledge; verify at build time]**. The client secret is referenced by file path, not value, so the client config carries no secret (plan 02 S2). `ff doctor` reads this file (if present), checks that `command` and `args[0]` are absolute and exist, that `command` is a Node ≥ 22.13, and warns if the file's mode allows group/other read while `env` holds a `YAHOO_CLIENT_SECRET` value.
+Paste target: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) **[A-5: path from general knowledge; verify at build time]**. The client secret is referenced by file path, not value, so the client config carries no secret (plan 02 S2). `ff doctor` reads this file (if present), checks that `command` and `args[0]` are absolute and exist, that `command` is a Node ≥ 24.15 (plan 01 D2, round 1), and warns if the file's mode allows group/other read while `env` holds a `YAHOO_CLIENT_SECRET` value.
 
 Version-manager note: `process.execPath` under nvm/volta/fnm points at a versioned binary that survives shell-less launches; that is the point of printing it rather than `node`.
 
@@ -160,8 +160,8 @@ Offline checks run always; `--online` adds the network ones; `--fix` repairs mod
 
 | # | Check | Pass condition | Fix / message |
 |---|---|---|---|
-| 1 | Node version | ≥ 22.13.0 (`node:sqlite` unflagged [V-node]); warn if not the 24 LTS line **[A-7 on LTS labels]** | install/switch; the config's `command` must point at it |
-| 2 | Launch config paths | `command` and `args[0]` absolute, exist, executable; `command` is Node ≥ 22.13; `args` contains `serve` | prints the corrected snippet from `print-config` |
+| 1 | Node version | **≥ 24.15.0** — the line on which `node:sqlite` is a release candidate [V-node v24.x, 2026-09-30]; the v22 line is "active development" and prints `ExperimentalWarning` at every start (observed on 22.23.2, HANDOFF) *(revised round 1, OBJ-09)*. The message hedges the LTS label: "Node 24 (the LTS line per nodejs.org's schedule at build time — **[A-7]**)" | install/switch — Chad runs Node 22 via `fnm` today: `fnm install 24 && fnm use 24` (the README quickstart carries this line); the config's `command` must point at the 24 binary |
+| 2 | Launch config paths | `command` and `args[0]` absolute, exist, executable; `command` is Node ≥ 24.15; `args` contains `serve` | prints the corrected snippet from `print-config` |
 | 3 | Client config secrecy | no `YAHOO_CLIENT_SECRET` value in a client config that is group/other-readable | recommend `YAHOO_CLIENT_SECRET_FILE` |
 | 4 | Config dir | exists, mode 0700, owned by the user | `--fix` chmods |
 | 5 | Token file | exists, mode 0600, parses, `version` current; reports `expires_at`, `refreshed_at` age, `provisioning.state` + evidence | "run `ff auth`" (exit 3) |
@@ -202,6 +202,7 @@ The server process never exits on an auth problem; auth problems are tool result
 - **Token file:** `version` field; `src/auth/token-upgrade.ts` migrates older shapes in memory and rewrites atomically on the next write.
 - **Config:** additive only; unknown keys warn, never fail.
 - **Package upgrade path:** `git pull && npm ci && npm run build` (checkout install) or `npm update -g fantasy-football-mcp` (global); the launch config does not change because `dist/cli.js` keeps its path; `ff doctor` after every upgrade (plan 06 pre-release check runs it in CI against a fresh store).
+- **Node upgrade path (quickstart note, round 1 OBJ-09):** the floor is 24.15 (plan 01 D2). Under `fnm`: `fnm install 24 && fnm use 24`, then re-run `ff print-config` so the launch config's `command` points at the 24 binary (`process.execPath` changes with the version — §4.1).
 - **SDK/protocol upgrades:** re-read `docs/protocol-versions.md` [V-sdk] on every SDK bump; the Inspector smoke (plan 05 §5) runs against both eras.
 
 ---
@@ -232,4 +233,4 @@ Which refresh jobs exist and their schedules (plan 06 — this plan only specifi
 | A-4 | Binding both `127.0.0.1` and `::1` is needed for `localhost` callbacks | try with a browser; if Yahoo accepts `https://127.0.0.1:port` the IPv6 bind is unnecessary (03 §F.3) |
 | A-5 | Claude Desktop config path on macOS | verify at build time; `doctor` also accepts `--client-config <path>` |
 | A-6 | `claude mcp add --scope user … -e K=V -- cmd args` syntax | Claude Code MCP docs at build time |
-| A-7 | Node 24 is the current LTS line as of 2026-09 | nodejs.org release schedule at build time |
+| A-7 | Node 24 is the current LTS line as of 2026-09 — stays [U]; doctor #1's text is hedged accordingly *(round 1, OBJ-23 d)* | nodejs.org release schedule at build time |
