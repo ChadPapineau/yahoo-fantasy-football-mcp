@@ -148,7 +148,7 @@ Version-manager note: `process.execPath` under nvm/volta/fnm points at a version
 
 ### 4.2 `ff print-config --client code`
 
-Emits the `claude mcp add` command line with the same absolute paths and `-e` env flags, **user scope** (`--scope user`) so nothing lands in the public repo's `.mcp.json` **[A-6: flag syntax from general knowledge; verify against the Claude Code MCP docs at build time]**. `doctor` also parses Claude Code's user-level MCP config if found, with the same checks.
+Emits the `claude mcp add` command line with the same absolute paths and `-e` env flags, **user scope** (`--scope user`) so no secret or absolute user path lands in the public repo's `.mcp.json` — when plan 10 D3 = yes the plugin's `.mcp.json` at the repo root exists by design and carries only `${CLAUDE_PLUGIN_ROOT}`/`${CLAUDE_PLUGIN_DATA}` variables (T7, round 1; plan 04 §1) **[A-6: flag syntax from general knowledge; verify against the Claude Code MCP docs at build time]**. `doctor` also parses Claude Code's user-level MCP config if found, with the same checks.
 
 ### 4.3 Global install variant
 `npm install -g` puts `ff` on `PATH`; the config still uses the absolute `dist/cli.js` path printed by `ff print-config` — GUI clients do not have the user's shell `PATH` [A-1].
