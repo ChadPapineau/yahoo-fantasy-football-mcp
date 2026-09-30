@@ -326,11 +326,43 @@ describe("CRPS from quantiles", () => {
       fc.property(knotsArb, fc.double({ min: -150, max: 150, noNaN: true }), (knots, y) => {
         const c = crpsFromQuantiles(knots, y);
         expect(c).toBeGreaterThanOrEqual(0);
-        expect(c === 0).toBe(knots.every((k) => k.value === y));
+        if (knots.every((k) => k.value === y)) expect(c).toBe(0);
+        // a positive CRPS is representable only when the spread is: a forecast within subnormal
+        // distance of the outcome (e.g. knots 0 and 5e-324, y = 0) has an exact CRPS below
+        // Number.MIN_VALUE, whose correctly rounded binary64 value IS 0
+        else if (Math.max(...knots.map((k) => Math.abs(k.value - y))) > 1e-300)
+          expect(c).toBeGreaterThan(0);
         expect(c).toBeCloseTo(crpsNumeric(pwlQuantile(knots), y, 4000), 1);
       }),
       { numRuns: 150 },
     );
+  });
+
+  it("a forecast within subnormal distance of the outcome scores the correctly rounded 0", () => {
+    // the CI counterexample (fast-check seed 722633578): the exact CRPS is below Number.MIN_VALUE
+    const tiny = [
+      { level: 0.43, value: 0 },
+      { level: 0.63, value: 5e-324 },
+    ];
+    expect(crpsFromQuantiles(tiny, 0)).toBe(0);
+    // the same shape at a representable scale is strictly positive and scales linearly
+    const s = 1e-300;
+    const small = crpsFromQuantiles(
+      [
+        { level: 0.43, value: 0 },
+        { level: 0.63, value: s },
+      ],
+      0,
+    );
+    expect(small).toBeGreaterThan(0);
+    const unit = crpsFromQuantiles(
+      [
+        { level: 0.43, value: 0 },
+        { level: 0.63, value: 1 },
+      ],
+      0,
+    );
+    expect(small / s).toBeCloseTo(unit, 10);
   });
 
   it("rejects hostile knots and outcomes", () => {
