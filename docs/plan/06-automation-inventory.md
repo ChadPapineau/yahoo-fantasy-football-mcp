@@ -43,7 +43,7 @@ Columns: **Trigger** (launchd calendar in local time, or Actions); **Inputs**; *
 | Weekly audit + outdated report + macOS smoke (`scheduled.yml`) | Monday 06:00 UTC + manual | lockfile, binary | job summary | red run | N | ✅ workflow (audit/outdated); 🔧 smoke |
 | Dependabot security updates | on advisory | lockfile | PR | open PR | N | ✅ **now** |
 | Release (`release.yml`) | tag `v*` | repo at tag, `CHANGELOG.md` | GitHub Release + tarball + sha256 | red run; missing changelog entry | N | 🔧 (workflow file ✅) |
-| Branch ruleset (no force-push, required checks) | repo setting (Chad) | — | — | push rejected | N | ✅ **now** (plan 04 §5) |
+| Branch ruleset (no force-push, no deletion, linear history; **no required checks** — round 1 OBJ-13, plan 04 §5) | repo setting (Chad) | — | — | force-push / deletion rejected; a red check is caught by the `ci-vigilance` obligation, not by the ruleset | N | ✅ **now** (plan 04 §5) |
 
 ### 1.2 Data refreshes (launchd, Chad's Mac, no Yahoo credentials)
 
@@ -105,7 +105,7 @@ All are `ff refresh <source>`; each: poll version → skip/download → assert s
 
 | Channel | Red when | Who sees it |
 |---|---|---|
-| GitHub check | any `ci.yml`/`docs.yml` job fails | Chad (and the `ci-sentinel`-style agent practice: verify after every push) |
+| GitHub check | any `ci.yml`/`docs.yml`/`secrets` job fails | Chad, and every agent that pushed — the **`ci-vigilance` obligation** (plan 04 §5): verify the push's runs, fix or revert a red `main` before replying. In the docs phase this obligation *is* the protection, since no check is required by the ruleset (round 1, OBJ-13) |
 | `refresh_log.ok = 0` | a launchd job failed after retries | `ff status`, `ff doctor` #9–#11 |
 | macOS notification | a job failed (rate-limited), a roster/FA diff, a pre-kickoff problem, a token/provisioning problem, an unmatched-crosswalk threshold | Chad, without opening anything |
 | `ff status` / `ff_get_status` | any source past its hard limit; pending journal rows; token expiry within 24 h; jobs not loaded | Chad, or the model when asked |
