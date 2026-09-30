@@ -23,19 +23,79 @@ read-only, a locally-run open-source tool, low cached request volume.
 Record the submission date in the decisions table; the plan 10 Ph8 clock
 starts then.
 
-**For the orchestrator:** `plan-reviser` (same ID) is applying the
-round-2 rulings (`## Round 2 — defence` §D.1: session-condition rewrite of
-plan 02, Keychain reworded as hygiene + hurdle, D0 paragraph with both
-ends of L and the 1a-minimum cut, per-source dataset files with
-`ATTACH`/`DETACH` swap, token-derived downward-only ceilings + the
-`instructions` field, X1 honesty, the pin-time maintenance criterion,
-changelog counts fixed). When it finishes: verify SHAs + green runs,
-spot-check that no main-store dataset write survives anywhere, then resume
-the same `devils-advocate` ID for round 3 ("revisions on `main` at <SHA>;
-diff against `8c39191`; write `## Closing verdict` if nothing structural
-remains"). Then finalize `docs/plan/changelog.md`, spawn wave 6
-`docs-writer`, write the executive summary, and **stop for Chad's review**.
-All briefs: `docs/scratch/briefs/`. Two agents at a time.
+**The pre-build program is complete (2026-09-30).** Research, the refined
+plan, the three-round adversarial review, the changelog, the README and
+supporting docs, and the docs-only CI are all on `main` and verified.
+**Nothing further happens until Chad has reviewed the package and says
+go** (decision 2026-09-30). Read in this order: the Executive summary
+below → `README.md` → `docs/plan/00-index.md` → `docs/plan/changelog.md`
+→ `docs/plan/10-phasing-and-acceptance.md` §0 and §5.
+
+**On Chad's go, the first build session:** `git pull --rebase`; re-read
+this file; confirm the answers to the decisions below (especially the
+1a-minimum vs 1a-full cut and whether the application has been
+submitted — record its date); then start **Phase 0** and **Phase 1a**
+per `docs/plan/10-*` §3.0/§3.1a (Yahoo-free: needs no approval from
+Yahoo). Standing rules: two agents at a time, file-ownership partition,
+saved verbatim briefs + roster, explicit-path staging, push at every
+checkpoint, `qa`-style tests with every unit, CI verified after every
+push.
+
+## Executive summary (2026-09-30)
+
+**What exists.** A public, docs-only repo with a verified research pack
+(`docs/research/00–06`: tooling inventory, a 21-repo security audit,
+prior-art lessons, the Yahoo API reference, a data-source evaluation, the
+strategy/analytics methodology, the Skills/MCP design), a ten-file plan
+(`docs/plan/01–10`) refined through a three-round adversarial review
+(30 objections: 29 conceded-and-landed, 1 withdrawn on evidence, 0
+pressed), the changelog, a 947-line README with seven CI-rendered
+diagrams, LICENSE (MIT), SECURITY.md, and live CI (Mermaid/link
+validation; gitleaks with Yahoo-specific rules and a weekly full-history
+scan). No product code exists; the build is gated on Chad's review.
+
+**The five findings that shaped it.**
+1. **Yahoo API access is application-gated and read-only**; write access
+   is "not available at this time". Chad has decided read-only *is* the
+   product. No one has publicly reported approval under the new form.
+2. **Yahoo has no player projections, news or usage data** — the
+   intelligence comes from nflverse/ffopportunity/lines/injuries, and the
+   projections are ours, labelled as estimates.
+3. **No prior server has a confirmation gate, and most mishandle
+   tokens** (two public repos leak real credentials in git history). Ours
+   stores tokens outside the repo, and its gate's guarantees are stated
+   per session condition — never "safe" where the model has shell reach.
+4. **The free data stack is real and current** (nflverse CC-BY, updated
+   the day it was checked), but the Yahoo-id join misses every 2025–26
+   rookie — so the crosswalk is a persisted matcher, built first.
+5. **The season clock is the binding constraint.** Phase 1a (Yahoo-free)
+   starts on plan approval and is 4–8 weeks; even an immediate Yahoo
+   grant may yield a playoffs-only product this season. A 1a-minimum cut
+   exists to reach the optimistic end.
+
+**The shape of the product.** A local stdio MCP server (Node ≥ 24.15,
+official SDK v2, exact-pinned); 19 read tools by default (`core`), 31 in
+`full`, 7 conditional write tools; a settings-driven scoring engine
+checked against Yahoo's own totals; 12 Skills; a recommendation log and
+weekly retrospective so the advice is measured; launchd jobs for
+zero-token data refreshes and roster/FA-pool snapshots.
+
+**Decisions that need Chad** (ranked; details in the items below and in
+`docs/plan/10-*` §5):
+1. **Submit the Yahoo API application now** — not development; starts the
+   only clock nobody controls.
+2. **Approve the plan** (or send it back), and choose **1a-minimum vs
+   1a-full** for the first build phase.
+3. **Repo visibility and the branch ruleset** — public with no
+   protection today; the exact `gh api` command is in
+   `docs/scratch/ci-bootstrap.md` § "For Chad".
+4. **Notify the two repo owners whose credentials are in public git
+   history?** Nothing has been sent.
+5. **Commercial intent?** (changes two data sources) and **paid
+   projections baseline?** (default: no to both).
+6. Smaller defaults to confirm: plugin manifest in Phase 2 (yes), Odds
+   API key (skip for now), a second fixture league for unverified scoring
+   branches, Sunday live `P(win)` in Phase 1 (no).
 
 ## The finding that reshapes the product (verified by the orchestrator)
 
@@ -61,7 +121,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 2 — plan | ✅ all ten files (`docs/plan/01-*`…`10-*`, 2,935 lines), both halves verified; plan 10 §4 lists 13 small tensions to fold in during the adversarial round | `docs/plan/` |
 | 2b — docs-only automation (plan 06 §4 step 1) | ✅ `docs` (Mermaid 7/7 + links, with self-tests) and `secrets` (gitleaks 8.30.1 pinned by sha256, 7 Yahoo rules, self-test, weekly full-history scan) green on `main` at `f3a0a48`; Dependabot; PR template. GitHub secret scanning + push protection were already enabled. **Chad's step:** the branch ruleset (no force-push / no deletion / linear history) — exact `gh api` command in `docs/scratch/ci-bootstrap.md` § "For Chad"; required status checks deliberately deferred until PRs are required (a required check rejects every fresh direct push) | `.github/**`, `.gitleaks.toml`, `scripts/**` |
 | 3 — adversarial review | ✅ **closed after three rounds** (`4c1d981`): 30 objections — 29 conceded-and-landed, 1 withdrawn on evidence, 0 pressed; round 3 raised no objections, three nits (fixed by the orchestrator), remainder declared marginal; `## Closing verdict` in the log; `docs/plan/changelog.md` finalised (numbers, closing summary, rounds 1–3) | `docs/plan/adversarial-log.md`, `docs/plan/changelog.md` |
-| docs — README, LICENSE, SECURITY.md | 🟢 `docs-writer` starting on the refined plan | root + `docs/README.md`, `docs/plan/00-index.md` |
+| docs — README, LICENSE, SECURITY.md | ✅ `README.md` (947 lines, 16 sections, 7 Mermaid diagrams rendered by CI, 121 features marked 📋 planned), `LICENSE` (MIT), `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` — verified by the orchestrator; CI green on `b09fd77` | root + `docs/README.md`, `docs/plan/00-index.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
 
 ## Decisions made
@@ -166,12 +226,28 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 
 ## Open items
 
-- [ ] wave 1 complete and verified
-- [ ] waves 2–3
-- [ ] plan, adversarial rounds, docs
-- [ ] executive summary for Chad
+- [x] research waves 1–3 complete and verified (docs 00–06)
+- [x] plan (01–10), three adversarial rounds, changelog
+- [x] docs-only CI (Mermaid/links, gitleaks + self-test, Dependabot, PR template)
+- [x] README, LICENSE, SECURITY.md, docs indexes
+- [x] executive summary for Chad (above; also delivered in chat)
+- [ ] **Chad:** submit the Yahoo API application; record the date here
+- [ ] **Chad:** review the package; approve / amend; choose 1a-minimum vs 1a-full
+- [ ] **Chad:** repo visibility + branch ruleset; leaked-credential notification; commercial intent; paid projections
+- [ ] build Phase 0 + Phase 1a — **blocked on the two items above**
 
 ## Log
 
 - 2026-09-29 — Phase 0 complete. Wave 1 spawned. Briefs for waves 2–3 written
   and pushed. No Yahoo/NFL/sports connector exists in the MCP registry.
+- 2026-09-29/30 — Research 01–06 complete, each verified at source by the
+  orchestrator. Plan 01–10 written by two planners split on file ownership.
+  Docs-only CI built and proven green.
+- 2026-09-30 — Chad's decisions: no legacy Yahoo app; read-only is the
+  product; no development until the package is reviewed.
+- 2026-09-30 — Adversarial review: three rounds, 30 objections, advocate
+  rests (`4c1d981`); plan revised twice (`8c39191`, `b904a6f`); changelog
+  finalised (`72301ad`).
+- 2026-09-30 — README/LICENSE/SECURITY/indexes landed (`b09fd77`). An
+  account usage-limit cutoff hit the docs writer just after its final push;
+  nothing was lost. **Pre-build program complete; waiting on Chad.**
