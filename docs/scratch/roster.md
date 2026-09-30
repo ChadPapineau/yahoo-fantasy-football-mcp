@@ -18,7 +18,7 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | ci-bootstrap | afe971bb2e5796cc9 | 4 | ✅ done (orchestrator verified: `docs` + `secrets` green on `f3a0a48`; full-history scan green; 20 files tracked) | `.github/**`, `.gitleaks.toml`, `scripts/**`, `docs/scratch/ci-bootstrap.md` | `f3a0a48` | — |
 | devils-advocate | a2ed55e691cda6d2a | 5 | ✅ **rested** after round 3 (`4c1d981`: 7/7 round-2 rulings landed, 0 new objections, remainder marginal, closing verdict written; 30/30 answered over three rounds) | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | `618ab31` | — |
 | plan-reviser | a4ae16bdc0e7b6482 | 5 | ✅ done (rounds 1–2 applied and verified; round-3 nits fixed by the orchestrator) | `docs/plan/01-*`…`10-*`, `docs/plan/changelog.md`, `.github/workflows/docs.yml` (OBJ-12 only), `docs/scratch/plan-reviser.md` | `b904a6f` | — |
-| docs-writer | a0448bd44708ee02e | 6 | 🟢 running (on the final plan at `72301ad`) | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md`, `docs/scratch/docs-writer.md` | — | `docs/scratch/docs-writer.md` §RESUME HERE |
+| docs-writer | a0448bd44708ee02e | 6 | ✅ done — it pushed its DONE note (`b09fd77`) moments before an account usage-limit cutoff (HTTP 429) ended its session; **nothing was lost** (tree clean, all five deliverables on origin). Orchestrator verified: `docs` + `secrets` green on `b09fd77` (Mermaid 14/14, links 0 broken), identifiers limited to the repo slug + copyright line, 121 features 📋 planned / ✅ only for research, plan and CI, attribution present, 7 README diagrams, 16 sections | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md`, `docs/scratch/docs-writer.md` | `b09fd77` | — |
 
 ## Cutoff procedure
 
@@ -121,3 +121,12 @@ only if the ID is gone.
 - 2026-09-30 — wave 6 spawned: `docs-writer` on the final plan (`72301ad`)
   — README (16 sections, 7 Mermaid diagrams validated by `docs.yml` on
   push), LICENSE (MIT), SECURITY.md, `docs/README.md`, `docs/plan/00-index.md`.
+- 2026-09-30 — **usage-limit cutoff (HTTP 429)** hit the `docs-writer` as
+  it was watching its final CI run. Cutoff procedure run: tree inventoried
+  (clean), `origin` checked — its DONE note `b09fd77` and all five
+  deliverables were already pushed; no WIP to preserve, no resume needed.
+  The checkpoint-push discipline did its job.
+- 2026-09-30 — `docs-writer` ✅ verified by the orchestrator (see row).
+  **Program complete: every roster row is ✅; no `.wip.patch` remains in
+  `docs/scratch/`; ten agents, nothing lost.** The build is gated on
+  Chad's review of the package.
