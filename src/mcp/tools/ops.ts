@@ -35,6 +35,9 @@ export const SDK_VERSION = "2.2.0";
 /** The protocol eras `serveStdio` answers (plan 01 §3.1: dual era). */
 export const PROTOCOL_ERAS = ["2026-07-28", "legacy"] as const;
 
+/** refresh_log `error` codes (the store's fixed-vocabulary grammar); anything else reads `internal`. */
+export const REFRESH_ERROR_CODE = /^[a-z][a-z0-9_:.-]{0,63}$/;
+
 /** The Phase-1a dataset sources G1 reports (the weather source per FF_WEATHER_SOURCE). */
 export function statusSources(options: McpServerOptions): DatasetSourceId[] {
   const base: DatasetSourceId[] = [
@@ -76,7 +79,10 @@ export function sourceRows(ctx: {
     const failures = ctx.services.refreshLog.consecutiveFailures(id);
     const info = SOURCE_REGISTRY[id];
     const lastError =
-      latest !== null && !latest.ok && latest.error !== null && /^[a-z_]{1,40}$/.test(latest.error)
+      latest !== null &&
+      !latest.ok &&
+      latest.error !== null &&
+      REFRESH_ERROR_CODE.test(latest.error)
         ? latest.error
         : latest !== null && !latest.ok
           ? "internal"
