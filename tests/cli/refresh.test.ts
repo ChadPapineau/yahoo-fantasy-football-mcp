@@ -108,6 +108,21 @@ describe("ff refresh <source>", () => {
     expect(c.out).toMatch(/published/);
   }, 30_000);
 
+  it("two concurrent refreshes of one source: one publishes, the other skips as locked; both exit 0", async () => {
+    const s = sandbox();
+    sb = s;
+    const a = makeIo(s, { env: fixtureEnv() });
+    const b = makeIo(s, { env: fixtureEnv() });
+    const [ca, cb] = await Promise.all([
+      main(["refresh", "nflverse:injuries", "--seasons", "2026"], a),
+      main(["refresh", "nflverse:injuries", "--seasons", "2026"], b),
+    ]);
+    expect([ca, cb]).toEqual([EXIT.OK, EXIT.OK]);
+    const outs = [a.out.text, b.out.text].sort();
+    expect(outs.some((o) => o.includes(" published "))).toBe(true);
+    expect(outs.some((o) => /skipped\s+locked|unchanged/.test(o))).toBe(true);
+  }, 30_000);
+
   it("FF_WEATHER_SOURCE=off skips weather with exit 0", async () => {
     sb = sandbox();
     const io = makeIo(sb, { env: { ...fixtureEnv(), FF_WEATHER_SOURCE: "off" } });
