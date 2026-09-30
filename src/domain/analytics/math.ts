@@ -46,7 +46,8 @@ export function normalCdf(x: number): number {
                               (-1.13520398 +
                                 t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))),
     );
-  const p = 0.5 * erfc;
+  // the approximation reads erfc(0) ≈ 1 + 3e-8: cap at ½ so Φ is continuous and monotone at 0
+  const p = Math.min(0.5, 0.5 * erfc);
   return x >= 0 ? 1 - p : p;
 }
 
