@@ -62,11 +62,23 @@ export interface StoreInternals {
 /** busy_timeout while migrating at startup (before the stdio loop exists). */
 export const MIGRATION_BUSY_TIMEOUT_MS = 5000;
 
-const guards = new WeakMap<object, StatementGuard>();
+/** An open store's internals (diagnostics and tests only; never handed to src/mcp). */
+export interface StoreInternalsView {
+  readonly db: DatabaseSync;
+  readonly guard: StatementGuard;
+  readonly attachments: Attachments;
+}
+
+const internalsByStore = new WeakMap<object, StoreInternalsView>();
 
 /** The dataset write guard of an open store (the statement trace — tests and `ff doctor`). */
 export function statementGuardOf(store: Store): StatementGuard | null {
-  return guards.get(store) ?? null;
+  return internalsByStore.get(store)?.guard ?? null;
+}
+
+/** The connection, guard and attachment manager of an open store (tests/diagnostics). */
+export function storeInternalsOf(store: Store): StoreInternalsView | null {
+  return internalsByStore.get(store) ?? null;
 }
 
 /** `<store>.lock`: the process-wide store lock file. */
@@ -192,7 +204,7 @@ export function openStore(opts: StoreOpenOptions, internals: StoreInternals = {}
       // a throwing warning sink must never break a read
     }
   };
-  const writes = new WriteExecutor(internals.requiredWriteBudgetMs ?? REQUIRED_WRITE_BUDGET_MS);
+  const writes = new WriteExecutor(internals.requiredWriteBudgetMs ?? REQUIRED_WRITE_BUDGET_MS, db);
   const deps: RepoDeps = { db, writes };
   const repos = buildRepos(deps);
   const attachments = new Attachments({
@@ -262,6 +274,6 @@ export function openStore(opts: StoreOpenOptions, internals: StoreInternals = {}
       db.close();
     },
   };
-  guards.set(store, guard);
+  internalsByStore.set(store, { db, guard, attachments });
   return store;
 }

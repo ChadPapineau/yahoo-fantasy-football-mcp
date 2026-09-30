@@ -69,6 +69,14 @@ const WRITE_ACTIONS: ReadonlySet<number> = new Set([
   C.SQLITE_ANALYZE,
   C.SQLITE_CREATE_VTABLE,
   C.SQLITE_DROP_VTABLE,
+  C.SQLITE_CREATE_TEMP_INDEX,
+  C.SQLITE_CREATE_TEMP_TABLE,
+  C.SQLITE_CREATE_TEMP_TRIGGER,
+  C.SQLITE_CREATE_TEMP_VIEW,
+  C.SQLITE_DROP_TEMP_INDEX,
+  C.SQLITE_DROP_TEMP_TABLE,
+  C.SQLITE_DROP_TEMP_TRIGGER,
+  C.SQLITE_DROP_TEMP_VIEW,
 ]);
 
 /** Whether an authorizer write targets a dataset (an attached schema, or any `ds_*` object). */
@@ -177,16 +185,24 @@ export const BEST_EFFORT_BACKOFF_MS = 250;
 /** Monotonic milliseconds (lock-wait accounting only; never a stored instant). */
 const monoMs = (): number => performance.now();
 
+/** How often a REQUIRED write re-tries a busy lock (each try is non-blocking; the loop runs between). */
+export const REQUIRED_POLL_MS = 20;
+
 /**
  * The write-class executor (plan 01 §5.3). Best-effort writes wait at most the connection's
- * `busy_timeout` once and turn a busy lock into a counted miss; required writes retry — each
- * attempt waits ≤ BUSY_TIMEOUT_MS, then YIELDS to the event loop — until the next attempt would
- * overrun REQUIRED_WRITE_BUDGET_MS, then reject with StoreBusyError (plan 03 §1.2).
+ * `busy_timeout` once and turn a busy lock into a counted miss; required writes poll the lock
+ * WITHOUT blocking (busy_timeout 0 for the attempt), yielding to the event loop for
+ * REQUIRED_POLL_MS between tries, until the next try would overrun REQUIRED_WRITE_BUDGET_MS, then
+ * reject with StoreBusyError (plan 03 §1.2). Decision recorded: polling instead of 100 ms blocking
+ * steps keeps tool reads flowing while a required write waits (plan 05 §2 p95 < 300 ms).
  */
 export class WriteExecutor {
   private misses = 0;
   private busyUntil = Number.NEGATIVE_INFINITY;
-  constructor(private readonly budgetMs: number = REQUIRED_WRITE_BUDGET_MS) {}
+  constructor(
+    private readonly budgetMs: number = REQUIRED_WRITE_BUDGET_MS,
+    private readonly db: DatabaseSync | null = null,
+  ) {}
 
   /** Best-effort writes skipped because the lock was busy. */
   get cacheMissesBusy(): number {
@@ -209,21 +225,33 @@ export class WriteExecutor {
     }
   }
 
+  /** One non-blocking try: busy_timeout 0 for its duration (restored after). */
+  private tryNow<T>(fn: () => T): T {
+    if (this.db === null) return fn();
+    this.db.exec("PRAGMA busy_timeout = 0");
+    try {
+      return fn();
+    } finally {
+      this.db.exec(`PRAGMA busy_timeout = ${String(BUSY_TIMEOUT_MS)}`);
+    }
+  }
+
   async required<T>(table: StoreTable, fn: () => T): Promise<T> {
     const start = monoMs();
     let longest = 0;
     for (;;) {
       const t0 = monoMs();
       try {
-        return fn();
+        return this.tryNow(fn);
       } catch (e) {
         if (!isBusyError(e)) throw e;
       }
       const now = monoMs();
-      longest = Math.max(longest, now - t0, 1);
+      longest = Math.max(longest, now - t0);
       const waited = now - start;
-      if (waited + longest > this.budgetMs) throw new StoreBusyError(table, Math.round(waited));
-      await sleep(1);
+      if (waited + REQUIRED_POLL_MS + longest > this.budgetMs)
+        throw new StoreBusyError(table, Math.round(waited));
+      await sleep(REQUIRED_POLL_MS);
     }
   }
 }

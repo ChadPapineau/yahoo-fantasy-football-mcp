@@ -126,7 +126,7 @@ describe("required writes under a foreign writer lock", () => {
     ).toBe(0);
   });
 
-  it("yield to the event loop between attempts (no stall longer than ~one attempt)", async () => {
+  it("poll without blocking: the event loop keeps turning while a required write waits", async () => {
     await holdLock(3000);
     const gaps: number[] = [];
     let last = performance.now();
@@ -157,7 +157,7 @@ describe("required writes under a foreign writer lock", () => {
     ticking = false;
     await ticker;
     expect(gaps.length).toBeGreaterThan(5);
-    expect(Math.max(...gaps)).toBeLessThan(BUSY_TIMEOUT_MS * 2.5);
+    expect(Math.max(...gaps)).toBeLessThan(BUSY_TIMEOUT_MS);
   });
 
   it("succeed when the lock is released inside the budget", async () => {

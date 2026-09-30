@@ -226,7 +226,6 @@ export class Attachments {
   /** Full pass against refresh_log (startup and `Store.reattachIfChanged`). */
   reattachIfChanged(): ReattachReport {
     const t0 = performance.now();
-    this.evicted = [];
     const reattached: DatasetSourceId[] = [];
     const unchanged: DatasetSourceId[] = [];
     const missing: DatasetSourceId[] = [];
@@ -240,9 +239,14 @@ export class Attachments {
         .filter(isDatasetSourceId),
     );
     for (const s of this.slots.keys()) current.add(s);
-    // Most recently used first, so a full pass never evicts what readers are using.
+    // Most recently used first, then the sources the readers serve, so a full pass never
+    // crowds out what the tools read.
+    const rank = (s: DatasetSourceId): number => (tablesFor(s).length > 0 ? 1 : 0);
     const order = [...current].sort(
-      (a, b) => (this.slots.get(b)?.lastUsed ?? 0) - (this.slots.get(a)?.lastUsed ?? 0),
+      (a, b) =>
+        (this.slots.get(b)?.lastUsed ?? 0) - (this.slots.get(a)?.lastUsed ?? 0) ||
+        rank(b) - rank(a) ||
+        a.localeCompare(b),
     );
     for (const source of order) {
       const st = this.statFile(source);
@@ -260,13 +264,9 @@ export class Attachments {
         reattached.push(source);
       }
     }
-    return {
-      reattached,
-      unchanged,
-      missing,
-      detached: [...this.evicted],
-      elapsed_ms: performance.now() - t0,
-    };
+    const detached = [...this.evicted];
+    this.evicted = [];
+    return { reattached, unchanged, missing, detached, elapsed_ms: performance.now() - t0 };
   }
 
   /** The provenance stamp of what is attached for `source` (refresh_log row for its version). */
@@ -288,6 +288,11 @@ export class Attachments {
       freshness_class: SOURCE_REGISTRY[a.source].freshness,
       file_version: a.file_version,
     };
+  }
+
+  /** Sources evicted (LRU) since the last full pass; reported and cleared by reattachIfChanged. */
+  get pendingEvictions(): readonly DatasetSourceId[] {
+    return [...this.evicted];
   }
 
   /** Detaches everything that can be detached (close path). */
