@@ -8,6 +8,7 @@
 // kicked off and the late ones have not). A9: start-sit's pre-game run on week 3, then retro's run
 // on week 4 scores the logged call (regret, followed, per-player metrics, swap regret, Brier).
 import { afterEach, describe, expect, it } from "vitest";
+import { chmodSync, copyFileSync, utimesSync } from "node:fs";
 import path from "node:path";
 import { datasetDir, storePath } from "../../src/config/paths.js";
 import { seededRng } from "../../src/domain/clock.js";
@@ -20,7 +21,15 @@ import {
   outcomeAllowed,
   resolveArgs,
 } from "../../scripts/skills/tool-sequences.mjs";
-import { PUBLISHED, T0, body, connect, makeWorld, type World } from "../mcp/helpers/env.js";
+import {
+  FIXTURE_LEAGUE,
+  PUBLISHED,
+  T0,
+  body,
+  connect,
+  makeWorld,
+  type World,
+} from "../mcp/helpers/env.js";
 import { fakeHttp, fixtureRoutes } from "../sources/nflverse/helpers/harness.js";
 
 /** The scheduled jobs' refresh at the world's clock (the unchanged release check moves checked_at). */
@@ -71,6 +80,25 @@ interface Step {
 }
 
 const worlds: World[] = [];
+
+/**
+ * A fixture world whose league file is a private copy at <config>/league.yaml (0600) with its mtime
+ * set a day before the world's clock: the provider stamps as_of from the file's mtime, and a checkout
+ * newer than the fixed clock would make every rec "in the future" for E12 (it did on CI, where the
+ * clone is minutes old). `league: false` leaves it absent (the no-league-file variant).
+ */
+async function leagueWorld(clock: string, league: boolean): Promise<World> {
+  const world = await makeWorld({ noLeague: true, clock });
+  worlds.push(world);
+  if (league) {
+    const file = path.join(world.root, "config", "league.yaml");
+    copyFileSync(FIXTURE_LEAGUE, file);
+    chmodSync(file, 0o600);
+    const before = new Date(Date.parse(clock) - 86_400_000);
+    utimesSync(file, before, before);
+  }
+  return world;
+}
 afterEach(() => {
   for (const w of worlds.splice(0)) w.cleanup();
 });
@@ -131,11 +159,10 @@ describe("every Skill's tool sequence replays against the fixture-mode server", 
     for (const seq of skill.sequences) {
       it(`${skill.skill}/${seq.id} (${seq.fixture_variant ?? "base fixture"})`, async () => {
         const variant = seq.fixture_variant;
-        const world = await makeWorld({
-          noLeague: variant === "no-league-file",
-          clock: variant === "two-slots-locked" ? SUNDAY_WEEK4 : T0,
-        });
-        worlds.push(world);
+        const world = await leagueWorld(
+          variant === "two-slots-locked" ? SUNDAY_WEEK4 : T0,
+          variant !== "no-league-file",
+        );
         if (variant !== null && !["no-league-file", "two-slots-locked"].includes(variant))
           throw new Error(`unknown fixture variant ${variant}`);
         const results = await replay(world, `${skill.skill}/${seq.id}`, seq.steps);
@@ -167,8 +194,7 @@ describe("every Skill's tool sequence replays against the fixture-mode server", 
 
 describe("A9: start-sit on week N, retro on week N+1", () => {
   it("the logged week-3 call is scored: regret, followed, per-player metrics, swap regret, Brier", async () => {
-    const world = await makeWorld({ clock: BEFORE_WEEK3 });
-    worlds.push(world);
+    const world = await leagueWorld(BEFORE_WEEK3, true);
     const startSit = sequences.find((s) => s.skill === "start-sit")?.sequences[0];
     expect(startSit?.id).toBe("pre_game");
     // the pre-game sequence, replayed for week 3 (its fixture week is 4, which has no stats yet)
