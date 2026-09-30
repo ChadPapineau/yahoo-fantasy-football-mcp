@@ -25,7 +25,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` committed+pushed 
 | 10 | OBJ-12 / docs.yml + plan 04 §4.2 + plan 10 Z3 — **PROVEN GREEN** on 90d8df6: docs https://github.com/ChadPapineau/yahoo-fantasy-football-mcp/actions/runs/36672531960 · secrets https://github.com/ChadPapineau/yahoo-fantasy-football-mcp/actions/runs/36672531962 | [x] | 7592321 |
 | 11 | OBJ-13 / plan 04 §5 + R9 + A-4, plan 06 §1.1/§3, plan 10 §1/Z1 | [x] | 1150810 |
 | 12 | OBJ-20 / plan 01 D7 + §5.5, plan 05 sources row (snappy, upload.R:85, codec assertion) | [x] | 866ac36 |
-| 13 | D.2 items (Yahoo-dependency header tag ×10, FF_TOOLSET default, re-tag sources) | [ ] | — |
+| 13 | D.2 items (Yahoo-dependency header tag ×10 here; cannot-rule G2; FF_TOOLSET default G4; re-tag sweep in C) | [x] | a472362 |
 | 14 | T1–T13 per plan 10 §4 + log §1.3 additions | [ ] | — |
 | C | Consistency pass (xrefs, decisions tables, assumptions tables, Mermaid) | [ ] | — |
 | L | `docs/plan/changelog.md` `## Round 1` | [ ] | — |
