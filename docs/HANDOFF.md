@@ -360,4 +360,12 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   synchronous `node:sqlite`/engine call cannot be pre-empted; plan 05 §4.2's bound is 3 s and the
   idle case exits in 15–17 ms. **CI green on `2774446`** (push `36782980116` + dispatch
   `36782980065` with macOS): A4a `STORE_BUSY` 891 ms ubuntu / 875 ms macOS, p95 97 / 110 ms.
-
+- 2026-09-30 — **Stage B (modules) done** — workflow `ffmcp-modules` (20 agents, 0 errors): dataset
+  contract grounded in the real 2026 nflverse files (`d6c6801`), 8 parallel modules (store,
+  network/runner/weather, nflverse, scoring, crosswalk, league + `ManualLeagueProvider`, reclog,
+  Skills), analytics, MCP surface (19 P0 tools, 7 resources, 3 prompts) + `ff` CLI, integration
+  (golden over real nflverse lines, E2E over stdio, Skills dry run, latency), 3 gate/fix rounds.
+  Head `b69e439`: every automated check green — **3,392 unit + 115 process tests, 98.8 % lines**,
+  smoke in both protocol eras, CI green. The gate's only open item is **A17's manual half**
+  (Chad asks Claude Code and Claude Desktop to repeat the `ff_debug_echo` nonce). Orchestrator
+  re-ran the gate from a clean install and got the same numbers. Stage C (QA + pentest) next.
