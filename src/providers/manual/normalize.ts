@@ -146,6 +146,44 @@ export function toManualPlayer(e: RosterEntryInput): ManualPlayer {
   });
 }
 
+/**
+ * The rule fields the file leaves unsaid, named as the `rules` output names them (plan 07 A2
+ * `unverified_fields[]`; skills/onboard §2: an "I don't know" answer leaves the field out and it is
+ * "listed as unverified"). A derived flag whose inputs are all absent is listed too: `uses_faab`
+ * with neither a waiver type nor a budget, and `playoffs` (so `uses_playoff`) with no playoffs block.
+ * Fields made moot by a stated answer are not listed (a budget in a rolling-waiver league, the
+ * waiver period of a league without waivers, the veto window of a league without trade review).
+ * Every name matches `^[a-z_]{1,40}$` (the tool's field grammar); the order is fixed.
+ */
+export function unverifiedRuleFields(f: LeagueFile): readonly string[] {
+  const r = f.rules ?? {};
+  const po = f.league.playoffs;
+  const out: string[] = [];
+  const unsaid = (field: string, value: unknown, moot = false): void => {
+    if (value === undefined && !moot) out.push(field);
+  };
+  const noWaivers = r.waiver_type === "none";
+  const notFaab = r.waiver_type !== undefined && r.waiver_type !== "faab";
+  unsaid("waiver_type", r.waiver_type);
+  unsaid("waiver_time_days", r.waiver_time_days, noWaivers);
+  if (r.waiver_type === undefined && r.faab_budget === undefined) out.push("uses_faab");
+  unsaid("faab_budget", r.faab_budget, notFaab);
+  unsaid("trade_ratify_type", r.trade_review);
+  unsaid("trade_reject_time_days", r.trade_reject_time_days, r.trade_review === "none");
+  unsaid("trade_end_date", r.trade_end_date);
+  unsaid("can_trade_draft_picks", r.can_trade_draft_picks);
+  unsaid("max_adds", r.max_adds);
+  unsaid("max_weekly_adds", r.max_weekly_adds);
+  unsaid("uses_median_score", f.league.uses_median_score);
+  if (po === undefined) out.push("playoffs");
+  else {
+    unsaid("playoffs_reseeding", po.reseeding);
+    unsaid("playoffs_multiweek_championship", po.multiweek_championship);
+    unsaid("playoffs_consolation_teams", po.consolation_teams);
+  }
+  return Object.freeze(out);
+}
+
 /** Result of normalisation: the model, or the cross-field issues. */
 export type NormalizeResult =
   | { readonly ok: true; readonly data: ManualLeagueData }
@@ -352,7 +390,7 @@ export function normalizeLeague(f: LeagueFile): NormalizeResult {
     player_pool: null,
     cant_cut_list: null,
     allow_add_to_dl_extra_pos: null,
-    unverified_fields: Object.freeze([]),
+    unverified_fields: unverifiedRuleFields(f),
     capabilities: ruleCapabilities({
       uses_faab,
       waiver_time_days: r.waiver_time_days ?? null,

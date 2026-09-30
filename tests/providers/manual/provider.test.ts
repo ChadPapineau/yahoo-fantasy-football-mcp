@@ -88,7 +88,19 @@ describe("the fixture league loads and maps", () => {
       trade_ratify_type: "commissioner",
       max_adds: null,
       max_weekly_adds: null,
-      unverified_fields: [],
+      // the fixture states waivers, FAAB, trade review and playoff week/size; the rest is unsaid
+      // (QA-1-045: an omitted field is listed, never implied)
+      unverified_fields: [
+        "trade_reject_time_days",
+        "trade_end_date",
+        "can_trade_draft_picks",
+        "max_adds",
+        "max_weekly_adds",
+        "uses_median_score",
+        "playoffs_reseeding",
+        "playoffs_multiweek_championship",
+        "playoffs_consolation_teams",
+      ],
       playoffs: { uses_playoff: true, start_week: 15, num_teams: 6 },
       capabilities: { hasFaab: true, waiverProcessingDays: 2, tradeReviewMode: "commissioner" },
     });
