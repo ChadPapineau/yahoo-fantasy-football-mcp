@@ -150,6 +150,31 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   Node 24 is current LTS (03 A-7) — the Node floor and the warning are
   material for the adversarial round.
 
+## Build facts (Stage A, 2026-09-30 — verified by the orchestrator)
+
+- **Working copy for the build: `~/Developer/yahoo-fantasy-football-mcp`** (outside iCloud).
+  The canonical checkout Chad chose, `~/Documents/Repos/Yahoo Fantasy Football`, stays and is
+  updated by `git pull`; it holds no `node_modules`/`dist`/coverage. Reason: iCloud created 207
+  conflict duplicates inside `node_modules` (`@babel/parser 2` …) during Stage A and broke three
+  tests locally; git metadata written by parallel agents is at the same risk. The commit helper
+  now refuses any "name 2.ext" conflict-copy path.
+- Node **24.21.0** via fnm for this repo only (`.nvmrc` = 24; the global default stays 22 for
+  SOTARA). `node:sqlite` on 24 prints no experimental warning; `ATTACH 'file:…?mode=ro'` is
+  honoured; **at most 10 attached databases** — Phase 2 needs attach-on-demand (LRU).
+- Pins (exact): `@modelcontextprotocol/server` 2.2.0, `zod` 4.6.5 (one copy, test-enforced),
+  `hyparquet` 1.31.2, `yaml` 2.9.1 → a **5-package runtime tree**; TypeScript **6.0.3** (not
+  7.x: typescript-eslint 8.71 requires < 6.1 and TS 7 has no JS API for typed lint).
+- Contract deviations from the plan text (deliberate, documented in the file headers):
+  `FantasyPlatform.getPlayerWeekStats` → `getPlayerStats` (week or season), every read returns
+  `Stamped<T>`; `DataSource` publishes a fresh per-source dataset file (`publish(files,
+  DatasetWriter)`) instead of `load(file, tx)` — round 2 OBJ-27; the envelope gained
+  `meta.request_id`; `release-assets.githubusercontent.com` joined the host allow-list (GitHub
+  release downloads redirect there); `config.json` unknown keys warn; `availability` is
+  `FA | W | T | unknown` (plan 07); `delta_pwin` bands |Δ| < 0.04 small, < 0.10 medium, else large.
+- Tools must be registered as `registerTool(name, { inputSchema: deferValidation(schema), … },
+  wrapHandler(schema, fn))` — the only pattern that keeps plan 01 §4.3 coded errors under SDK
+  2.2.0.
+
 ## Confirmation-gate facts (verified 2026-09-29)
 
 - MCP spec current revision is **2026-07-28**; elicitation is a
@@ -255,3 +280,12 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 - 2026-09-30 — README/LICENSE/SECURITY/indexes landed (`b09fd77`). An
   account usage-limit cutoff hit the docs writer just after its final push;
   nothing was lost. **Pre-build program complete; waiting on Chad.**
+- 2026-09-30 — **Build approved.** Guard-rails first (`b0a7194`, `1224af6`): secret/identifier
+  scanner + pre-commit hook + commit helper, all self-tested.
+- 2026-09-30 — **Stage A (foundation) green** — workflow `ffmcp-foundation`: scaffold (`.npmrc`
+  alone first `8402644`, Z3 proven), exact pins, strict TS, ESLint with layer boundaries,
+  coverage gate, zero-dep supply-chain checks, `ci.yml`; the contract layer, critiqued by two
+  independent critics (46 issues: 44 applied, 2 routed to owners) and revised (`fbcd8e8`); an
+  independent gate re-ran everything from a clean install — green first time, **1,014 tests**,
+  ~99.5 % coverage, CI green. Orchestrator re-verified in a fresh clone outside iCloud and moved
+  the build there; added the domain `Math.random`/`Date.now` ban and the conflict-copy guard.

@@ -32,3 +32,15 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
     scan of what `npm pack` would ship. Each one has a test proving it fails on bad input.
   - `ci.yml`: lint, typecheck, test (with coverage gate), supply-chain and pack jobs on every
     push and pull request, actions pinned by commit SHA, read-only permissions.
+- The shared contract layer every module codes against (Stage A, adversarially critiqued — 46
+  issues, 44 applied): the `FantasyPlatform` seam and its types (`src/providers/platform.ts`,
+  `src/domain/league/types.ts`), the `DataSource` contract publishing immutable per-source dataset
+  files (`src/sources/source.ts`), scoring, analytics, reclog, crosswalk and store types, a
+  deterministic `Clock`/seeded `Rng` (`src/domain/clock.ts`), the output envelope with
+  untrusted-text wrapping and budgets (`src/mcp/envelope.ts`), the error-code table
+  (`src/mcp/errors.ts`), input bounds and key grammars (`src/mcp/bounds.ts`), the configuration
+  schema, safe paths and freshness table (`src/config/`), and a stderr-only redacting logger
+  (`src/cli/log.ts`).
+- Development guard-rails: a zero-dependency secret and personal-identifier scanner run by a
+  pre-commit hook and by the commit helper (`scripts/dev/`); `src/domain` may not call
+  `Math.random` or `Date.now` (seeded `Rng` and injected `Clock` only).
