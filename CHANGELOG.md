@@ -9,6 +9,42 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
 
 ### Added
 
+- **Phase 1a (1a-full, the Yahoo-free half; `docs/plan/10-phasing-and-acceptance.md` §3.1a)** on
+  `build/phase-1a`:
+  - Store (`src/store`): `node:sqlite` with WAL, STRICT tables, forward-only migrations with a
+    consistent pre-migration backup, all 14 repositories, per-source dataset files published by
+    atomic rename and re-attached read-only, the busy-lock write classes.
+  - Network and refresh (`src/http`, `src/sources/runner.ts`): one allow-listed HTTPS client
+    (redirect/size/gzip/timeout guards), a rate limiter, the retrying refresh runner.
+  - Sources: nflverse `schedules`, `injuries`, `roster_weekly`, `stats_player_week` (parquet,
+    schema + codec assertion, team-defence weeks derived at load) and weather (Open-Meteo, NWS).
+  - Scoring engine (`src/domain/scoring`, plan 08 in full over nflverse lines), the crosswalk
+    (`src/domain/crosswalk`, overrides file), the league model and `ManualLeagueProvider`
+    (hardened `league.yaml` parser), the analytics engines E1/E2/E3 `pre`/E5 K/DEF, the
+    recommendation log and retrospective (`src/domain/reclog`).
+  - The MCP surface: the 19 P0 tools under `FF_TOOLSET=core`, 7 resources, 3 prompts, the
+    fixture-only `ff_debug_echo`; the `ff` CLI (`serve`, `status`, `doctor`, `refresh`,
+    `print-config`, `install-launchd`, `uninstall`, `prune`, `backup`).
+  - Skills `start-sit`, `stream-kdef`, `retro`, `onboard` (manual mode) with the shared
+    references, `build-skills` / `check-skills`.
+  - Integration: a golden test over every fixture nflverse player-week and team defence
+    (`fixtures/golden/nflverse/`), the whole product end to end over real stdio against the
+    built `dist/` (every tool, resource and prompt; hostile arguments; raw JSON-RPC frames), the
+    Skills Lane 1 fixture dry run and the A9 week-N → N+1 chain, the A15 latency suite.
+  - CI: `process` (ubuntu on every push; macOS weekly/on demand), `smoke` (the MCP Inspector CLI
+    pinned to 2.8.0 plus `npm run smoke`), and the `docs` → `skills` job; package scripts
+    `test:process`, `test:all`, `smoke`, `build:skills`, `check:skills`.
+
+### Fixed
+
+- `ManualLeagueProvider` scoring goes through the engine's `normalizeSettings`, so
+  `negative_points: false` floors the player-week total (plan 08 §4.4 / P9) and `settings_hash`
+  has one definition.
+- A team-level nflverse row (no `player_id`) now credits its team defence (the 2026 week-2 BUF
+  safety was lost); the games reader uses the venue's physical roof for open-air and fixed-roof
+  venues (nflverse says `dome` for the MCG, Stade de France and Allianz Arena); a transient
+  failure polling an nflverse `timestamp.txt` is retried instead of failing the refresh.
+
 - Project scaffold (Phase 0 remainder, `docs/plan/10-phasing-and-acceptance.md` §3.0):
   - `.npmrc` — `save-exact`, `ignore-scripts`, `engine-strict`, `audit`, no funding noise; landed
     alone before `package.json` so the docs workflow could be shown green with it present (Z3).
