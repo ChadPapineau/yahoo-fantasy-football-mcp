@@ -12,7 +12,7 @@ docs/scratch/roster.md, docs/scratch/program.md, docs/scratch/briefs/*, docs/pla
 SDK README, npm registry). Verifying three last facts (SDK v2 legacy-client compat, `node:sqlite`
 stability, client elicitation support), then writing plan files 01 → 06 in order.
 
-**Next step:** write `docs/plan/01-system-architecture.md`; commit + push; then 02 … 06.
+**Next step:** write `docs/plan/02-security-architecture.md`; commit + push; then 03 … 06.
 If resuming cold: the "Working notes" below hold every verified fact and every decision taken so
 far — do not re-derive them.
 
@@ -20,7 +20,7 @@ far — do not re-derive them.
 
 | File | Status |
 |---|---|
-| `docs/plan/01-system-architecture.md` | not started |
+| `docs/plan/01-system-architecture.md` | **written, pushed** |
 | `docs/plan/02-security-architecture.md` | not started |
 | `docs/plan/03-lifecycle-and-operations.md` | not started |
 | `docs/plan/04-repo-structure-and-ci.md` | not started |
@@ -40,8 +40,17 @@ far — do not re-derive them.
 - Confirmation gate = `prepare_*`/`commit_*` with HMAC token bound to the diff + a precondition
   hash (compare-and-set at commit); human confirmation via elicitation where the client supports
   it; fallback = out-of-band one-time code (macOS notification) or CLI `confirm <id>`.
-- SDK: decide v1 (1.31.0, spec ≤2025-11-25) vs v2 (2.2.0, spec 2026-07-28) after checking legacy
-  client compatibility; exact pin either way.
+- SDK: **v2 `@modelcontextprotocol/server` 2.2.0 exact-pinned** — `serveStdio` serves both the
+  legacy `initialize` era and 2026-07-28 by default (docs/protocol-versions.md); tool handlers return
+  `inputRequired({ inputRequests: { k: inputRequired.elicit({...}) } })`, the legacy shim converts it
+  to `elicitation/create` for old clients; `createRequestStateCodec({ key, ttlSeconds })` = HMAC-SHA256
+  `mint`/`verify`; `acceptedContent(ctx.mcpReq.inputResponses, key, schema)` on re-entry.
+- Verified 2026-09-29: `node:sqlite` = "Stability: 1.2 - Release candidate", unflagged since 22.13.0,
+  sync-only. `hyparquet` 1.31.x = pure JS, MIT, zero deps, no install scripts. Inspector has `--cli`
+  + `docs/cli-smoke-testing.md`. Claude Code: form+URL elicitation on 2026-07-28 connections
+  (CLI 2.1.76+); Claude Desktop/Cowork: declares elicitation but open bugs drop/cancel it
+  (anthropics/claude-ai-mcp#1046, #153; anthropics/claude-code#56243, #41110) — search-result
+  snippets, pages not opened.
 
 **Open questions for the orchestrator:** none yet.
 
