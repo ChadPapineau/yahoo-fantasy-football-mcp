@@ -272,16 +272,60 @@ describe("clean negatives of the manual league (critic C-14)", () => {
     const c = e.data.candidates as {
       availability: string;
       position: string;
+      gsis_id: string | null;
       kdef: { implied_total: number | null };
     }[];
     expect(c.every((x) => x.availability === "unknown")).toBe(true);
     expect(e.warnings).toContain(MANUAL_FA_POOL_WARNING);
-    // the fixture roster excerpt holds three kickers (Boswell, Fairbairn, Folk): all are ranked
+    // the roster excerpt holds every kicker (make-fixtures: position K): the universe is each
+    // team's kicker — an active-roster (ACT) row; cut and practice-squad kickers never appear
     const kickers = world.store.rosterWeekly.latest(2026).rows.filter((r) => r.position === "K");
-    // my own kicker (Boswell) is the hold-vs-stream baseline, not a candidate
-    expect(c.filter((x) => x.position === "K").length).toBe(kickers.length - 1);
-    expect(c.filter((x) => x.position === "DEF").length).toBeGreaterThanOrEqual(3);
+    const active = new Set(kickers.filter((r) => r.status === "ACT").map((r) => r.gsis_id));
+    expect(active.size).toBe(32);
+    expect(kickers.length).toBeGreaterThan(active.size); // the excerpt does hold CUT/DEV kickers
+    const k = c.filter((x) => x.position === "K");
+    // E5_CANDIDATES_OUT.compact (10) split evenly, interleaved by rank, and never truncated (A8
+    // margin: 5 per position, from 31 kickers — mine is the baseline — and 31 defences)
+    expect(e.truncated).not.toBe(true);
+    expect(c.map((x) => x.position)).toEqual(
+      Array.from({ length: 10 }, (_, i) => (i % 2 === 0 ? "K" : "DEF")),
+    );
+    expect(k.length).toBe(5);
+    expect(k.every((x) => x.gsis_id !== null && active.has(x.gsis_id))).toBe(true);
+    expect(c.filter((x) => x.position === "DEF").length).toBe(5);
+    // detail full: 3 + 3 inside the 10 000-char budget by construction, not by halving
+    const f = await ok("ff_analyze_waivers", { positions: ["K", "DEF"], detail: "full" });
+    const fc = f.data.candidates as { position: string }[];
+    expect(f.truncated).not.toBe(true);
+    expect(fc.filter((x) => x.position === "K").length).toBe(3);
+    expect(fc.filter((x) => x.position === "DEF").length).toBe(3);
     expect(c.every((x) => x.kdef.implied_total !== null)).toBe(true);
+  });
+  it("E5: a cut or practice-squad kicker is not a team's kicker, even when named", async () => {
+    const off = world.store.rosterWeekly
+      .latest(2026)
+      .rows.filter((r) => r.position === "K" && r.status !== "ACT");
+    expect(off.map((r) => r.status).sort()).toEqual(expect.arrayContaining(["CUT", "DEV"]));
+    for (const r of off) {
+      const e = await err("ff_analyze_waivers", {
+        positions: ["K"],
+        candidates: [`manual.p.${r.gsis_id}`],
+      });
+      expect(e.code).toBe("NOT_FOUND");
+    }
+    const act = world.store.rosterWeekly
+      .latest(2026)
+      .rows.find(
+        (r) => r.position === "K" && r.status === "ACT" && `manual.p.${r.gsis_id}` !== BOSWELL,
+      );
+    if (act === undefined) throw new Error("no active kicker");
+    const ok1 = await ok("ff_analyze_waivers", {
+      positions: ["K"],
+      candidates: [`manual.p.${act.gsis_id}`],
+    });
+    expect((ok1.data.candidates as { gsis_id: string }[]).map((c) => c.gsis_id)).toEqual([
+      act.gsis_id,
+    ]);
   });
   it("E3 / E2 pwin without an opponent roster: NOT_FOUND with the fixed hint", async () => {
     const e3 = await err("ff_analyze_matchup", { week: 4 });

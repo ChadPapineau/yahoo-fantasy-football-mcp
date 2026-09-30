@@ -846,7 +846,11 @@ function rosTotal(weeks: readonly ProjectedWeek[]): Dist | null {
 
 // --- entry point ------------------------------------------------------------------------------------------
 
-function validate(req: ProjectionRequest, minSims: number): number {
+function validate(
+  req: ProjectionRequest,
+  minSims: number,
+  maxTargets: number = LIMITS.maxTargets,
+): number {
   const n = req.n_sims ?? SIMS.default;
   if (!Number.isInteger(n) || n < minSims || n > SIMS.max) {
     throw new AnalyticsError("invalid_request", "n_sims out of range", ["n_sims"]);
@@ -862,7 +866,7 @@ function validate(req: ProjectionRequest, minSims: number): number {
   ) {
     throw new AnalyticsError("invalid_request", "weeks must be distinct integers 1..22", ["weeks"]);
   }
-  if (req.targets.length > LIMITS.maxTargets) {
+  if (req.targets.length > maxTargets) {
     throw new AnalyticsError("invalid_request", "too many players", ["targets"]);
   }
   return n;
@@ -880,10 +884,12 @@ export function projectPlayers(req: ProjectionRequest): ProjectionOutcome {
 
 /**
  * The E5 path: the same projection with engine-internal sample sizes below E1's public floor — a
- * ranking needs means, not tails (A15 latency) — and a smaller size for the look-ahead weeks.
+ * ranking needs means, not tails (A15 latency) — and a smaller size for the look-ahead weeks. Its
+ * target bound is E5's own (LIMITS.maxKdefCandidates: 32 defences + every team's kicker + mine),
+ * not E1's selector bound — the real universe is 64 before my roster's K/DEF join it.
  */
 export function projectForRanking(req: ProjectionRequest, nLater: number): ProjectionOutcome {
-  const n = validate(req, KDEF.minSims);
+  const n = validate(req, KDEF.minSims, LIMITS.maxKdefCandidates);
   if (!Number.isInteger(nLater) || nLater < KDEF.minSims || nLater > n) {
     throw new AnalyticsError("invalid_request", "look-ahead n_sims out of range", ["n_sims"]);
   }

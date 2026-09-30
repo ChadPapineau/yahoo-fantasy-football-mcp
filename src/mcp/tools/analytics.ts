@@ -744,6 +744,43 @@ const e5Data = z.strictObject({
 });
 
 /** The K/DEF universe: all 32 defences + every kicker on the season's weekly rosters. */
+/**
+ * How many E5 candidates a result carries, over all requested positions (plan 07 E5 "10 candidates
+ * compact"; full: ~1.25 k chars each, so 6 stay inside C8's 10 000 by construction, not by halving).
+ */
+export const E5_CANDIDATES_OUT = Object.freeze({ compact: 10, full: 6 });
+
+/**
+ * The engine's per-position ranking cut to an even share of E5_CANDIDATES_OUT and interleaved by
+ * rank (K1, DEF1, K2, DEF2, …), so the result fits the budget and any prefix C8's halving keeps
+ * still holds every position: with the full K universe, K then DEF blocks of 10 were halved to ten
+ * kickers and no defence at all (A8: ≥ 3 per position).
+ */
+export function balancedCandidates<C extends { readonly position: string }>(
+  ranked: readonly C[],
+  full: boolean,
+): C[] {
+  const byPos = new Map<string, C[]>();
+  for (const c of ranked) byPos.set(c.position, [...(byPos.get(c.position) ?? []), c]);
+  const share = Math.max(
+    1,
+    Math.floor(
+      (full ? E5_CANDIDATES_OUT.full : E5_CANDIDATES_OUT.compact) / Math.max(1, byPos.size),
+    ),
+  );
+  const lists = [...byPos.values()].map((l) => l.slice(0, share));
+  const out: C[] = [];
+  for (let i = 0; i < share; i += 1)
+    for (const l of lists) {
+      const c = l[i];
+      if (c !== undefined) out.push(c);
+    }
+  return out;
+}
+
+/** nflverse `roster_weekly.status` for a player on a team's active roster. */
+const ACTIVE_ROSTER_STATUS = "ACT";
+
 function kdefUniverse(
   ctx: ToolContext,
   lc: LeagueContext,
@@ -760,8 +797,10 @@ function kdefUniverse(
     nfl_team: t,
     availability: "unknown" as const,
   }));
+  // "every team's kicker" (plan 07 E5): a kicker whose newest row is on an active roster (ACT);
+  // a cut (CUT) or practice-squad (DEV) kicker does not kick for that team this week
   const kickers: KdefCandidateInput[] = rr.rows
-    .filter((r) => r.position === "K")
+    .filter((r) => r.position === "K" && r.status === ACTIVE_ROSTER_STATUS)
     .map((r) => ({
       player_key: manualPlayerKeyFor({ kind: "player", gsis_id: r.gsis_id }),
       subject: { kind: "player" as const, gsis_id: r.gsis_id },
@@ -852,7 +891,7 @@ export const analyzeWaiversTool = defineTool({
     if (!out.availability_known) warnings.push(MANUAL_FA_POOL_WARNING);
     const a = out.analysis;
     const full = args.detail === "full";
-    const candidates = a.candidates.map((c) => ({
+    const candidates = balancedCandidates(a.candidates, full).map((c) => ({
       player_key: c.player_key,
       ...(full ? { subject: c.subject } : {}),
       gsis_id: c.gsis_id,

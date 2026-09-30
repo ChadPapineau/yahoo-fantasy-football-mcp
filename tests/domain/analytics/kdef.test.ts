@@ -7,6 +7,7 @@ import {
   type KdefCandidateInput,
   type KdefRequest,
 } from "../../../src/domain/analytics/kdef.js";
+import { LIMITS } from "../../../src/domain/analytics/constants.js";
 import { fixedClock, seededRng } from "../../../src/domain/clock.js";
 import type { ScoringSettings } from "../../../src/domain/scoring/types.js";
 import {
@@ -137,6 +138,26 @@ describe("analyzeKdef", () => {
         expect.objectContaining({ code: "invalid_request" }),
       );
     }
+  });
+
+  it("the whole universe plus my own K and DEF is ranked, not refused (E1's 64-target bound)", () => {
+    // 32 defences + 32 kickers is exactly E1's LIMITS.maxTargets; my roster's K/DEF (keys the
+    // universe does not hold — the manual league keys them per team) pushed the ranking pass past
+    // it and every served ff_analyze_waivers call on the real roster_weekly was VALIDATION
+    expect(universe.length).toBe(LIMITS.maxTargets);
+    const k = universe.find((u) => u.position === "K");
+    const d = universe.find((u) => u.position === "DEF");
+    if (k === undefined || d === undefined) throw new Error("fixture universe");
+    const current: KdefCandidateInput[] = [
+      { ...k, player_key: "mine.k", availability: "T" },
+      { ...d, player_key: "mine.def", availability: "T" },
+    ];
+    expect(universe.length + current.length).toBeGreaterThan(LIMITS.maxTargets);
+    expect(universe.length + current.length).toBeLessThanOrEqual(LIMITS.maxKdefCandidates);
+    const out = analyzeKdef(req({ current }));
+    expect(out.analysis.candidates.filter((c) => c.position === "K")).toHaveLength(10);
+    expect(out.analysis.candidates.filter((c) => c.position === "DEF")).toHaveLength(10);
+    expect(out.analysis.hold_vs_stream).not.toBeNull();
   });
 
   it("an empty universe yields no candidates and an honest no-move rec", () => {
