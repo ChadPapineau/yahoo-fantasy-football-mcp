@@ -40,8 +40,15 @@ export default defineConfig({
       },
       {
         extends: true,
-        // one file at a time: process tests measure wall-clock latency and spawn servers
-        test: { name: "process", include: PROCESS_TESTS, fileParallelism: false },
+        // one file at a time (wall-clock latency is measured here); every test spawns processes,
+        // so the default 5 s per test is too short under load (tests/process/cli.test.ts)
+        test: {
+          name: "process",
+          include: PROCESS_TESTS,
+          fileParallelism: false,
+          testTimeout: 30_000,
+          hookTimeout: 120_000,
+        },
       },
     ],
     coverage: {
