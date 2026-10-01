@@ -249,13 +249,15 @@ describe("parse + schema + normalize units", () => {
       current_week_override: null,
     });
     expect(n.data.my_team.players?.[0]?.slot).toBe("BN");
+    // a file silent on waivers and playoffs says neither "yes" nor "no": unknown (QA-1-045); an
+    // unknown FAAB still grants no FAAB capability
     expect(n.data.rules).toMatchObject({
-      uses_faab: false,
+      uses_faab: null,
       waiver_type: null,
       faab_budget: null,
       capabilities: { hasFaab: false, tradeReviewMode: "unknown" },
     });
-    expect(n.data.rules.playoffs.uses_playoff).toBe(false);
+    expect(n.data.rules.playoffs.uses_playoff).toBeNull();
   });
 
   it("uses_faab follows a stated budget when no waiver type is given", () => {

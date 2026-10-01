@@ -422,8 +422,11 @@ export function normalizeLeague(f: LeagueFile): NormalizeResult {
 
   // --- rules ---
   const r = f.rules ?? {};
+  // unknown (null) when the file says nothing about waivers: never a silent "no FAAB" (QA-1-045)
   const uses_faab =
-    r.waiver_type === "faab" || (r.waiver_type === undefined && r.faab_budget !== undefined);
+    r.waiver_type === undefined && r.faab_budget === undefined
+      ? null
+      : r.waiver_type === "faab" || (r.waiver_type === undefined && r.faab_budget !== undefined);
   const trade_ratify_type = r.trade_review ?? null;
   const rules: LeagueRules = Object.freeze({
     waiver_type: r.waiver_type ?? null,
@@ -439,7 +442,7 @@ export function normalizeLeague(f: LeagueFile): NormalizeResult {
     max_weekly_adds: r.max_weekly_adds ?? null,
     uses_median_score: f.league.uses_median_score ?? null,
     playoffs: Object.freeze({
-      uses_playoff: po !== undefined,
+      uses_playoff: po !== undefined ? true : null,
       start_week: po?.start_week ?? null,
       num_teams: po?.num_teams ?? null,
       reseeding: po?.reseeding ?? null,
