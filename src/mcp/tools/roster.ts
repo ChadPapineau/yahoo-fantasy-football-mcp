@@ -56,7 +56,7 @@ import {
   optionalDataset,
   present,
   readOpts,
-  requiredDataset,
+  requiredSource,
   rosterRows,
   scoringOf,
   seasonGames,
@@ -350,7 +350,7 @@ export const getPlayerStats = defineTool({
       resolved.map((r) => (r.subject?.kind === "defense" ? r.subject.nfl_team : null)),
     );
     const lines = ctx.services.datasets.playerWeeks.lines(gsis, season, weeks);
-    const dIn = requiredDataset(lines, ctx.nowMs, lc.allowStale);
+    const dIn = requiredSource(ctx, "nflverse:stats_player_week", lines, lc.allowStale);
     if (dIn !== null) inputs.push(dIn);
     const dLines =
       teams.length === 0

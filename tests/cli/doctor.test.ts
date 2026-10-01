@@ -50,6 +50,7 @@ import { openExistingStore, openStore, storeOpenReason } from "../../src/cli/sto
 import { datasetFilePath, storePath } from "../../src/config/paths.js";
 import { loadConfig, type Config } from "../../src/config/schema.js";
 import { fixedClock } from "../../src/domain/clock.js";
+import { DS_SCHEMA_VERSION } from "../../src/store/attach.js";
 import { fixtureFetch } from "../../src/cli/fixture-fetch.js";
 import type { FetchLike } from "../../src/http/client.js";
 import {
@@ -428,6 +429,9 @@ describe("rows 8–10 — store, datasets, journal", () => {
       expect(r.details.join("\n")).toMatch(
         /nflverse:injuries: dataset file quick_check (corrupt|unreadable)/,
       );
+      // a plain refresh repairs it (QA-1-038): the fix never says --force
+      expect(r.details.join("\n")).toContain("`ff refresh nflverse:injuries`");
+      expect(r.details.join("\n")).not.toContain("--force");
       expect(r.details.join("\n")).toMatch(
         /nflverse:roster_weekly: listed as current but its dataset file is missing/,
       );
@@ -435,6 +439,27 @@ describe("rows 8–10 — store, datasets, journal", () => {
       if (ex2.kind === "open") ex2.store.close();
     }
     expect(quickCheckFile(path.join(s.dir, "nope.sqlite"))).toBe("unreadable");
+  });
+
+  it("row 8: a dataset file of another layout (ds_schema) fails and names the refresh [QA-1-098]", () => {
+    const s = refreshed();
+    const c = cfg(s);
+    const clock = fixedClock(REFRESHED_AT);
+    const db = new DatabaseSync(datasetFilePath(s.cacheDir, "nflverse:schedules"));
+    db.exec(
+      `UPDATE dataset_meta SET value = '${String(DS_SCHEMA_VERSION + 1)}' WHERE key = 'ds_schema'`,
+    );
+    db.close();
+    const ex = openExistingStore(c, clock, log(s));
+    try {
+      const r = checkStore(c, ex);
+      expect(r.status).toBe("fail");
+      expect(r.details.join("\n")).toContain(
+        `nflverse:schedules: dataset file layout v${String(DS_SCHEMA_VERSION + 1)}, this binary reads v${String(DS_SCHEMA_VERSION)} — \`ff refresh nflverse:schedules\``,
+      );
+    } finally {
+      if (ex.kind === "open") ex.store.close();
+    }
   });
 
   it("row 8: newer / pending / error stores", () => {

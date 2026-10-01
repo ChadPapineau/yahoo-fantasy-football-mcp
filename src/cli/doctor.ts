@@ -34,7 +34,9 @@ import type { DatasetSourceId } from "../config/freshness.js";
 import { createHttpClient } from "../http/client.js";
 import { ManualLeagueProvider } from "../providers/manual/index.js";
 import { LeagueFileError, MANUAL_LEAGUE_MISSING_HINT } from "../providers/platform.js";
+import { DS_SCHEMA_VERSION, parseDsSchema } from "../store/attach.js";
 import { MIGRATIONS } from "../store/index.js";
+import { readDatasetFileMeta } from "../store/publisher.js";
 import { storeInternalsOf } from "../store/store.js";
 import type { Store, StoreFactory } from "../store/types.js";
 import { VERSION } from "../version.js";
@@ -757,8 +759,16 @@ export function checkStore(config: Config, ex: ExistingStore): DoctorRow {
     const c = quickCheckFile(file);
     if (c !== "ok") {
       worse("fail");
+      // a plain refresh republishes a damaged current file (49ace6d): --force is not needed
+      details.push(`${r.source}: dataset file quick_check ${c} — \`ff refresh ${r.source}\``);
+      continue;
+    }
+    // another dataset layout (plan 03 §7 ds_schema): never served; the next refresh rewrites it
+    const layout = parseDsSchema(readDatasetFileMeta(file)?.ds_schema);
+    if (layout !== DS_SCHEMA_VERSION) {
+      worse("fail");
       details.push(
-        `${r.source}: dataset file quick_check ${c} — \`ff refresh ${r.source} --force\``,
+        `${r.source}: dataset file layout ${layout === null ? "unknown" : `v${String(layout)}`}, this binary reads v${String(DS_SCHEMA_VERSION)} — \`ff refresh ${r.source}\``,
       );
     }
   }
