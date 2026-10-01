@@ -2,7 +2,6 @@
 // §3.1a) must show YAML the server actually accepts: its example is parsed with the provider's own
 // hardened parser and validated against its schema, so a schema change that the Skill does not
 // follow fails here instead of in the user's terminal.
-import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -18,7 +17,7 @@ import { describe, expect, it } from "vitest";
 import { defaultLeagueFilePath, resolveConfigDir } from "../../src/config/paths.js";
 import { leagueFileSchema, parseLeagueYaml } from "../../src/providers/manual/index.js";
 import { FIXTURE_LEAGUE } from "../mcp/helpers/env.js";
-import { ROOT } from "./helpers.js";
+import { ROOT, runSaveSteps, saveBlocks } from "./helpers.js";
 
 const guide = readFileSync(
   path.join(ROOT, "skills/onboard/references/onboard-league-yaml.md"),
@@ -45,41 +44,6 @@ describe("the onboard guide's league.yaml", () => {
     }
   });
 });
-
-/** The guide's save commands (the one ```sh block under "Saving it"). */
-const saveBlocks = [...guide.matchAll(/^```sh\n([\s\S]*?)^```/gm)].map((m) => m[1] ?? "");
-
-/**
- * Runs the guide's save commands in `sh` as a user would paste them, under a private HOME and the
- * given environment. The "save the YAML … with any editor" comment line stands for the user's
- * editor: it is replaced by a copy of the fixture league to the very path the next `chmod 600`
- * line names (so the test follows the guide's path, whatever it is), and `ff` is a stub that logs.
- */
-function runSaveSteps(
-  env: Record<string, string>,
-  home: string,
-): { stdout: string; ffLog: string } {
-  const block = saveBlocks[0] ?? "";
-  const target = /^chmod 600 (.+)$/m.exec(block)?.[1];
-  if (target === undefined) throw new Error("the save commands have no `chmod 600 <file>` line");
-  const script = block
-    .split("\n")
-    .map((l) => (l.startsWith("# save the YAML") ? `cp "$FF_TEST_YAML" ${target}` : l))
-    .join("\n");
-  const log = path.join(home, "..", "ff.log");
-  const r = spawnSync("/bin/sh", ["-c", `ff() { echo "ff $*" >> "$FF_TEST_LOG"; }\n${script}`], {
-    encoding: "utf8",
-    env: {
-      PATH: "/usr/bin:/bin",
-      HOME: home,
-      FF_TEST_YAML: FIXTURE_LEAGUE,
-      FF_TEST_LOG: log,
-      ...env,
-    },
-  });
-  expect(r.status, r.stderr).toBe(0);
-  return { stdout: r.stdout, ffLog: existsSync(log) ? readFileSync(log, "utf8") : "" };
-}
 
 describe("QA-1-072: the guide's save commands put league.yaml where the server reads it", () => {
   it("has exactly one block of save commands, with umask 077", () => {
@@ -110,7 +74,8 @@ describe("QA-1-072: the guide's save commands put league.yaml where the server r
         const home = path.join(base, "home");
         mkdirSync(home, { mode: 0o700 });
         const env = envOf(home);
-        const { ffLog } = runSaveSteps(env, home);
+        const { status, stderr, ffLog } = runSaveSteps(env, home);
+        expect(status, stderr).toBe(0);
         const want = defaultLeagueFilePath(resolveConfigDir(env, home));
         expect(existsSync(want), `expected the league file at ${want}`).toBe(true);
         expect(statSync(want).mode & 0o777).toBe(0o600);
