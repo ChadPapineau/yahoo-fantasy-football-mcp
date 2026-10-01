@@ -13,6 +13,7 @@ import {
   isDatasetSourceId,
   type DatasetSourceId,
 } from "../../config/freshness.js";
+import type { CrosswalkDiagnostic } from "../../domain/crosswalk/matcher.js";
 import type { UnmatchedPlayer } from "../../domain/crosswalk/types.js";
 import {
   LEAGUE_FILE_INVALID_HINT,
@@ -27,7 +28,7 @@ import { FfError, describeForLog, wrapHandler } from "../errors.js";
 import type { McpServerOptions, McpServices } from "../services.js";
 import { bare, leagueContext, leagueUniverse, textSource, type LeagueContext } from "./common.js";
 import { advertisedInputSchema, advertisedOutputSchema, FAMILY_ANNOTATIONS } from "../define.js";
-import { bareName, iso, playerKey, week } from "./schemas.js";
+import { bareName, gsisId, iso, playerKey, week } from "./schemas.js";
 
 /** The tool contract version the Skills stamp and check (plan 09 §4 K5; skills/_shared/manifest.json). */
 export const TOOL_CONTRACT = 1;
@@ -121,11 +122,41 @@ export function sourceRows(ctx: {
   });
 }
 
+/** The NFL players an unmatched entry might be (QA-1-048): enough to pick the right gsis_id. */
+const candidateRow = z.strictObject({
+  gsis_id: gsisId,
+  nfl_team: z
+    .string()
+    .regex(/^[A-Z]{2,3}$/)
+    .nullable(),
+  position: z
+    .string()
+    .regex(/^[A-Z]{1,4}$/)
+    .nullable(),
+  name: bareName,
+});
+/** The number of candidate summaries each unmatched row carries. */
+export const UNMATCHED_CANDIDATES_SHOWN = 3;
+
 const unmatchedRow = z.strictObject({
   player_key: playerKey,
   name: bareName,
   reason: z.enum(["no_candidate", "name_only", "unknown_team", "ambiguous"]),
   candidates: z.number().int().min(0),
+  candidate_players: z.array(candidateRow).max(UNMATCHED_CANDIDATES_SHOWN),
+});
+
+/** The crosswalk diagnostics a human must act on (QA-1-042): codes and ids only, no third-party text. */
+export const SURFACED_DIAGNOSTICS = [
+  "hint_conflict",
+  "hint_name_mismatch",
+  "hint_not_in_roster",
+  "duplicate_gsis",
+] as const;
+const diagnosticRow = z.strictObject({
+  code: z.enum(SURFACED_DIAGNOSTICS),
+  platform_player_id: playerKey.nullable(),
+  gsis_ids: z.array(gsisId).max(10),
 });
 
 const g1Data = z.strictObject({
@@ -173,6 +204,7 @@ const g1Data = z.strictObject({
       matched: z.number().int().min(0),
       unmatched_rostered: z.array(unmatchedRow).max(60),
       unmatched_top_owned: z.array(unmatchedRow).max(60),
+      diagnostics: z.array(diagnosticRow).max(60),
     })
     .nullable(),
   store: z.strictObject({
@@ -211,12 +243,40 @@ export type StatusData = z.infer<typeof g1Data>;
 type StatusCheck = NonNullable<StatusData["checks"]>[number];
 
 function unmatched(list: readonly UnmatchedPlayer[]): z.infer<typeof unmatchedRow>[] {
+  const code = (v: string, re: RegExp): string | null => (re.test(v) ? v : null);
   return list.slice(0, 60).map((u) => ({
     player_key: u.player.ref.id,
     name: bareUntrusted(u.player.name, "player_name"),
     reason: u.reason,
     candidates: u.candidates.length,
+    candidate_players: u.candidates
+      .filter((c) => gsisId.safeParse(c.gsis_id).success)
+      .slice(0, UNMATCHED_CANDIDATES_SHOWN)
+      .map((c) => ({
+        gsis_id: c.gsis_id,
+        nfl_team: code(c.team, /^[A-Z]{2,3}$/),
+        position: code(c.position, /^[A-Z]{1,4}$/),
+        name: bareUntrusted(c.full_name, "player_name"),
+      })),
   }));
+}
+
+/** The run's diagnostics a human must act on, value-free (QA-1-042). */
+function surfacedDiagnostics(
+  list: readonly CrosswalkDiagnostic[],
+): z.infer<typeof diagnosticRow>[] {
+  const wanted: ReadonlySet<string> = new Set(SURFACED_DIAGNOSTICS);
+  return list
+    .filter((d) => wanted.has(d.code))
+    .slice(0, 60)
+    .map((d) => ({
+      code: d.code as (typeof SURFACED_DIAGNOSTICS)[number],
+      platform_player_id:
+        d.platform_player_id !== null && playerKey.safeParse(d.platform_player_id).success
+          ? d.platform_player_id
+          : null,
+      gsis_ids: d.gsis_ids.filter((g) => gsisId.safeParse(g).success).slice(0, 10),
+    }));
 }
 
 /** A source id as a check `detail` (`nflverse:schedules` → `nflverse_schedules`). */
@@ -290,6 +350,7 @@ export async function statusSnapshot(
       matched: u.run.report.matched,
       unmatched_rostered: unmatched(u.run.report.unmatched_rostered),
       unmatched_top_owned: unmatched(u.run.report.unmatched_top_owned),
+      diagnostics: surfacedDiagnostics(u.run.diagnostics),
     };
   }
   if (ctx.options.writeRequested)
@@ -393,6 +454,14 @@ export const getStatus = defineTool({
           : [
               bare("data.crosswalk.unmatched_rostered[].name", r.nameSource),
               bare("data.crosswalk.unmatched_top_owned[].name", r.nameSource),
+              bare(
+                "data.crosswalk.unmatched_rostered[].candidate_players[].name",
+                "nflverse.roster_weekly.name",
+              ),
+              bare(
+                "data.crosswalk.unmatched_top_owned[].candidate_players[].name",
+                "nflverse.roster_weekly.name",
+              ),
             ],
     };
   },
