@@ -830,7 +830,7 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   if (coinFlip) {
     assumptions.push(
       A(
-        `the best lineup change is a coin flip: its Δ interval (${String(delta.p10)} to ${String(delta.p90)} points) includes 0, so the call is no move (research 05 §14.4)`,
+        `the best lineup change is a coin flip: its Δ interval (${String(round(delta.p10, 1))} to ${String(round(delta.p90, 1))} points) includes 0, so the call is no move (research 05 §14.4)`,
         "a status or projection change moves the interval off 0",
       ),
     );
