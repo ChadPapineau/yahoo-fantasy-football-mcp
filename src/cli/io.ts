@@ -112,9 +112,34 @@ export function defaultIo(): CliIo {
   };
 }
 
+const pipeGuarded = new WeakSet<NodeJS.WritableStream>();
+
+/**
+ * Makes a reader that closes early (`ff status | head -1`, `| less` then q) end the command's output
+ * quietly instead of crashing it: the write fails with EPIPE, which a stream reports as an 'error'
+ * EVENT — with no listener that is an unhandled exception, a Node stack and exit 1 (QA-1-055). The
+ * command keeps running to its own end and exit code with nowhere to print (a refresh still
+ * publishes, never killed mid-write). Any other output error is rethrown as before. `serve` never
+ * gets this: there a closed stdout is the plan 03 §1.3 shutdown path. Idempotent per stream.
+ */
+export function tolerateClosedPipe(stream: NodeJS.WritableStream): void {
+  if (pipeGuarded.has(stream)) return;
+  pipeGuarded.add(stream);
+  stream.on("error", (e: unknown) => {
+    const code = (e as { code?: unknown } | null)?.code;
+    if (code === "EPIPE" || code === "ERR_STREAM_DESTROYED") return;
+    throw e;
+  });
+}
+
 /** Writes `text` and resolves once the stream accepted it (so `process.exit` cannot truncate it). */
 export function write(stream: NodeJS.WritableStream, text: string): Promise<void> {
   return new Promise((resolve) => {
+    // a closed reader: nothing more can be delivered, and writing again only re-raises the error
+    if ((stream as { destroyed?: boolean }).destroyed === true) {
+      resolve();
+      return;
+    }
     try {
       stream.write(text, () => {
         resolve();

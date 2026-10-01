@@ -4,7 +4,7 @@
 // FF_CONFIG_DIR/FF_CACHE_DIR, so nothing touches the real ~/.config, ~/.cache or LaunchAgents.
 // Refresh runs in fixture mode (FF_FIXTURE_DIR): the fixture tree is the only transport, so no test
 // reaches the network. launchctl is never run: install-launchd/uninstall use --dry-run only.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, realpathSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -135,6 +135,36 @@ describe("ff (process)", () => {
     expect(existsSync(t.env.FF_CACHE_DIR ?? "")).toBe(false);
     expect(existsSync(t.env.FF_CONFIG_DIR ?? "")).toBe(false);
   });
+
+  it.each([["status"], ["doctor"], ["install-launchd", "--dry-run"]])(
+    "%s piped into a reader that closes early (`| head -1`): no EPIPE stack, a normal exit [QA-1-055]",
+    async (...args) => {
+      const t = tempRoot();
+      const argv = USE_DIST
+        ? [DIST, ...args]
+        : ["--import", TSX, path.join(ROOT, "src", "cli.ts"), ...args];
+      const child = spawn(process.execPath, argv, {
+        env: t.env,
+        cwd: t.dir,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stderr = "";
+      child.stderr.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
+      // like `head -1`: take the first chunk, then close the read end
+      child.stdout.once("data", () => {
+        child.stdout.destroy();
+      });
+      const code = await new Promise<number | null>((resolve) => {
+        child.on("close", (c) => {
+          resolve(c);
+        });
+      });
+      expect(stderr).not.toMatch(/EPIPE|Unhandled 'error' event|node:events/);
+      expect(code === 0 || code === 1, `exit ${String(code)}`).toBe(true);
+      if (args[0] !== "doctor") expect(code).toBe(0);
+    },
+    60_000,
+  );
 
   it("doctor with a bad configuration exits 2", () => {
     const t = tempRoot();
