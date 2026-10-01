@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { SHIPPED_DATA, classify } from "../../scripts/ci/scan-tarball.mjs";
 import { VERSION } from "../../src/version.js";
 import { ROOT } from "./helpers.js";
 
@@ -38,7 +39,16 @@ describe("package.json", () => {
     expect(pkg.license).toBe("MIT");
     expect(pkg.bin).toEqual({ ff: "dist/cli.js" });
     expect(pkg.engines).toEqual({ node: ">=24.15" });
-    expect(pkg.files).toEqual(["dist", "skills", "README.md", "LICENSE", "CHANGELOG.md"]);
+    // the crosswalk overrides file is runtime data (serve loads it): it ships (QA-1-093)
+    expect(pkg.files).toEqual([
+      "dist",
+      "skills",
+      "data/crosswalk/overrides.yaml",
+      "README.md",
+      "LICENSE",
+      "CHANGELOG.md",
+    ]);
+    for (const f of SHIPPED_DATA) expect(classify(f, pkg.files ?? []), f).toBeNull();
   });
 
   it("pins every dependency to an exact version (no ^ ~ * x ranges, tags, urls)", () => {

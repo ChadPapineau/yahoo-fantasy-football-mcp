@@ -11,6 +11,7 @@
   "files": [
     "dist",
     "skills",
+    "data/crosswalk/overrides.yaml",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"

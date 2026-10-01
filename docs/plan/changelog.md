@@ -95,3 +95,13 @@ The advocate's verdict on round 1: 22 conceded-by-defence, 1 withdrawn (OBJ-20),
 | D.2 (what the defence strengthened unasked) | (1) every latency/size bound names the fixture or dataset size it is measured on and the test that measures it — plan 05 **T10**; (2) HANDOFF's ▶ NEXT STEP leads with the application (orchestrator); (3) plan 02 re-audited after OBJ-24/25 — S13 and the §1 notification edge re-qualified per session; no client-set wording remains | plan 05 §0 T10, §4.2, §2 `store` · plan 07 §5.1 · plan 10 A15, A4a · plan 03 §1.1 · plan 02 S13, §1 diagram |
 
 **Survived round 2 unchanged** (advocate §2.3): the architecture, the `FantasyPlatform` seam and its four implementations, the scoring engine, the phasing shape, the gate's mechanics, and the security taxonomy's *intent* — round 2 changed the taxonomy's unit (session, not client), the storage layout's mechanism, two numbers and one sentence's home.
+
+## Implementation amendments (after approval)
+
+Changes the build made to an approved plan text, each with the finding that forced it.
+
+| finding | amendment |
+|---|---|
+| QA-1-093 — `ff serve` loads `data/crosswalk/overrides.yaml` at runtime, but the package's `files` list omitted it, so an installed package served with no overrides | plan 04 §1's `files` list gains `data/crosswalk/overrides.yaml` (the one runtime data file, `SHIPPED_DATA` in `scripts/ci/scan-tarball.mjs`); `tests/lint/package.test.ts` pins both |
+| QA-1-017 — nflverse `def_tds` holds interception returns only | `ds_team_defense_week` gains `fumble_recovery_tds_opp` (per-row defensive fumble-return TDs); `dst_td` sums both; plan 03 §7 `ds_schema` goes to 2, so a layout-1 file is refused and republished by the next refresh |
+| QA-1-061 — the recommendation log deduplicated a `client_ref` across weeks and seasons | store migration 002 replaces the `(league_key, client_ref)` unique index with one over league, season, week, kind and `client_ref` |
