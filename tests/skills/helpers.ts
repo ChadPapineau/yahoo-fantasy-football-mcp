@@ -4,6 +4,7 @@
 import { spawnSync } from "node:child_process";
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -88,3 +89,49 @@ export function runScript(
 
 /** The four Phase-1a Skills. */
 export const SKILLS = ["onboard", "retro", "start-sit", "stream-kdef"] as const;
+
+/** The onboard guide's save commands (its ```sh blocks; there is exactly one). */
+export const saveBlocks = [
+  ...readFileSync(
+    path.join(ROOT, "skills/onboard/references/onboard-league-yaml.md"),
+    "utf8",
+  ).matchAll(/^```sh\n([\s\S]*?)^```/gm),
+].map((m) => m[1] ?? "");
+
+/**
+ * Runs the onboard guide's save commands in `sh` as a user would paste them, under `home` and the
+ * given environment (PATH is /usr/bin:/bin). The "save the YAML … with any editor" comment line
+ * stands for the user's editor: it is replaced by a copy of the fixture league to the very path the
+ * `chmod 600` line names (so the test follows the guide's path, whatever it is), and `ff` is a stub
+ * that logs its arguments.
+ */
+export function runSaveSteps(
+  env: Record<string, string>,
+  home: string,
+): { status: number | null; stdout: string; stderr: string; ffLog: string } {
+  const block = saveBlocks[0] ?? "";
+  const target = /^chmod 600 (.+)$/m.exec(block)?.[1];
+  if (target === undefined) throw new Error("the save commands have no `chmod 600 <file>` line");
+  const script = block
+    .split("\n")
+    .map((l) => (l.startsWith("# save the YAML") ? `cp "$FF_TEST_YAML" ${target}` : l))
+    .join("\n");
+  const log = path.join(home, "..", "ff.log");
+  const r = spawnSync("/bin/sh", ["-c", `ff() { echo "ff $*" >> "$FF_TEST_LOG"; }\n${script}`], {
+    encoding: "utf8",
+    env: {
+      PATH: "/usr/bin:/bin",
+      HOME: home,
+      FF_TEST_YAML: path.join(ROOT, "fixtures", "manual", "league.yaml"),
+      FF_TEST_LOG: log,
+      ...env,
+    },
+    timeout: 30_000,
+  });
+  return {
+    status: r.status,
+    stdout: r.stdout,
+    stderr: r.stderr,
+    ffLog: existsSync(log) ? readFileSync(log, "utf8") : "",
+  };
+}
