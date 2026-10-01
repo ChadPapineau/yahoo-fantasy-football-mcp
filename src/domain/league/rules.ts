@@ -62,7 +62,8 @@ export function waiverProcessingDays(days: number | null): number | null {
 
 /** The inputs the capability predicates are derived from. */
 export interface RuleInputs {
-  readonly uses_faab: boolean;
+  /** Null = unknown, which grants no FAAB capability. */
+  readonly uses_faab: boolean | null;
   readonly waiver_time_days: number | null;
   readonly trade_ratify_type: string | null;
 }
@@ -70,7 +71,7 @@ export interface RuleInputs {
 /** Derives the capability predicates from the raw rule fields. */
 export function ruleCapabilities(r: RuleInputs): RuleCapabilities {
   return Object.freeze({
-    hasFaab: r.uses_faab,
+    hasFaab: r.uses_faab === true,
     waiverProcessingDays: waiverProcessingDays(r.waiver_time_days),
     tradeReviewMode: tradeReviewMode(r.trade_ratify_type),
   });
