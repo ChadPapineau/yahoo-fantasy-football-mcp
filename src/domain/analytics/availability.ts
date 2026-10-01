@@ -10,6 +10,16 @@ export interface AvailabilityInput {
   readonly report: InjuryReport | null;
   /** Whether the injury dataset was loaded at all (null stamp → nothing is known). */
   readonly injuriesLoaded: boolean;
+  /**
+   * Whether this week's report is out for the player's team (QA-1-021: reports are published team by
+   * team, Wednesday–Friday; the Thursday teams first). Omitted → `injuriesLoaded` (the old contract).
+   * Only a published report makes "not listed" mean "cleared to play".
+   */
+  readonly reportPublished?: boolean;
+  /** Whether the previous week's report was published for the player's team. */
+  readonly priorPublished?: boolean;
+  /** The player's row on the previous week's report, or null (not listed). */
+  readonly priorReport?: InjuryReport | null;
   /** The provider's roster status code (league.yaml `status`, Yahoo `status`), or null. */
   readonly platformStatus: string | null;
   /**
@@ -27,6 +37,25 @@ export interface AvailabilityInput {
 export interface Availability {
   readonly p: number | null;
   readonly basis: PActiveBasis;
+  /**
+   * Set when this week's report is not out yet for the player's team and his designation was carried
+   * from that earlier week's report (QA-1-021) — the caller names it as an assumption.
+   */
+  readonly carried_from?: number;
+}
+
+/** P(active) from a report row's designation (Questionable refined by practice); null when none. */
+function fromReport(r: InjuryReport): Availability | null {
+  const d = designation(r.report_status);
+  if (d === "out") return { p: P_ACTIVE.out, basis: "designation_base_rate" };
+  if (d === "doubtful") return { p: P_ACTIVE.doubtful, basis: "designation_base_rate" };
+  if (d === "questionable") {
+    const lvl = practiceLevel(r);
+    return lvl === null
+      ? { p: P_ACTIVE.questionable, basis: "designation_base_rate" }
+      : { p: P_ACTIVE.questionableByPractice[lvl], basis: "trend_model" };
+  }
+  return null;
 }
 
 /** The normalised report designation, from nflverse `report_status` (`Out`, `Doubtful`, …). */
@@ -61,9 +90,11 @@ function fromStatusCode(code: string | null): number | null {
 /**
  * P(active) for one player-week. Order: (1) a provider-stamped game-day status inside the game-day
  * window; (2) the official report's designation (Questionable refined by the last practice level —
- * `trend_model`); (3) the provider's roster status; (4) not listed on a loaded report → active;
- * (5) nothing loaded → `p: null`, basis `none` (the simulation then treats the player as active and
- * the projection names that assumption).
+ * `trend_model`); (3) the provider's roster status; (4) not listed on his team's published report →
+ * active; (5) his team's report for this week not out yet → last week's designation carried
+ * (`carried_from`), or active when he was not on it (QA-1-021); (6) the dataset loaded but neither
+ * report out (a look-ahead week) → active; (7) nothing loaded → `p: null`, basis `none` (the
+ * simulation then treats the player as active and the projection names that assumption).
  */
 export function pActive(input: AvailabilityInput): Availability {
   const gd = input.gameDayStatus;
@@ -78,20 +109,21 @@ export function pActive(input: AvailabilityInput): Availability {
     };
   }
   if (input.report !== null) {
-    const d = designation(input.report.report_status);
-    if (d === "out") return { p: P_ACTIVE.out, basis: "designation_base_rate" };
-    if (d === "doubtful") return { p: P_ACTIVE.doubtful, basis: "designation_base_rate" };
-    if (d === "questionable") {
-      const lvl = practiceLevel(input.report);
-      return lvl === null
-        ? { p: P_ACTIVE.questionable, basis: "designation_base_rate" }
-        : { p: P_ACTIVE.questionableByPractice[lvl], basis: "trend_model" };
-    }
+    const r = fromReport(input.report);
+    if (r !== null) return r;
   }
   const fromPlatform = fromStatusCode(input.platformStatus);
   if (fromPlatform !== null) return { p: fromPlatform, basis: "designation_base_rate" };
-  if (input.report !== null || input.injuriesLoaded) {
+  const published = input.reportPublished ?? input.injuriesLoaded;
+  if (input.report !== null || published) {
     return { p: P_ACTIVE.noDesignation, basis: "designation_base_rate" };
   }
+  if (input.priorPublished === true) {
+    const prior = input.priorReport ?? null;
+    const carried = prior === null ? null : fromReport(prior);
+    if (prior !== null && carried !== null) return { ...carried, carried_from: prior.week };
+    return { p: P_ACTIVE.noDesignation, basis: "designation_base_rate" };
+  }
+  if (input.injuriesLoaded) return { p: P_ACTIVE.noDesignation, basis: "designation_base_rate" };
   return { p: null, basis: "none" };
 }
