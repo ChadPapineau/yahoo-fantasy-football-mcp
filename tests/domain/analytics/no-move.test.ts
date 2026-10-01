@@ -15,7 +15,7 @@ import {
   loadFixtureData,
 } from "../../backtest/helpers/fixture.js";
 import { beforeWeek, fixtureLeague, kdefUniverse } from "../../backtest/helpers/league.js";
-import { dist, LEAGUE_SLOTS, NOW, player, slotsOf } from "./helpers.js";
+import { dist, LEAGUE_SLOTS, NOW, player, recTextsFit, slotsOf } from "./helpers.js";
 
 const clock = fixedClock(NOW);
 const straddles = (d: { p10: number; p90: number }): boolean => d.p10 < 0 && d.p90 > 0;
@@ -113,6 +113,7 @@ describe("QA-1-060 — E2: a lineup change whose Δ interval straddles 0 is no m
           const r = analyzeLineup({ slots: LEAGUE_SLOTS, players, opponent: null, clock });
           if (!r.rec.no_move) expect(straddles(r.rec.delta_vs_next)).toBe(false);
           expect(r.no_move).toBe(r.rec.no_move);
+          expect(recTextsFit(r.rec)).toBe(true);
           if (r.rec.no_move) {
             const cur = r.current_lineup
               .filter((a) => a.slot !== "BN" && a.slot !== "IR")
@@ -173,6 +174,7 @@ describe("QA-1-060 — E5: a stream whose Δ interval straddles 0 is a hold", ()
   it("every K and DEF starter: a stream is called only when its Δ interval excludes 0", () => {
     for (const cur of universe.filter((u) => u.nfl_team === "BUF" || u.nfl_team === "DET")) {
       const a = run(3, [cur], [cur.position]);
+      expect(recTextsFit(a.rec)).toBe(true);
       if (!a.rec.no_move) expect(straddles(a.rec.delta_vs_next)).toBe(false);
     }
   });

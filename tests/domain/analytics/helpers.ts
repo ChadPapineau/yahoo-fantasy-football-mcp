@@ -5,6 +5,8 @@ import { buildRosterSlots, defineSlot } from "../../../src/domain/league/slots.j
 import type { RosterSlot, RosterSlots } from "../../../src/domain/league/types.js";
 import type { Dist, DistBasis } from "../../../src/domain/scoring/types.js";
 import type { NflTeam } from "../../../src/config/schema.js";
+import type { Rec } from "../../../src/domain/analytics/types.js";
+import { PRINTABLE_RE, TEXT_CAPS } from "../../../src/mcp/envelope.js";
 
 export const NOW = Date.parse("2026-09-27T12:00:00Z");
 export const PAST = "2026-09-25T00:15:00.000Z"; // Thursday night (ET) — already locked
@@ -105,4 +107,17 @@ export function complete(
     }),
   );
   return [...opponent, ...fillers];
+}
+
+/**
+ * The texts of a Rec fit the tool's output schema (recSchema: printable, ≤ TEXT_CAPS.rec_log_text) —
+ * a longer assumption makes the whole tool call an INTERNAL error.
+ */
+export function recTextsFit(rec: Rec): boolean {
+  const texts = [
+    rec.action,
+    ...rec.drivers.map((d) => d.name),
+    ...rec.assumptions.flatMap((a) => [a.text, a.revisit_trigger]),
+  ];
+  return texts.every((t) => t.length <= TEXT_CAPS.rec_log_text && PRINTABLE_RE.test(t));
 }
