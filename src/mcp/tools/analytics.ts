@@ -65,7 +65,13 @@ import {
   weekOf,
   type LeagueContext,
 } from "./common.js";
-import { projectable, rosterTargets, selectTargets, type Target } from "./select.js";
+import {
+  ACTIVE_ROSTER_STATUS,
+  projectable,
+  rosterTargets,
+  selectTargets,
+  type Target,
+} from "./select.js";
 import {
   bareName,
   canonical,
@@ -1011,9 +1017,6 @@ export function balancedCandidates<C extends { readonly position: string }>(
     }
   return out;
 }
-
-/** nflverse `roster_weekly.status` for a player on a team's active roster. */
-const ACTIVE_ROSTER_STATUS = "ACT";
 
 function kdefUniverse(
   ctx: ToolContext,
