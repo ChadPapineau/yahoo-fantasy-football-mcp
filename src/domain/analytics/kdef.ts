@@ -392,7 +392,7 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
     const iv = vsHold(top);
     assumptions.push(
       A(
-        `the best stream is a coin flip: its Δ interval against holding (${String(round(iv.p10, 3))} to ${String(round(iv.p90, 3))} points) includes 0, so the call is hold (research 05 §14.4)`,
+        `the best stream is a coin flip: its Δ interval against holding (${String(round(iv.p10, 1))} to ${String(round(iv.p90, 1))} points) includes 0, so the call is hold (research 05 §14.4)`,
         "lines or injury news move the interval off 0",
       ),
     );
