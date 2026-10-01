@@ -581,6 +581,11 @@ const a4Data = z.strictObject({
     .max(40),
 });
 
+/** The fixed warning for a manual-league week with no matchup (a driver is named, never omitted). */
+export function manualNoMatchupWarning(week: number): string {
+  return `no matchup for week ${String(week)} in league.yaml: add an opponents: entry for this week`;
+}
+
 export const getScoreboard = defineTool({
   name: "ff_get_scoreboard",
   family: "platform",
@@ -607,6 +612,9 @@ export const getScoreboard = defineTool({
       inputs,
       lc.allowStale,
     );
+    // QA-1-008: under the manual league an empty week is a missing `opponents:` entry — name it
+    if (all.length === 0 && caps.read_features.matchups && lc.ref.platform === "manual")
+      warnings.push(manualNoMatchupWarning(w));
     const src = textSource(lc.ref.platform, "team.name");
     const mine = lc.league.my_team?.team_key ?? null;
     const matchups = all
