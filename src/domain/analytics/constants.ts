@@ -219,6 +219,21 @@ export const INACTIVE_STATUS_CODES: readonly string[] = Object.freeze([
   "NFI-A",
 ]);
 
+/**
+ * nflverse `roster_weekly.status` codes that mean "will not play" from that week on (QA-1-030): RES
+ * (reserve: injured reserve, PUP, NFI), CUT, RET (retired), SUS (suspended), UFA (unsigned). A player
+ * on a reserve list never appears on the weekly injury report.
+ */
+export const ROSTER_OUT_STATUSES: readonly string[] = Object.freeze([
+  "RES",
+  "CUT",
+  "RET",
+  "SUS",
+  "UFA",
+]);
+/** `roster_weekly.status` INA: a game-day inactive — only for that week's game. */
+export const ROSTER_INACTIVE_THIS_WEEK = "INA";
+
 /** Within this long before kickoff a provider-stamped status is game-day (plan 07 D2, OBJ-16). */
 export const GAME_DAY_WINDOW_MS = 3 * 60 * 60 * 1000;
 
