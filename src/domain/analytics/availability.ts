@@ -1,7 +1,13 @@
 // availability.ts — P(active) (research 05 §1 step 8, §3.5: Questionable 71 % base rate, the
 // practice trend refines it; plan 07 D2 / changelog OBJ-16: within 3 h of kickoff a provider-stamped
 // game-day status wins and `p_active_basis = "yahoo_gameday_status"`). Pure.
-import { GAME_DAY_WINDOW_MS, INACTIVE_STATUS_CODES, P_ACTIVE } from "./constants.js";
+import {
+  GAME_DAY_WINDOW_MS,
+  INACTIVE_STATUS_CODES,
+  P_ACTIVE,
+  ROSTER_INACTIVE_THIS_WEEK,
+  ROSTER_OUT_STATUSES,
+} from "./constants.js";
 import type { InjuryReport, PActiveBasis } from "./types.js";
 
 /** What P(active) is computed from. */
@@ -22,6 +28,11 @@ export interface AvailabilityInput {
   readonly priorReport?: InjuryReport | null;
   /** The provider's roster status code (league.yaml `status`, Yahoo `status`), or null. */
   readonly platformStatus: string | null;
+  /**
+   * The player's NFL roster status that applies to this week (nflverse `roster_weekly.status` of his
+   * newest row at or before the week; INA only from that same week), or null/omitted (QA-1-030).
+   */
+  readonly rosterStatus?: string | null;
   /**
    * A game-day status the provider stamped (Yahoo, within the game-day window). `undefined` = the
    * provider stamps none (ManualLeagueProvider — X1 has no game-day source, OBJ-29); `null` status =
@@ -87,10 +98,18 @@ function fromStatusCode(code: string | null): number | null {
   return null;
 }
 
+/** Whether an applicable NFL roster status means "will not play" (RES, CUT, RET, SUS, UFA, INA). */
+export function isRosterOut(status: string | null): boolean {
+  if (status === null) return false;
+  const c = status.trim().toUpperCase();
+  return ROSTER_OUT_STATUSES.includes(c) || c === ROSTER_INACTIVE_THIS_WEEK;
+}
+
 /**
  * P(active) for one player-week. Order: (1) a provider-stamped game-day status inside the game-day
  * window; (2) the official report's designation (Questionable refined by the last practice level —
- * `trend_model`); (3) the provider's roster status; (4) not listed on his team's published report →
+ * `trend_model`); (2b) an NFL roster status that rules him out (reserve list, cut, retired,
+ * suspended, unsigned, game-day inactive — QA-1-030); (3) the provider's roster status; (4) not listed on his team's published report →
  * active; (5) his team's report for this week not out yet → last week's designation carried
  * (`carried_from`), or active when he was not on it (QA-1-021); (6) the dataset loaded but neither
  * report out (a look-ahead week) → active; (7) nothing loaded → `p: null`, basis `none` (the
@@ -111,6 +130,9 @@ export function pActive(input: AvailabilityInput): Availability {
   if (input.report !== null) {
     const r = fromReport(input.report);
     if (r !== null) return r;
+  }
+  if (isRosterOut(input.rosterStatus ?? null)) {
+    return { p: P_ACTIVE.out, basis: "designation_base_rate" };
   }
   const fromPlatform = fromStatusCode(input.platformStatus);
   if (fromPlatform !== null) return { p: fromPlatform, basis: "designation_base_rate" };

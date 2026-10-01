@@ -21,7 +21,8 @@ import type {
   ScoringSettings,
   StatLine,
 } from "../scoring/types.js";
-import { pActive, type Availability } from "./availability.js";
+import { isRosterOut, pActive, type Availability } from "./availability.js";
+import type { NflRosterPlayer, RosterWeeklyReader } from "../crosswalk/types.js";
 import {
   DEF_SIM,
   EXPECTATION,
@@ -94,6 +95,8 @@ export interface ProjectionReaders {
   readonly injuries: InjuryReader;
   readonly playerWeeks: PlayerWeekReader;
   readonly weather?: WeatherReader;
+  /** nflverse roster_weekly (newest row per player): reserve/cut/inactive statuses (QA-1-030). */
+  readonly rosters?: Pick<RosterWeeklyReader, "latest">;
 }
 
 /** An E1 request (already validated by the tool's zod schema; re-checked here). */
@@ -180,6 +183,8 @@ interface Loaded {
   readonly injuriesLoaded: Map<Week, boolean>;
   /** Teams whose report for the week is published (any row), per week (QA-1-021). */
   readonly reportTeams: Map<Week, ReadonlySet<NflTeam>>;
+  /** Each target player's newest nflverse roster row this season (QA-1-030). */
+  readonly rosterRows: Map<string, NflRosterPlayer>;
   readonly weather: Map<string, WeatherObservation>;
   readonly stamps: (DatasetStamp | null)[];
 }
@@ -392,6 +397,17 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
     reportTeams.set(w, teams);
   }
 
+  const rosterRows = new Map<string, NflRosterPlayer>();
+  if (req.readers.rosters !== undefined && gsisIds.length > 0) {
+    const r = req.readers.rosters.latest(season);
+    if (r.stamp !== null) {
+      stamps.push(r.stamp);
+      for (const row of r.rows) {
+        if (row.season === season && wanted.has(row.gsis_id)) rosterRows.set(row.gsis_id, row);
+      }
+    }
+  }
+
   const weather = new Map<string, WeatherObservation>();
   const kickerWeeks = req.targets.some((t) => t.subject.kind === "player" && t.position === "K");
   if (kickerWeeks && req.readers.weather !== undefined) {
@@ -409,6 +425,7 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
     injuries,
     injuriesLoaded,
     reportTeams,
+    rosterRows,
     weather,
     stamps,
   };
@@ -840,7 +857,17 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
           ? (loaded.injuries.get(`${t.subject.gsis_id}:${String(w)}`) ?? null)
           : null;
       const prior = week - 1;
+      const rosterRow =
+        t.subject.kind === "player" ? loaded.rosterRows.get(t.subject.gsis_id) : undefined;
+      // the newest roster status at or before this week (never a later week's); INA only that week
+      const rosterStatus =
+        rosterRow === undefined ||
+        rosterRow.week > week ||
+        (rosterRow.status?.trim().toUpperCase() === "INA" && rosterRow.week !== week)
+          ? null
+          : rosterRow.status;
       availability = pActive({
+        rosterStatus,
         report: rowOf(week),
         injuriesLoaded: loadedInj,
         reportPublished: loadedInj && loaded.reportTeams.get(week)?.has(team) === true,
@@ -851,6 +878,13 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
         kickoffMs: ko,
         nowMs: req.clock.nowMs(),
       });
+      if (rosterStatus !== null && isRosterOut(rosterStatus) && availability.p === 0) {
+        const why = A(
+          `NFL roster status ${rosterStatus.trim().toUpperCase()} (week ${String(rosterRow?.week ?? week)}): not available, zero points`,
+          "he returns to the active roster",
+        );
+        if (!assumptions.some((a) => a.text === why.text)) assumptions.push(why);
+      }
       if (availability.carried_from !== undefined) {
         assumptions.push(
           A(
