@@ -24,13 +24,13 @@ Conventions: Step 0 and the never-re-fetch rules in [orient](references/orient.m
 Step 0 of [orient](references/orient.md). The week under review is `week − 1` unless the user names one.
 
 ### 2. Is the week final?
-`fantasy-football-mcp-server:ff_get_scoreboard` for the week. Under the manual league matchups are unavailable — rely on the retrospective's own `final` flag instead.
+`fantasy-football-mcp-server:ff_get_scoreboard` for the week. Under the manual league it shows only the opponent entered for that week, without scores, so it cannot say whether the week is final — rely on the retrospective's own `final` flag instead.
 
 ### 3. Score the week
 `fantasy-football-mcp-server:ff_analyze_retrospective` with that `week`. If `final` is false (or `meta.provisional` is true), every number is **provisional**: say so at the top, and say when to ask again (after the week's last game and the stat corrections).
 
 ### 4. Followed or not
-When any call has `followed: null`: `fantasy-football-mcp-server:ff_list_transactions` with `count: 40` can settle add/drop calls where transactions exist. Under the manual league it returns nothing — ask the user, in one question, which of the unresolved calls they followed; never assume.
+When any call has `followed: null`: `fantasy-football-mcp-server:ff_list_transactions` with `count: 40` can settle add/drop calls where transactions exist. Under the manual league it returns only the transactions listed in the league file (often none). For every call it does not settle, ask the user, in one question, which of the unresolved calls they followed; never assume.
 
 ### 5. Log, then answer
 `fantasy-football-mcp-server:ff_record_recommendation` with `kind: "retro"` and the result's `rec`, then render.
