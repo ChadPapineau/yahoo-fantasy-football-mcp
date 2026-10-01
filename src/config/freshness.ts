@@ -47,6 +47,13 @@ export interface FreshnessClass {
   readonly phase: Phase;
   /** The plan 01 §13 assumption id(s) behind the numbers, when they are assumed. */
   readonly assumption: string | null;
+  /**
+   * The TTL off game days, or null (the same TTL every day). Release-basis only: a check made on a
+   * Tuesday, Wednesday, Friday or Saturday (local time, like launchd's calendar) is judged against
+   * this, matching the refresh job's 6-hourly off-day cadence; Thursday, Sunday and Monday keep
+   * `ttlSeconds` (QA-1-036).
+   */
+  readonly offDayTtlSeconds: number | null;
 }
 
 const MIN = 60;
@@ -96,6 +103,7 @@ const row = (
   beyondHard: BeyondHardLimit | null,
   phase: Phase,
   assumption: string | null = null,
+  offDayTtlSeconds: number | null = null,
 ): FreshnessClass =>
   Object.freeze({
     id,
@@ -106,7 +114,13 @@ const row = (
     beyondHard,
     phase,
     assumption,
+    offDayTtlSeconds,
   });
+
+/** The local weekdays the schedules job checks every 30 min (Date#getDay: Thu, Sun, Mon). */
+export const GAME_DAYS: readonly number[] = Object.freeze([4, 0, 1]);
+/** The off-day TTL of the 30-minute classes: the 6-hourly cadence plus a run's duration. */
+const OFF_DAY_TTL = 6 * HOUR + 30 * MIN;
 
 /**
  * The table (plan 01 §5.2 "TTL (fresh)" and "Hard limit", §5.4 "beyond"). Release-based nflverse
@@ -285,6 +299,7 @@ export const FRESHNESS_TABLE: Readonly<Record<FreshnessClassId, FreshnessClass>>
     "STALE_ONLY",
     "1a",
     "A-9",
+    OFF_DAY_TTL,
   ),
   lines: row(
     "lines",
@@ -295,6 +310,7 @@ export const FRESHNESS_TABLE: Readonly<Record<FreshnessClassId, FreshnessClass>>
     "omit",
     "1a",
     "A-9",
+    OFF_DAY_TTL,
   ),
   ffopportunity_ep_weekly: row(
     "ffopportunity_ep_weekly",
@@ -374,13 +390,26 @@ export function freshnessClass(id: FreshnessClassId): FreshnessClass {
  * age ≤ hard limit, `expired` beyond it. Monotone in age. A negative, NaN or infinite age is a
  * caller bug and throws — it must never silently read as fresh.
  */
-export function classifyAge(cls: FreshnessClass, ageSeconds: number): FreshnessState {
+export function classifyAge(
+  cls: FreshnessClass,
+  ageSeconds: number,
+  ttlSeconds: number | null = cls.ttlSeconds,
+): FreshnessState {
   if (!Number.isFinite(ageSeconds) || ageSeconds < 0) {
     throw new RangeError("freshness: age must be a finite, non-negative number of seconds");
   }
-  if (cls.ttlSeconds === null || ageSeconds <= cls.ttlSeconds) return "fresh";
+  if (ttlSeconds === null || ageSeconds <= ttlSeconds) return "fresh";
   if (cls.hardLimitSeconds === null || ageSeconds <= cls.hardLimitSeconds) return "stale";
   return "expired";
+}
+
+/**
+ * The TTL that applies to a check made at `basisMs` (QA-1-036): `offDayTtlSeconds` when the class
+ * has one and the check's local weekday is not a game day, else `ttlSeconds`.
+ */
+export function ttlAt(cls: FreshnessClass, basisMs: number): number | null {
+  if (cls.offDayTtlSeconds === null || cls.basis !== "release") return cls.ttlSeconds;
+  return GAME_DAYS.includes(new Date(basisMs).getDay()) ? cls.ttlSeconds : cls.offDayTtlSeconds;
 }
 
 /**
@@ -435,7 +464,7 @@ export function stampState(cls: FreshnessClass, t: StampInstants, nowMs: number)
   }
   const age = Math.max(0, Math.floor((nowMs - basis) / 1000));
   return {
-    state: cls.basis === "immutable" ? "fresh" : classifyAge(cls, age),
+    state: cls.basis === "immutable" ? "fresh" : classifyAge(cls, age, ttlAt(cls, basis)),
     basis_at: new Date(basis).toISOString(),
     age_s: age,
   };
