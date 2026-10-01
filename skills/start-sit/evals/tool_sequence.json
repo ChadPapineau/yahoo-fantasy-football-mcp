@@ -108,7 +108,7 @@
           "id": "record",
           "tool": "ff_record_recommendation",
           "args": {
-            "kind": "matchup",
+            "kind": "lineup",
             "week": 4,
             "rec": { "$ref": "lineup.data.rec" },
             "alternatives": [],

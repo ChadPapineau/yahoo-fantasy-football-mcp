@@ -107,6 +107,28 @@ const before = (seq, a, b) => {
 /** @param {number} n @param {string} p */
 const ids = (p, n) => Array.from({ length: n }, (_, i) => new RegExp(`^${p}-${String(i + 1)}$`));
 
+/**
+ * The log `kind` of each analytics tool's `data.rec` (QA-1-065). The retrospective scores swap
+ * regret and `decisive` only for kind "lineup" (src/domain/reclog/retrospective.ts), so a lineup rec
+ * logged under another kind is never judged; a `$ref` rec must carry its producer's kind.
+ */
+export const REC_KIND_BY_TOOL = Object.freeze(
+  /** @type {Readonly<Record<string, string>>} */ ({
+    ff_analyze_lineup: "lineup",
+    ff_analyze_matchup: "matchup",
+    ff_analyze_waivers: "stream",
+    ff_analyze_retrospective: "retro",
+  }),
+);
+
+/** The kinds a SKILL.md body tells the model to log (`ff_record_recommendation` … `kind: "x"`). */
+const BODY_KIND_RE = /ff_record_recommendation`?[^\n`]*?`kind: "([a-z_]+)"`/g;
+
+/** @param {string} body */
+export function bodyRecordKinds(body) {
+  return [...new Set([...body.matchAll(BODY_KIND_RE)].map((m) => m[1] ?? ""))].sort();
+}
+
 /** Per-Skill promises (plan 09 §3 "Evals — Lane 1"); a Skill without a row gets the general checks. */
 export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
   Object.freeze({
@@ -612,6 +634,15 @@ export function validateToolSequence(raw, ctx) {
       for (const k of ["rec", "source_calls", "week"]) {
         if (!(k in p.args)) errors.push(`${sw}: ff_record_recommendation needs \`${k}\``);
       }
+      const ref = isRecord(p.args["rec"]) ? p.args["rec"]["$ref"] : undefined;
+      const m = typeof ref === "string" ? /^([^.]+)\.data\.rec$/.exec(ref) : null;
+      const producer = m ? parsed.find((x) => x.id === m[1])?.tool : undefined;
+      const want = producer === undefined ? undefined : REC_KIND_BY_TOOL[producer];
+      if (want !== undefined && kind !== want) {
+        errors.push(
+          `${sw}: logs ${String(producer)}'s rec as kind "${String(kind)}" — it is a "${want}" rec`,
+        );
+      }
     });
     sequences.push({ id: String(id), steps: parsed });
   });
@@ -1006,17 +1037,31 @@ export function checkSkills(opts = {}) {
     };
     const seq = readEval("tool_sequence.json");
     if (seq !== undefined && manifest) {
-      errors.push(
-        ...validateToolSequence(seq, {
-          skill,
-          where: `${rel}/evals/tool_sequence.json`,
-          tools: manifest.tools,
-          writeTools: manifest.write_tools,
-          toolContract: manifest.tool_contract,
-          errorCodes,
-          ...(skillRule ? { rule: skillRule } : {}),
-        }).errors,
+      const v = validateToolSequence(seq, {
+        skill,
+        where: `${rel}/evals/tool_sequence.json`,
+        tools: manifest.tools,
+        writeTools: manifest.write_tools,
+        toolContract: manifest.tool_contract,
+        errorCodes,
+        ...(skillRule ? { rule: skillRule } : {}),
+      });
+      errors.push(...v.errors);
+      // QA-1-065: the body logs exactly the kinds its sequences record (one source of the kind)
+      const seqKinds = new Set(
+        v.sequences.flatMap((q) =>
+          q.steps
+            .filter((st) => st.tool === "ff_record_recommendation")
+            .map((st) => String(st.args["kind"])),
+        ),
       );
+      const said = bodyRecordKinds(body);
+      for (const k of said.filter((x) => !seqKinds.has(x)))
+        errors.push(`${rel}/SKILL.md: logs kind "${k}" but no tool_sequence records it`);
+      for (const k of [...seqKinds].filter((x) => !said.includes(x)).sort())
+        errors.push(
+          `${rel}/SKILL.md: the tool_sequence records kind "${k}" but the body never logs it`,
+        );
     }
     const cases = readEval("cases.json");
     if (cases !== undefined && manifest) {

@@ -756,6 +756,98 @@ describe("tool_sequence.json", () => {
   });
 });
 
+describe("QA-1-065: a recommendation is logged under the kind of the tool that produced it", () => {
+  /** [record step's kind, the producing tool] for every sequence of the committed bundle. */
+  const logged = SKILLS.flatMap((skill) => {
+    const j = JSON.parse(readFileSync(`${ROOT}/${SEQ(skill)}`, "utf8")) as Json;
+    return (j.sequences as Json[]).flatMap((q) => {
+      const steps = q.steps as Json[];
+      return steps
+        .filter((st) => st.tool === "ff_record_recommendation")
+        .map((st) => {
+          const args = st.args as Json;
+          const ref = (args.rec as Json | undefined)?.$ref;
+          const from = typeof ref === "string" ? ref.split(".")[0] : undefined;
+          const producer = steps.find((x) => x.id === from)?.tool;
+          return { where: `${skill}/${String(q.id)}`, kind: args.kind, producer };
+        });
+    });
+  });
+
+  it("every committed sequence logs an analytics rec under its producer's kind", () => {
+    const want: Record<string, string> = {
+      ff_analyze_lineup: "lineup",
+      ff_analyze_matchup: "matchup",
+      ff_analyze_waivers: "stream",
+      ff_analyze_retrospective: "retro",
+    };
+    const wrong = logged.filter(
+      (l) => typeof l.producer === "string" && l.producer in want && want[l.producer] !== l.kind,
+    );
+    expect(wrong).toEqual([]);
+  });
+
+  it("rejects a lineup rec logged as kind matchup (the retrospective would skip its swap regret)", () => {
+    const t = fresh();
+    const j = t.readJson(SEQ("start-sit")) as Json;
+    for (const s of (j.sequences as Json[])[0]!.steps as Json[])
+      if (s.tool === "ff_record_recommendation") (s.args as Json).kind = "matchup";
+    t.write(SEQ("start-sit"), j);
+    expect(errorsOf(t)).toMatch(
+      /logs ff_analyze_lineup's rec as kind "matchup" — it is a "lineup" rec/,
+    );
+  });
+
+  it("validateToolSequence names the producer's kind for a $ref rec", () => {
+    const seq = {
+      schema_version: 1,
+      skill: "x",
+      tool_contract: 1,
+      fixture: { league_key: "manual.l.example" },
+      sequences: [
+        {
+          id: "a",
+          when: "always",
+          steps: [
+            { id: "status", tool: "ff_get_status", args: {} },
+            { id: "rank", tool: "ff_analyze_waivers", args: { positions: ["K"] } },
+            {
+              id: "record",
+              tool: "ff_record_recommendation",
+              args: { kind: "lineup", week: 4, rec: { $ref: "rank.data.rec" }, source_calls: [] },
+            },
+          ],
+        },
+      ],
+    };
+    const ctx = {
+      skill: "x",
+      where: "w",
+      tools: ["ff_get_status", "ff_analyze_waivers", "ff_record_recommendation"],
+      writeTools: [],
+      toolContract: 1,
+      errorCodes: [],
+    };
+    expect(validateToolSequence(seq, ctx).errors.join("\n")).toMatch(
+      /logs ff_analyze_waivers's rec as kind "lineup" — it is a "stream" rec/,
+    );
+    const ok = structuredClone(seq);
+    (ok.sequences[0]!.steps[2]!.args as Json).kind = "stream";
+    expect(validateToolSequence(ok, ctx).errors).toEqual([]);
+  });
+
+  it("rejects a SKILL.md that logs a kind no sequence records, and a sequence kind the body never names", () => {
+    const t = fresh();
+    t.edit("skills/stream-kdef/SKILL.md", 'with `kind: "stream"`', 'with `kind: "matchup"`');
+    expect(errorsOf(t)).toMatch(
+      /stream-kdef\/SKILL\.md: logs kind "matchup" but no tool_sequence records it/,
+    );
+    expect(errorsOf(t)).toMatch(
+      /stream-kdef\/SKILL\.md: the tool_sequence records kind "stream" but the body never logs it/,
+    );
+  });
+});
+
 describe("cases.json", () => {
   const ctx = {
     skill: "retro",
