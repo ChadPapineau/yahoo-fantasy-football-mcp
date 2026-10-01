@@ -45,6 +45,7 @@ import { FfError } from "../errors.js";
 import {
   bare,
   leagueContext,
+  leagueTypedLine,
   lockModeOf,
   requiredDataset,
   scoringOf,
@@ -370,7 +371,16 @@ export const analyzeRetrospective = defineTool({
       keys.teams.size === 0
         ? { rows: [], stamp: null }
         : ctx.services.datasets.playerWeeks.defenseLines([...keys.teams], season, [w]);
-    const byGsis = new Map(lines.rows.map((l) => [l.gsis_id, score(l.line, settings).points]));
+    // realised points by each player's LEAGUE position (QA-1-018), nflverse's only when unknown
+    const leaguePos = new Map<string, string>();
+    for (const t of [...mine, ...(opp ?? [])])
+      if (t.subject.kind === "player") leaguePos.set(t.subject.gsis_id, t.position);
+    const byGsis = new Map(
+      lines.rows.map((l) => [
+        l.gsis_id,
+        score(leagueTypedLine(l.line, leaguePos.get(l.gsis_id)), settings).points,
+      ]),
+    );
     const byTeam = new Map(dLines.rows.map((l) => [l.nfl_team, score(l.line, settings).points]));
     const pointsOf = (s: { gsis_id: string | null; nfl_team: NflTeam | null }): number | null => {
       if (s.gsis_id !== null) return byGsis.get(s.gsis_id) ?? (final ? 0 : null);
