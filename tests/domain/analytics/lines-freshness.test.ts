@@ -18,6 +18,7 @@ import {
   loadFixtureData,
 } from "../../backtest/helpers/fixture.js";
 import { fixtureLeague, kdefUniverse } from "../../backtest/helpers/league.js";
+import { recTextsFit } from "./helpers.js";
 
 let data: FixtureData;
 let settings: ScoringSettings;
@@ -103,5 +104,6 @@ describe("QA-1-004 — betting lines past their 24 h limit are omitted and named
       expect(c.signals.some((s) => s.kind === "implied_total")).toBe(false);
     }
     expect(out.rec.assumptions.some((a) => a.text.startsWith("betting lines omitted"))).toBe(true);
+    expect(recTextsFit(out.rec)).toBe(true);
   });
 });

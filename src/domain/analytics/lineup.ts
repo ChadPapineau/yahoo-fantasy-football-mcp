@@ -599,15 +599,15 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   if (oppEmpty.length > 0) {
     assumptions.push(
       A(
-        `the opponent's listed players leave starting slots empty (${oppEmpty.join(", ")}): P(win) is withheld, the objective is mean${req.objective !== undefined && req.objective !== "mean" ? ` (not ${req.objective})` : ""}, and ΔP(win) is measured against an evenly matched opponent`,
+        `the opponent's listed players leave starting slots empty (${oppEmpty.join(", ")}): P(win) withheld, the objective is mean${req.objective !== undefined && req.objective !== "mean" ? ` (not ${req.objective})` : ""}`,
         "the opponent's full starting lineup is in league.yaml",
       ),
     );
   } else if (opponent === null) {
     assumptions.push(
       A(
-        "no opponent roster: P(win) is not reported and ΔP(win) is measured against an evenly matched opponent",
-        "the opponent's roster is added to league.yaml",
+        "no opponent for this week (no opponents entry, or his players are missing): P(win) is not reported; ΔP(win) is against an evenly matched opponent",
+        "league.yaml lists this week under opponents (- { week, team }) and that team's players under other_teams",
       ),
     );
   }

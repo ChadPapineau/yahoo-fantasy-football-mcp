@@ -19,6 +19,7 @@ import {
   loadFixtureData,
 } from "../../backtest/helpers/fixture.js";
 import { fixtureLeague, kdefUniverse } from "../../backtest/helpers/league.js";
+import { recTextsFit } from "./helpers.js";
 
 let data: FixtureData;
 let settings: ScoringSettings;
@@ -123,6 +124,7 @@ describe("QA-1-022 — locked players are never moved or offered", () => {
     for (const now of [TUE, FRI, SUN, "2026-10-06T12:00:00.000Z"]) {
       for (const current of [[boswell], []]) {
         const a = run(now, { current, positions: ["K", "DEF"] });
+        expect(recTextsFit(a.rec)).toBe(true);
         if (!a.rec.no_move) expect(a.rec.latest_execution_time).not.toBeNull();
       }
     }
