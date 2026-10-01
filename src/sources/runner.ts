@@ -1,7 +1,7 @@
 // runner.ts — the refresh runner behind `ff refresh <source>` (plan 01 §5.5 refresh execution model,
 // §5.7 "retry 3× with jitter inside one run, then stop and report"; plan 06 §1.2 per-job pipeline,
 // §2 season awareness + per-job lock; plan 05 §4.1 "network error on refresh" row; OBJ-22/OBJ-27).
-// version() → (release unchanged → recordUnchanged) → fetch → assertSchema → publisher.publish(fill
+// version() → (release unchanged AND the current file healthy → recordUnchanged) → fetch → assertSchema → publisher.publish(fill
 // via source.publish; the unchanged check re-made under the job lock) → outcome. Pure orchestration over injected HttpGet/Clock/Rng/publisher/temp
 // area: no Date.now, no Math.random, no process globals. Never throws: every path returns a result.
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
@@ -13,6 +13,7 @@ import type { IsoInstant, Week } from "../domain/league/types.js";
 import { HttpError, isNetworkFailure, isTransientNetworkError } from "../http/errors.js";
 import { createRateLimiter, limitDownload, limitGet } from "../http/limiter.js";
 import { abortableSleep, type Sleep } from "../http/sleep.js";
+import { checkDatasetFile, type DatasetCheck, type DatasetHealth } from "./dataset-health.js";
 import {
   PUBLISH_ALREADY_CURRENT,
   type DatasetPublisher,
@@ -137,6 +138,12 @@ export interface RefreshDeps {
   readonly sleep?: Sleep;
   readonly log?: RunnerLog;
   readonly retry?: RetryPolicy;
+  /**
+   * Whether the file refresh_log lists as current is servable (default `checkDatasetFile`). The
+   * "unchanged" short-circuit is taken only when it is: a missing, unreadable or foreign file is
+   * republished (QA-1-097, QA-1-038).
+   */
+  readonly checkDataset?: DatasetCheck;
 }
 
 /** One run's request. */
@@ -227,11 +234,15 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
   let attempts = 0;
   let version: ReleaseVersion | null = null;
 
-  const previous = (): { file_version: string; checked_at: IsoInstant } | null => {
+  const previous = (): {
+    file_version: string;
+    file: string | null;
+    checked_at: IsoInstant;
+  } | null => {
     try {
       const row = deps.refreshLog.current().find((r) => r.source === id && r.ok);
       return row && row.file_version !== null
-        ? { file_version: row.file_version, checked_at: row.checked_at }
+        ? { file_version: row.file_version, file: row.file, checked_at: row.checked_at }
         : null;
     } catch {
       return null;
@@ -319,16 +330,36 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
     }
     if (version === null) return await fail("network", "the upstream version is unavailable");
 
+    // Set when the current file is damaged: publish without the publisher's under-lock "already
+    // current" check, which reads refresh_log (and the file's existence) only.
+    let repair = false;
     if (source.versioning === "release" && req.force !== true) {
       const prev = previous();
       if (prev !== null && prev.file_version === version.version) {
+        let health: DatasetHealth;
         try {
-          await deps.publisher.recordUnchanged(id, version.version, deps.clock.nowIso());
+          health = (deps.checkDataset ?? checkDatasetFile)(id, prev.file, version.version);
         } catch {
-          return await fail("store", "could not record the unchanged check", null, false);
+          health = "unreadable";
         }
-        deps.log?.info("refresh.unchanged", { source: id, version: version.version });
-        return { status: "unchanged", source: id, version, attempts };
+        if (health === "ok") {
+          try {
+            await deps.publisher.recordUnchanged(id, version.version, deps.clock.nowIso());
+            deps.log?.info("refresh.unchanged", { source: id, version: version.version });
+            return { status: "unchanged", source: id, version, attempts };
+          } catch {
+            // the check could not be recorded (the file vanished since, or the store is busy):
+            // publishing is always a correct answer — the publisher re-checks under its lock
+            deps.log?.warn("refresh.unchanged_check_failed", { source: id });
+          }
+        } else {
+          repair = true;
+          deps.log?.warn("refresh.dataset_repair", {
+            source: id,
+            health,
+            version: version.version,
+          });
+        }
       }
     }
 
@@ -373,7 +404,7 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
           v.released_at,
           (w) => source.publish(files, w),
           // the "unchanged" check above ran without the job lock: re-made under it (single-flight)
-          { skipIfCurrent: source.versioning === "release" && req.force !== true },
+          { skipIfCurrent: source.versioning === "release" && req.force !== true && !repair },
         );
       } catch {
         return await fail("publish", "the publisher failed");
