@@ -26,7 +26,7 @@ import {
 } from "../../src/cli/maintenance.js";
 import { backupDir, datasetDir, storePath } from "../../src/config/paths.js";
 import { fixedClock } from "../../src/domain/clock.js";
-import { fakeExec, makeIo, sandbox, type Sandbox } from "./helpers.js";
+import { fakeExec, makeIo, ROOT, sandbox, type Sandbox } from "./helpers.js";
 
 let sb: Sandbox | undefined;
 afterEach(() => {
@@ -277,7 +277,7 @@ describe("ff backup", () => {
     expect(await main(["backup", "--to", dest], again)).toBe(EXIT.ERROR);
     expect(again.err.text).toMatch(/ff backup: /);
     const rel = makeIo(s);
-    expect(await main(["backup", "--to", "relative.sqlite"], rel)).toBe(EXIT.ERROR);
+    expect(await main(["backup", "--to", "relative.sqlite"], rel)).toBe(EXIT.USAGE);
     expect(rel.err.text).toContain("must be absolute");
     const fx = fakeExec();
     expect(
@@ -287,5 +287,110 @@ describe("ff backup", () => {
       ),
     ).toBe(EXIT.ERROR);
     expect(fx.calls[0]?.args[1]).toContain("store-backup failed: backup");
+  });
+});
+
+describe("ff backup --to <path> (a destination the user chose) [QA-1-050, QA-1-101]", () => {
+  const isBackup = (file: string): boolean => {
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+      return (
+        (db.prepare("SELECT MAX(version) AS v FROM schema_version").get() as { v: number }).v >= 1
+      );
+    } finally {
+      db.close();
+    }
+  };
+  const noStagingLeft = (s: Sandbox): void => {
+    const tmp = path.join(s.cacheDir, "tmp");
+    expect(existsSync(tmp) ? readdirSync(tmp) : []).toEqual([]);
+  };
+
+  it("writes a 0600 backup into an ordinary 0755 directory, the 0755 home (~/) and through a symlinked parent (like /tmp)", async () => {
+    const s = sandbox();
+    sb = s;
+    chmodSync(s.home, 0o755);
+    const ext = path.join(s.dir, "ext");
+    mkdirSync(ext, { mode: 0o755 });
+    chmodSync(ext, 0o755);
+    const real = path.join(s.dir, "private-tmp");
+    mkdirSync(real, { mode: 0o1777 });
+    chmodSync(real, 0o1777);
+    symlinkSync(real, path.join(s.dir, "tmp-link"));
+    const cases: [string, string][] = [
+      [path.join(ext, "ff.sqlite"), path.join(ext, "ff.sqlite")],
+      ["~/ff-store-backup.sqlite", path.join(s.home, "ff-store-backup.sqlite")],
+      [path.join(s.dir, "tmp-link", "ff.sqlite"), path.join(real, "ff.sqlite")],
+    ];
+    for (const [arg, file] of cases) {
+      const io = makeIo(s);
+      expect(await main(["backup", "--to", arg], io), `${arg}: ${io.err.text}`).toBe(EXIT.OK);
+      expect(io.err.text).not.toContain("doctor --fix");
+      expect(io.out.text).toContain(`backup written: ${file} (`);
+      expect(lstatSync(file).isFile()).toBe(true);
+      expect(lstatSync(file).mode & 0o777).toBe(0o600);
+      expect(isBackup(file)).toBe(true);
+    }
+    // the user's directories are left exactly as they were
+    expect(lstatSync(ext).mode & 0o7777).toBe(0o755);
+    expect(lstatSync(s.home).mode & 0o7777).toBe(0o755);
+    noStagingLeft(s);
+  });
+
+  it("refuses, with exit 2 and a remedy that is not `ff doctor --fix`, what FF_CACHE_DIR refuses and what cannot work", async () => {
+    const s = sandbox();
+    sb = s;
+    mkdirSync(path.join(s.home, "Documents"), { mode: 0o700 });
+    const shared = path.join(s.dir, "shared");
+    mkdirSync(shared);
+    chmodSync(shared, 0o777);
+    writeFileSync(path.join(s.dir, "a-file"), "x");
+    const inRepo = path.join(ROOT, "fixtures", `qa-1-050-${String(process.pid)}.sqlite`);
+    const cases: [string, RegExp][] = [
+      ["rel.sqlite", /absolute/],
+      [path.join(s.home, "Documents", "ff.sqlite"), /cloud-synced/],
+      ["~/documents/ff.sqlite", /cloud-synced/],
+      [inRepo, /repository checkout/],
+      [path.join(s.dir, "no-such-dir", "ff.sqlite"), /does not exist/],
+      [path.join(s.dir, "a-file", "ff.sqlite"), /not a directory/],
+      [path.join(shared, "ff.sqlite"), /sticky/],
+      [path.join(s.dir, "ext") + "/", /must name a file/],
+      ["~", /must name a file/],
+    ];
+    try {
+      for (const [arg, why] of cases) {
+        const io = makeIo(s);
+        expect(await main(["backup", "--to", arg], io), arg).toBe(EXIT.USAGE);
+        expect(io.err.text, arg).toMatch(why);
+        expect(io.err.text, arg).not.toContain("doctor --fix");
+      }
+      expect(existsSync(inRepo)).toBe(false);
+      expect(readdirSync(path.join(s.home, "Documents"))).toEqual([]);
+      expect(readdirSync(shared)).toEqual([]);
+      expect(existsSync(path.join(s.dir, "no-such-dir"))).toBe(false);
+      expect(existsSync(path.join(s.dir, "ext"))).toBe(false);
+    } finally {
+      rmSync(inRepo, { force: true });
+    }
+    noStagingLeft(s);
+  });
+
+  it("never overwrites or follows what is already at the destination (exit 1)", async () => {
+    const s = sandbox();
+    sb = s;
+    const victim = path.join(s.dir, "victim.txt");
+    writeFileSync(victim, "keep");
+    const link = path.join(s.dir, "link.sqlite");
+    symlinkSync(victim, link);
+    const dangling = path.join(s.dir, "dangling.sqlite");
+    symlinkSync(path.join(s.dir, "would-be-created"), dangling);
+    for (const dest of [victim, link, dangling]) {
+      const io = makeIo(s);
+      expect(await main(["backup", "--to", dest], io), dest).toBe(EXIT.ERROR);
+      expect(io.err.text).toMatch(/already exists/);
+    }
+    expect(existsSync(path.join(s.dir, "would-be-created"))).toBe(false);
+    expect(lstatSync(victim).size).toBe(4);
+    noStagingLeft(s);
   });
 });
