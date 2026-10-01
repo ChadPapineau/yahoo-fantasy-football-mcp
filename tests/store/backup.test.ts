@@ -96,7 +96,7 @@ describe("Store.backup under a second process's uncheckpointed WAL rows", () => 
     copyFileSync(dest, path.join(restoredDir, "store.sqlite"));
     chmodSync(path.join(restoredDir, "store.sqlite"), 0o600);
     const r = openStore(t, { path: path.join(restoredDir, "store.sqlite") });
-    expect(r.schemaVersion).toBe(1);
+    expect(r.schemaVersion).toBe(MIGRATIONS.length);
     expect(r.repos.writeJournal.countByStatus()).toEqual({ prepared: 7 });
     r.close();
   });
@@ -153,10 +153,12 @@ describe("Store.backup under a second process's uncheckpointed WAL rows", () => 
 });
 
 describe("pre-migration backup (plan 03 §7)", () => {
+  // a synthetic migration one past the binary's own (the shipped list grew to 2 with QA-1-061)
+  const N = MIGRATIONS.length;
   const V2 = [
     ...MIGRATIONS,
     {
-      version: 2,
+      version: N + 1,
       name: "synthetic",
       up: (db: DatabaseSync) => {
         db.exec("CREATE TABLE extra_v2 (x INTEGER)");
@@ -168,12 +170,12 @@ describe("pre-migration backup (plan 03 §7)", () => {
     openStore(t).close();
     await walRows(40, 11);
     s = openStore(t, {}, { migrations: V2 });
-    expect(s.schemaVersion).toBe(2);
-    const bak = path.join(t.backupDir, "store.sqlite.bak-v1");
+    expect(s.schemaVersion).toBe(N + 1);
+    const bak = path.join(t.backupDir, `store.sqlite.bak-v${String(N)}`);
     expect(statSync(bak).mode & 0o777).toBe(0o600);
     expect(counts(bak)).toEqual({ log: 40, journal: 11 });
     const b = new DatabaseSync(bak, { readOnly: true });
-    expect(readSchemaVersion(b)).toBe(1);
+    expect(readSchemaVersion(b)).toBe(N);
     expect(b.prepare("SELECT 1 FROM sqlite_master WHERE name = 'extra_v2'").get()).toBeUndefined();
     b.close();
     expect(existsSync(lockPathOf(t.storePath))).toBe(false);

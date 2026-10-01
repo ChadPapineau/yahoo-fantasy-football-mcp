@@ -9,6 +9,7 @@ import { newLogId } from "../../src/store/repos/reclog.js";
 import { SAMPLES_ENCODING } from "../../src/store/repos/samples-codec.js";
 import type { CrosswalkPair } from "../../src/domain/crosswalk/types.js";
 import type { Store } from "../../src/store/types.js";
+import { checkRecordDedupContract } from "../domain/reclog/dedup-contract.js";
 import { openStore, tempCache, type TempCache } from "./helpers/env.js";
 import {
   LEAGUE,
@@ -54,24 +55,49 @@ describe("recommendationLog (required; never pruned)", () => {
     expect(s.repos.recommendationLog.get("' OR 1=1 --")).toBeNull();
   });
 
-  it("dedups on league + client_ref (idempotent), but not across leagues", async () => {
+  it("dedups on the full scope (league, season, week, kind, client_ref), never on the key alone [QA-1-061]", async () => {
     const a = await s.repos.recommendationLog.record(
       recordInput({ client_ref: "c-1" }),
       iso(0),
       null,
     );
+    const again = await s.repos.recommendationLog.record(
+      recordInput({ client_ref: "c-1" }),
+      iso(1),
+      null,
+    );
+    expect(again).toEqual({ ...a, deduplicated: true });
+    // the same key in another week is a new record (it used to return the earlier week's row)
     const b = await s.repos.recommendationLog.record(
       recordInput({ client_ref: "c-1", week: 5 }),
       iso(1),
       null,
     );
-    expect(b).toEqual({ ...a, deduplicated: true });
+    expect(b.deduplicated).toBe(false);
+    expect(b.week).toBe(5);
+    expect(b.log_id).not.toBe(a.log_id);
     const c = await s.repos.recommendationLog.record(
       recordInput({ client_ref: "c-1", league_key: "manual.l.other" }),
       iso(2),
       null,
     );
     expect(c.deduplicated).toBe(false);
+  });
+
+  it("holds the reclog dedup contract [QA-1-061]", async () => {
+    expect(
+      await checkRecordDedupContract(() => {
+        const t2 = tempCache("ff-reclog-contract-");
+        const s2 = openStore(t2);
+        return {
+          repo: s2.repos.recommendationLog,
+          close: () => {
+            s2.close();
+            t2.cleanup();
+          },
+        };
+      }),
+    ).toEqual([]);
   });
 
   it("concurrent records with one client_ref produce one row", async () => {

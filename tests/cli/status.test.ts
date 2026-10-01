@@ -11,6 +11,7 @@ import { formatAge, renderStatus, type StatusReport } from "../../src/cli/status
 import { datasetFilePath, storePath } from "../../src/config/paths.js";
 import { fixedClock } from "../../src/domain/clock.js";
 import { copyCache, fixtureEnv, makeIo, sandbox, type Sandbox } from "./helpers.js";
+import { MIGRATIONS } from "../../src/store/migrations/index.js";
 
 const REFRESHED_AT = "2026-09-30T18:00:00.000Z";
 let template: Sandbox | undefined;
@@ -67,7 +68,9 @@ describe("ff status", () => {
     const s = refreshed();
     const { code, r, text } = await report(s, "2026-09-30T18:05:00.000Z");
     expect(code).toBe(EXIT.OK);
-    expect(r.store).toMatchObject({ state: "ok", schema_version: 1, binary_schema_version: 1 });
+    // the binary's schema version follows the migration list (2 since QA-1-061)
+    const v = MIGRATIONS.length;
+    expect(r.store).toMatchObject({ state: "ok", schema_version: v, binary_schema_version: v });
     const by = Object.fromEntries(r.sources.map((x) => [x.source, x]));
     expect(by["nflverse:injuries"]).toMatchObject({
       state: "fresh",
