@@ -9,7 +9,7 @@ import { AnalyticsError } from "../../../src/domain/analytics/errors.js";
 import { analyzeLineup, type LineupPlayer } from "../../../src/domain/analytics/lineup.js";
 import { analyzeMatchupPre } from "../../../src/domain/analytics/matchup.js";
 import { fixedClock, seededRng } from "../../../src/domain/clock.js";
-import { dist, LEAGUE_SLOTS, NOW, player } from "./helpers.js";
+import { dist, LEAGUE_SLOTS, NOW, player, recTextsFit } from "./helpers.js";
 
 const clock = fixedClock(NOW);
 
@@ -67,6 +67,7 @@ describe("QA-1-043 — P(win) needs the opponent's full starting lineup", () => 
     const partial = e3(noKdef);
     // full's K/DEF match mine (8, 7) by construction, so the stand-ins reproduce the full number
     expect(partial.p_win).toBeCloseTo(whole.p_win, 2);
+    expect(recTextsFit(partial.rec)).toBe(true);
     expect(partial.mu_o).toBeCloseTo(whole.mu_o, 6);
     expect(
       partial.rec.assumptions.some((a) =>
@@ -86,6 +87,7 @@ describe("QA-1-043 — P(win) needs the opponent's full starting lineup", () => 
         a.text.startsWith("the opponent's listed players leave starting slots empty"),
       ),
     ).toBe(true);
+    expect(recTextsFit(r.rec)).toBe(true);
     const ok = analyzeLineup({ slots: LEAGUE_SLOTS, players: mine, opponent: full, clock });
     expect(ok.p_win_before).not.toBeNull();
   });
@@ -100,6 +102,7 @@ describe("QA-1-043 — P(win) needs the opponent's full starting lineup", () => 
         clock,
       });
       expect(d.objective_used).toBe("mean");
+      expect(recTextsFit(d.rec)).toBe(true);
       expect([d.p_win_before, d.p_win_after, d.p_win_interval]).toEqual([null, null, null]);
       expect(d.rec.decision_metric).toBe("expected_points");
       expect(
