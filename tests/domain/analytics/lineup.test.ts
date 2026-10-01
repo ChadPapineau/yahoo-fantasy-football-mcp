@@ -22,6 +22,7 @@ import {
   NOW,
   PAST,
   player,
+  slotsOf,
   SUN_1PM,
   SUN_425,
   THU,
@@ -381,8 +382,13 @@ describe("analyzeLineup — swaps, conditionals, option value, stacks", () => {
   it("compare pairs are evaluated (≤ 5, unknown or identical keys ignored)", () => {
     const a = player("WR", 10, { slot: "WR" });
     const b = player("WR", 9, { slot: "BN" });
+    // one WR seat and no flex: b has no empty seat to fill, so the current lineup is the best one
+    // (with LEAGUE_SLOTS b would fill an empty WR seat — a real move since QA-1-020)
     const rec = analyzeLineup({
-      slots: LEAGUE_SLOTS,
+      slots: slotsOf([
+        { name: "WR", count: 1 },
+        { name: "BN", count: 4 },
+      ]),
       players: [a, b],
       opponent: null,
       compare: [
