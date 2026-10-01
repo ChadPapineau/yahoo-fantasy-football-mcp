@@ -27,13 +27,20 @@ export const MAX_SCORING_MAGNITUDE = 50;
 /** Characters a name may not contain: C0/C1 controls, zero-width and bidi-override code points. */
 const FORBIDDEN_TEXT_RE = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁠-⁩﻿]/u;
 
+/**
+ * Default-ignorable code points (soft hyphen, variation selectors, Hangul fillers, tag characters …)
+ * render as nothing, so a name could hide text in them; refused at the door like the MCP sanitiser
+ * strips them on output (QA-1-074).
+ */
+const DEFAULT_IGNORABLE_RE = /\p{Default_Ignorable_Code_Point}/u;
+
 /** A human-authored name: 1..max chars after trimming, no control/zero-width/bidi characters. */
 const text = (max: number) =>
   z
     .string()
     .max(max)
     .refine((s) => s.trim().length > 0, { message: "must not be empty" })
-    .refine((s) => !FORBIDDEN_TEXT_RE.test(s), {
+    .refine((s) => !FORBIDDEN_TEXT_RE.test(s) && !DEFAULT_IGNORABLE_RE.test(s), {
       message: "contains control, zero-width or bidi characters",
     });
 
