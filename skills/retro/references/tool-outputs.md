@@ -12,7 +12,7 @@ Every tool returns the same envelope: `data`, `meta` (`as_of`, `age_s`, `freshne
 | `ff_list_leagues` | the configured league and the user's team | `leagues[].league_key`, `my_team.team_key` | once |
 | `ff_get_league` | the settings digest | `league.current_week`, `rules.*`, `roster.slots[]`, `scoring.rules[]`, `scoring.settings_hash`, `weeks[]` | once |
 | `ff_get_standings` | standings (empty under the manual league, with a warning) | `teams[]`, `playoff_line` | once/hour |
-| `ff_get_scoreboard` | the week's matchups — manual league: the opponent entered for that week in `opponents:`, without scores (none: `matchups: []`, no warning) | `matchups[].teams[]`, `meta.provisional` | once/hour; every call on game day |
+| `ff_get_scoreboard` | the week's matchups — manual league: the opponent entered for that week in `opponents:`, without scores (a week with no entry returns `matchups: []`) | `matchups[].teams[]`, `meta.provisional` | once/hour; every call on game day |
 | `ff_list_transactions` | league moves — manual league: the transactions listed in the league file | `transactions[]`, `history_coverage` | once |
 | `ff_get_roster` | a roster, its slots and **the lock schedule** | `players[].slot`, `is_editable`, `lock_at`, `kickoff`, `status`, `lock_schedule[]`, `latest_execution_time` | once/hour; game day: once more |
 | `ff_get_player_stats` | stat lines + the engine's points | `players[].engine_points`, `engine_complete`, `match` (null under the manual league) | per (players, week) |
