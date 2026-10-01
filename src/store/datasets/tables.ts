@@ -11,6 +11,7 @@
 //     counted in the SchemaReport warnings (never the whole publish), unless `row_filter` says more;
 //   - tables are created STRICT (ddlFor), so a type slip fails loudly at insert time.
 import type { DatasetSourceId } from "../../config/freshness.js";
+import { DST_FUMBLE_RETURN_TD_COLUMN } from "../../domain/scoring/nflverse.js";
 import type { DatasetColumn, DatasetColumnType, DatasetTableSpec } from "../types.js";
 
 // --- contract types (extend the store's DatasetTableSpec; every contract IS a DatasetTableSpec) -----
@@ -350,6 +351,13 @@ export const DS_TEAM_DEFENSE_WEEK = table({
       col(c, "INTEGER", false, [c], "SUM over the team's rows (NULL counts 0)"),
     ),
     col(
+      DST_FUMBLE_RETURN_TD_COLUMN,
+      "INTEGER",
+      false,
+      ["fumble_recovery_tds", "fumble_recovery_opp"],
+      "SUM over the team's rows of defensiveFumbleReturnTds(row) = min(fumble_recovery_tds, fumble_recovery_opp) when fumble_recovery_opp > 0: defensive fumble-return TDs (nflverse def_tds holds interception returns only; QA-1-017)",
+    ),
+    col(
       "opp_passing_yards",
       "INTEGER",
       true,
@@ -679,7 +687,7 @@ WHERE season = :season AND game_id IN (SELECT value FROM json_each(:game_ids))`,
       ),
     ],
     mapping:
-      "nfl_team ← team; opponent ← opponent_team; line ← DT StatLine: dst_sack ← def_sacks, dst_int ← def_interceptions, dst_fum_rec ← fumble_recovery_opp, dst_td ← def_tds, dst_ret_td ← special_teams_tds, dst_safety ← def_safeties, dst_blk ← def_fg_blocks + def_punt_blocks (+ def_pat_blocks per the league's rule, plan 08 U), dst_pa ← the opponent's score from statement 2 (game final only; definition (a)/(b) per plan 08 §3.2 U-6), dst_ya ← opp_passing_yards − opp_sack_yards_lost + opp_rushing_yards ([U] Yahoo's yards-allowed definition)",
+      "nfl_team ← team; opponent ← opponent_team; line ← DT StatLine: dst_sack ← def_sacks, dst_int ← def_interceptions, dst_fum_rec ← fumble_recovery_opp, dst_td ← def_tds + fumble_recovery_tds_opp, dst_ret_td ← special_teams_tds, dst_safety ← def_safeties, dst_blk ← def_fg_blocks + def_punt_blocks (+ def_pat_blocks per the league's rule, plan 08 U), dst_pa ← the opponent's score from statement 2 (game final only; definition (a)/(b) per plan 08 §3.2 U-6), dst_ya ← opp_passing_yards − opp_sack_yards_lost + opp_rushing_yards ([U] Yahoo's yards-allowed definition)",
   }),
   /** WeatherReader.forGames(gameIds) — the configured weather source's table, then the other. */
   "WeatherReader.forGames": Object.freeze({

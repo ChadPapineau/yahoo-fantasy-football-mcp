@@ -93,11 +93,11 @@ practice-squad ones included, + my own K/DEF — exceeded E1's 64-target bound: 
 | position | week | n (played) | candidates | implied_total populated | ρ model | ρ last week's points | ρ implied total |
 |---|---|---|---|---|---|---|---|
 | K | 1 | 32 | 10 | yes | 0.022 | n/a | 0.022 |
-| DEF | 1 | 32 | 10 | yes | 0.322 | n/a | 0.322 |
+| DEF | 1 | 32 | 10 | yes | 0.301 | n/a | 0.301 |
 | K | 2 | 32 | 10 | yes | -0.093 | -0.28 | -0.095 |
-| DEF | 2 | 32 | 10 | yes | 0.24 | 0.025 | 0.213 |
+| DEF | 2 | 32 | 10 | yes | 0.246 | 0.033 | 0.221 |
 | K | 3 | 32 | 10 | yes | -0.091 | -0.008 | -0.218 |
-| DEF | 3 | 32 | 10 | yes | 0.17 | -0.036 | 0.046 |
+| DEF | 3 | 32 | 10 | yes | 0.169 | -0.047 | 0.046 |
 <!-- generated:kdef:end -->
 
 **Findings.**
