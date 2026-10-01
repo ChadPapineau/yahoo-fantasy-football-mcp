@@ -19,7 +19,8 @@ import {
 import type { Projection, Rec } from "../../domain/analytics/types.js";
 import { seededRng, type Rng } from "../../domain/clock.js";
 import { lockAtFor } from "../../domain/league/schedule.js";
-import { manualPlayerKeyFor, type Week } from "../../domain/league/types.js";
+import { MAX_ROSTER_SIZE, slotByName } from "../../domain/league/slots.js";
+import { manualPlayerKeyFor, type RosterSlots, type Week } from "../../domain/league/types.js";
 import type { ScoringSettings } from "../../domain/scoring/types.js";
 import { MANUAL_FA_POOL_WARNING } from "../../providers/platform.js";
 import {
@@ -39,7 +40,14 @@ import {
   faabBudgetSchema,
 } from "../bounds.js";
 import { defineTool, type ToolContext } from "../define.js";
-import { bareUntrusted, recSchema, type InputStamp, type UntrustedField } from "../envelope.js";
+import {
+  ANALYTICS_BUDGET_CHARS,
+  bareUntrusted,
+  recSchema,
+  type BudgetTrim,
+  type InputStamp,
+  type UntrustedField,
+} from "../envelope.js";
 import { FfError } from "../errors.js";
 import {
   bare,
@@ -407,8 +415,8 @@ const currentSeat = z.strictObject({
 const e2Data = z.strictObject({
   objective_used: z.enum(["mean", "pwin", "blend"]),
   dist_basis: z.enum(["position_cv", "player_sim"]),
-  current_lineup: z.array(currentSeat).max(30),
-  recommended_lineup: z.array(assignment).max(30),
+  current_lineup: z.array(currentSeat).max(MAX_ROSTER_SIZE),
+  recommended_lineup: z.array(assignment).max(MAX_ROSTER_SIZE),
   mode: z.enum(["protect", "chase", "neutral"]),
   mode_basis: z.strictObject({
     mu_m: z.number(),
@@ -479,6 +487,124 @@ const assignmentRow = (a: {
 
 const recRow = (r: Rec): z.infer<typeof recSchema> =>
   JSON.parse(JSON.stringify({ ...r, log_id: null })) as z.infer<typeof recSchema>;
+
+type E2Data = z.infer<typeof e2Data>;
+
+/** Whether `slot` is a starting (starter or flex) slot of this league. */
+function isStartingSlot(slots: RosterSlots, slot: string): boolean {
+  const c = slotByName(slots, slot)?.class;
+  return c === "starter" || c === "flex";
+}
+
+/**
+ * The reserves the advice needs shown: every swap's incoming player and every conditional's
+ * players (a swapped-OUT player's projection is summarised by the swap's delta_e and interval).
+ */
+function involvedKeys(d: E2Data, withOut: boolean): Set<string> {
+  const out = new Set<string>();
+  for (const s of d.swaps) {
+    out.add(s.in);
+    if (withOut) out.add(s.out);
+  }
+  for (const c of d.conditionals) out.add(c.if.player_key).add(c.then.in);
+  return out;
+}
+
+/** Removes the last row of `rows` that `keep` does not protect, or null when none is left. */
+function dropLastReserve<T extends { slot: string; player_key: string }>(
+  rows: readonly T[],
+  keep: (r: T) => boolean,
+): T[] | null {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
+    if (r !== undefined && !keep(r)) return [...rows.slice(0, i), ...rows.slice(i + 1)];
+  }
+  return null;
+}
+
+/**
+ * E2's budget steps (plan 07 C8; QA-1-001/073/080), cheapest information first, so that a
+ * schema-legal roster (≤ 60 players) always fits 10 000 chars WITHOUT cutting `swaps` — the advice
+ * `rec.action` counts. (1) full-detail seat names/locks (both are in recommended_lineup); (2)
+ * reserve rows of recommended_lineup, from the end; (3) reserve seats of current_lineup; (4)
+ * lock_schedule keys of players no longer shown. Starters and every player a swap or conditional
+ * names are never cut. Each warning states the cumulative cut.
+ */
+function lineupTrims(slots: RosterSlots, original: E2Data): BudgetTrim[] {
+  const cut = `cut to fit the ${String(ANALYTICS_BUDGET_CHARS)}-character budget`;
+  const keep = (d: E2Data, withOut: boolean) => {
+    const inv = involvedKeys(d, withOut);
+    return (r: { slot: string; player_key: string }): boolean =>
+      isStartingSlot(slots, r.slot) || inv.has(r.player_key);
+  };
+  const recCut = (d: E2Data, withOut: boolean) => {
+    const rows = dropLastReserve(d.recommended_lineup, keep(d, withOut));
+    if (rows === null) return null;
+    return {
+      data: { ...d, recommended_lineup: rows },
+      warning: `recommended_lineup ${cut}: ${String(rows.length)} of ${String(original.recommended_lineup.length)} rows (starters, swap-ins, conditionals); other projections: ff_project_players`,
+      key: "recommended_lineup",
+    };
+  };
+  return [
+    (raw) => {
+      const d = raw as E2Data;
+      if (d.current_lineup.every((r) => r.name === undefined && r.lock_at === undefined))
+        return null;
+      return {
+        data: {
+          ...d,
+          current_lineup: d.current_lineup.map((r) => ({ slot: r.slot, player_key: r.player_key })),
+        },
+        warning: `current_lineup names and lock times ${cut} (both are in recommended_lineup)`,
+        key: "current_lineup",
+        dropPaths: ["data.current_lineup[].name"],
+      };
+    },
+    (raw) => recCut(raw as E2Data, true),
+    (raw) => {
+      const d = raw as E2Data;
+      const rows = dropLastReserve(d.current_lineup, (r) => isStartingSlot(slots, r.slot));
+      if (rows === null) return null;
+      return {
+        data: { ...d, current_lineup: rows },
+        warning: `current_lineup ${cut}: its ${String(rows.length)} starting seats of ${String(original.current_lineup.length)}`,
+        key: "current_lineup",
+      };
+    },
+    // a swapped-out starter's row: the swap already carries his delta and interval
+    (raw) => recCut(raw as E2Data, false),
+    (raw) => {
+      const d = raw as E2Data;
+      if (d.lock_schedule.length === 0) return null;
+      const shown = new Set(d.recommended_lineup.map((r) => r.player_key));
+      const locks = d.lock_schedule
+        .map((l) => ({ ...l, player_keys: l.player_keys.filter((k) => shown.has(k)) }))
+        .filter((l) => l.player_keys.length > 0);
+      const limited = locks.reduce((n, l) => n + l.player_keys.length, 0);
+      const before = d.lock_schedule.reduce((n, l) => n + l.player_keys.length, 0);
+      return limited < before
+        ? {
+            data: { ...d, lock_schedule: locks },
+            warning: `lock_schedule ${cut}: the players shown in recommended_lineup only`,
+          }
+        : {
+            data: { ...d, lock_schedule: [] },
+            warning: `lock_schedule ${cut}: each shown player's lock_at is in recommended_lineup`,
+          };
+    },
+    (raw) => {
+      const d = raw as E2Data;
+      if (d.current_lineup.length === 0) return null;
+      return {
+        data: { ...d, current_lineup: [] },
+        warning: `current_lineup ${cut}: the current starters are recommended_lineup's with every swap reversed`,
+        key: "current_lineup",
+        dropPaths: ["data.current_lineup[].name"],
+      };
+    },
+  ];
+}
 
 export const analyzeLineupTool = defineTool({
   name: "ff_analyze_lineup",
@@ -553,8 +679,9 @@ export const analyzeLineupTool = defineTool({
       rec: recRow(rec.rec),
       inputs: rec.inputs.slice(0, 25).map((i) => ({ ...i })),
     };
+    const out = JSON.parse(JSON.stringify(data)) as E2Data;
     return {
-      data: JSON.parse(JSON.stringify(data)) as z.infer<typeof e2Data>,
+      data: out,
       inputs,
       warnings,
       bareFields: [
@@ -563,6 +690,7 @@ export const analyzeLineupTool = defineTool({
       ],
       extraSources: ["engine"],
       estimate: true,
+      trims: lineupTrims(slots, out),
       listKey: "swaps",
       week: w,
     };
