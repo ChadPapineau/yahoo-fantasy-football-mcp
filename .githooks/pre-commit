@@ -1,14 +1,15 @@
 #!/bin/sh
-# pre-commit — block secrets and personal identifiers before they reach a commit.
-# Scans the STAGED content of every added/copied/modified/renamed file.
+# pre-commit — block secrets, personal identifiers and a personal commit address before they reach
+# a commit. Scans the STAGED blob of every file the commit adds or changes — any status but a
+# deletion, type changes included — enumerated by the scanner itself (`git diff --cached --raw -z`)
+# and read by object id, so a name git would C-quote (non-ASCII, tab, quote, backslash) is never
+# mangled into a path that "does not exist" and skipped (QA-1-088). It also refuses an author or
+# committer address that is not a no-reply/reserved placeholder (QA-1-095).
 # Enabled per clone with:  git config core.hooksPath .githooks
 # (scripts/dev/commit-paths.sh runs the same scanner itself, since it commits via
 # plumbing that does not fire hooks.) Never bypass with --no-verify.
 root=$(git rev-parse --show-toplevel) || exit 1
-files=$(git diff --cached --name-only --diff-filter=ACMR)
-[ -z "$files" ] && exit 0
-printf '%s\n' "$files" | tr '\n' '\0' | \
-  xargs -0 "$root/scripts/dev/with-node.sh" node "$root/scripts/dev/scan-secrets.mjs" --staged -- || {
-  echo "pre-commit: secret/identifier scan failed — commit blocked" >&2
+"$root/scripts/dev/with-node.sh" node "$root/scripts/dev/scan-secrets.mjs" --index --identity || {
+  echo "pre-commit: secret/identifier/identity scan failed — commit blocked" >&2
   exit 1
 }
