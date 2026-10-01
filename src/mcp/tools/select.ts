@@ -112,6 +112,11 @@ function defenseTarget(team: NflTeam, platform: string): Target {
   };
 }
 
+/** How many unmatched entries a warning names by key. */
+const UNMATCHED_KEYS_NAMED = 5;
+/** A player key safe to quote in a warning (server-made ids only). */
+const SAFE_KEY_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
 /** A roster's entries resolved to targets; unmatched players are counted in `warnings`. */
 export async function rosterTargets(
   ctx: ToolContext,
@@ -135,17 +140,21 @@ export async function rosterTargets(
   const nameSrc = textSource(lc.ref.platform, "player.name");
   const out: Target[] = [];
   let unmatched = 0;
+  const named: string[] = [];
   for (const e of got.value.entries) {
     const r = byKey.get(e.player.ref.id);
     if (r?.subject === null || r === undefined) {
       unmatched++;
+      // the entry's key names which player (QA-1-042); keys are server-made, never free text
+      if (named.length < UNMATCHED_KEYS_NAMED && SAFE_KEY_RE.test(e.player.ref.id))
+        named.push(e.player.ref.id);
       continue;
     }
     out.push(fromPlatform(e.player, r.subject, nameSrc, e));
   }
   if (unmatched > 0)
     warnings.push(
-      `${String(unmatched)} rostered players are unmatched in the crosswalk and are omitted (ff_get_status lists them)`,
+      `${String(unmatched)} rostered players are unmatched in the crosswalk and are omitted (ff_get_status lists them)${named.length > 0 ? `: ${named.join(", ")}` : ""}`,
     );
   return out;
 }
@@ -190,8 +199,12 @@ export async function selectTargets(
     const universe = await leagueUniverse(ctx, lc, inputs);
     for (const key of selector.player_keys) {
       const u = universe.byKey.get(key);
-      if (u?.subject !== null && u !== undefined) {
-        out.push(fromPlatform(u.player, u.subject, nameSrc, null));
+      if (u !== undefined) {
+        // a league player resolves only through the crosswalk: a manual.p.<gsis> key whose entry is
+        // ambiguous (its gsis_id conflicts with the entry) is never projected as the key's player
+        // (QA-1-042) — it is unresolved, like an unmatched one
+        if (u.subject === null) missing++;
+        else out.push(fromPlatform(u.player, u.subject, nameSrc, null));
         continue;
       }
       const s = subjectFromKey(key);
