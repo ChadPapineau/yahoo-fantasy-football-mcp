@@ -3,7 +3,7 @@
 // (stampToInput; STALE_ONLY past a hard limit unless allow_stale — plan 01 §5.4), the never-loaded
 // dataset answer (C-14 (c)), provenance tags for untrusted text (plan 02 §6.2), the crosswalk run
 // behind every gsis id a tool shows (research 04 §D; plan 07 C1), and week/lock helpers (plan 07 B1).
-import { freshnessClass } from "../../config/freshness.js";
+import { freshnessClass, type DatasetSourceId } from "../../config/freshness.js";
 import type { NflTeam } from "../../config/schema.js";
 import type { DatasetResult, DatasetStamp, NflGame } from "../../domain/analytics/types.js";
 import {
@@ -109,6 +109,31 @@ export function requiredDataset<T>(
 ): InputStamp | null {
   if (r.stamp === null) throw new FfError("STALE_ONLY", { hint: DATASET_NEVER_LOADED_HINT });
   return inputOf(r.stamp, nowMs, allowStale);
+}
+
+/** The hint for a current dataset whose file is missing or unreadable: a plain refresh repairs it. */
+export function datasetUnreadableHint(source: DatasetSourceId): string {
+  return `Run \`ff refresh ${source}\` in a terminal, then retry.`;
+}
+
+/**
+ * `requiredDataset` for a named source (QA-1-038): when nothing could be read but the refresh log
+ * lists a current file for `source`, that file is missing or unreadable (a torn copy, a restore, a
+ * disk problem) — not "never loaded" and not "older than its hard limit". The error says so and
+ * names the one refresh that repairs it.
+ */
+export function requiredSource<T>(
+  ctx: ToolContext,
+  source: DatasetSourceId,
+  r: DatasetResult<T>,
+  allowStale: boolean,
+): InputStamp | null {
+  if (r.stamp === null && ctx.services.refreshLog.current().some((c) => c.source === source))
+    throw new FfError("STALE_ONLY", {
+      variant: "dataset_unreadable",
+      hint: datasetUnreadableHint(source),
+    });
+  return requiredDataset(r, ctx.nowMs, allowStale);
 }
 
 /** The input of an OPTIONAL dataset read (injuries, weather): null when never loaded. */
