@@ -1,7 +1,12 @@
 // projection.ts — the append-only `projection` table (plan 08 §5; plan 10 T12 never pruned; critic
 // C-03: rows keyed subject + made_at so `getAsOf(before)` reads only pre-lock projections). Writes
 // are best-effort (decision C-03b): a busy lock is a counted miss, never an error. Samples are stored
-// in the compact form of ./samples-codec.ts (plan 08 §5 "compressed"; A15 latency).
+// in the compressed form of ./samples-codec.ts (plan 08 §5 "compressed"; A15 latency).
+// Growth is bounded by what the retrospective can use, not by call count (QA-1-031/QA-1-081): a run
+// whose RECORDED inputs — inputs_as_of and expectation — equal those of the newest earlier row of
+// the same (subject, season, week, model_version) adds no row. getAsOf(before) then answers with
+// that earlier row: a projection made from exactly the inputs the collapsed run recorded, before
+// `before`, so a pre-lock read is unchanged (only a later run with NEW inputs can supersede it).
 import { GSIS_ID_RE, isNflTeam, type NflTeam } from "../../config/schema.js";
 import type { ProjectionRepository } from "../../domain/analytics/types.js";
 import type { ProjectionSubject, StoredProjection } from "../../domain/scoring/types.js";
@@ -55,12 +60,24 @@ const toStored = (r: Row): StoredProjection => ({
   samples: decodeSamples(r.samples_json),
 });
 
+/**
+ * Matches when the newest row of the key made at or before `:made` recorded the same inputs_as_of
+ * and expectation (QA-1-031). Only that ONE row is compared, so A, B, A again appends the second A.
+ */
+const REPEATS_PREVIOUS_SQL = `SELECT 1 FROM (
+    SELECT inputs_as_of, expectation_json FROM projection
+    WHERE subject_key = :subject AND season = :season AND week = :week AND model_version = :model
+      AND made_ms <= :made
+    ORDER BY made_ms DESC LIMIT 1
+  ) AS prev WHERE prev.inputs_as_of = :inputs AND prev.expectation_json = :expectation`;
+
 export function projectionRepository({ db, writes }: RepoDeps): ProjectionRepository {
   const newest = (extra: string) =>
     db.prepare(
       `SELECT * FROM projection WHERE subject_key = :subject AND season = :season AND week = :week
        AND model_version = :model ${extra} ORDER BY made_ms DESC LIMIT 1`,
     );
+  const repeatsPrevious = db.prepare(REPEATS_PREVIOUS_SQL);
   return {
     put(p) {
       const key = subjectKey(p.subject);
@@ -70,24 +87,27 @@ export function projectionRepository({ db, writes }: RepoDeps): ProjectionReposi
       const madeMs = isoMs(p.made_at, "made_at");
       isoMs(p.inputs_as_of, "inputs_as_of");
       const expectation = JSON.stringify(p.expectation);
+      const sameAs = {
+        subject: key,
+        season: p.season,
+        week: p.week,
+        model: p.model_version,
+        made: madeMs,
+        inputs: p.inputs_as_of,
+        expectation,
+      };
+      // A repeat of the newest earlier run's recorded inputs is already stored: no encode, no write.
+      if (repeatsPrevious.get(sameAs) !== undefined) return { written: true };
       const samples = encodeSamples(p.samples);
       return writes.bestEffort(() => {
-        // Append-only: the same (subject, season, week, model, made_at) twice keeps the first row.
+        // Append-only: the same (subject, season, week, model, made_at) twice keeps the first row;
+        // the NOT EXISTS re-checks the repeat inside the write (one autocommit statement).
         db.prepare(
           `INSERT OR IGNORE INTO projection
            (subject_key, season, week, model_version, made_at, made_ms, inputs_as_of, expectation_json, samples_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(
-          key,
-          p.season,
-          p.week,
-          p.model_version,
-          p.made_at,
-          madeMs,
-          p.inputs_as_of,
-          expectation,
-          samples,
-        );
+           SELECT :subject, :season, :week, :model, :made_at, :made, :inputs, :expectation, :samples
+           WHERE NOT EXISTS (${REPEATS_PREVIOUS_SQL})`,
+        ).run({ ...sameAs, made_at: p.made_at, samples });
       });
     },
 
