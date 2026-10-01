@@ -97,15 +97,13 @@ const DATASET_NAME_SOURCE = "nflverse.roster_weekly.name";
 
 /**
  * Where a served player's name came from (QA-1-075). Under the manual league the status-A/FA
- * universe adds the nflverse kicker universe (and the 32 defences), served with ownership
- * `unknown` — every league.yaml player has team/freeagents/waivers ownership — so a non-defence
- * `unknown` player's name is roster_weekly text, not the operator's file. Every other name is the
- * platform's own.
+ * universe adds the nflverse kicker universe, whose names are roster_weekly text, not the
+ * operator's file: the provider marks those `name_source: "dataset"`. Every other name (the file's
+ * players, the 32 defences) is the platform's own.
  */
 function nameSourceOf(p: PlatformPlayer, platform: LeagueContext["ref"]["platform"]): string {
-  return platform === "manual" && p.ownership?.type === "unknown" && p.position !== "DEF"
-    ? DATASET_NAME_SOURCE
-    : textSource(platform, "player.name");
+  // the provider says where each name came from (QA-1-075); never inferred from ownership
+  return p.name_source === "dataset" ? DATASET_NAME_SOURCE : textSource(platform, "player.name");
 }
 
 /**

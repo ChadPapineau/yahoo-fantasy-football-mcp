@@ -114,6 +114,7 @@ function toPlatformPlayer(
   slots: RosterSlots,
   ownership: PlayerOwnership,
   bye: Week | null,
+  nameSource: "platform" | "dataset" = "platform",
 ): PlatformPlayer {
   return Object.freeze({
     ref: Object.freeze({ platform: "manual" as const, id: p.key }),
@@ -132,6 +133,7 @@ function toPlatformPlayer(
     percent_owned_delta: null,
     ownership,
     gsis_hint: p.gsis_id,
+    name_source: nameSource,
   });
 }
 
@@ -449,7 +451,7 @@ export class ManualLeagueProvider implements FantasyPlatform {
         push(toPlatformPlayer(def, d.slots, UNKNOWN_OWNERSHIP, bye(team)), "U");
       }
       for (const k of this.kickers(d.season))
-        push(toPlatformPlayer(k, d.slots, UNKNOWN_OWNERSHIP, bye(k.nfl_team)), "U");
+        push(toPlatformPlayer(k, d.slots, UNKNOWN_OWNERSHIP, bye(k.nfl_team), "dataset"), "U");
 
       const wanted: ReadonlySet<string> =
         q.status === "A"
