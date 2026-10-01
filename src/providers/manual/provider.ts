@@ -10,6 +10,7 @@ import { NFL_TEAMS, type NflTeam } from "../../config/schema.js";
 import { ensureSecureDir, PathSecurityError, readSecureFile } from "../../config/paths.js";
 import type { ScheduleReader, NflGame } from "../../domain/analytics/types.js";
 import type { Clock } from "../../domain/clock.js";
+import { nameKey } from "../../domain/crosswalk/normalize.js";
 import type { RosterWeeklyReader } from "../../domain/crosswalk/types.js";
 import {
   byeWeekOf,
@@ -142,6 +143,28 @@ const UNKNOWN_OWNERSHIP: PlayerOwnership = Object.freeze({
 });
 
 /** The FantasyPlatform over a hand-written league.yaml (read-only; plan 01 §8 X1). */
+/** A letter or digit: a query without one cannot name anybody. */
+const NAME_CHAR_RE = /[\p{L}\p{N}]/u;
+
+/**
+ * The C1 name search (plan 07 C1 "a name to a player_key"; QA-1-084): a player matches when the
+ * query is a substring of his name under NFKC + case folding, OR under the crosswalk's name key
+ * (plan 05 §2: apostrophes of every kind, periods, hyphens, spacing and diacritics folded away), so
+ * `Ja’Marr`, `JaMarr`, `St Brown` and `Amon Ra` find the players spelled `Ja'Marr Chase` and
+ * `Amon-Ra St. Brown`. The literal path keeps suffix queries (`Walker III`) that the key strips. A
+ * query with no letter or digit matches nobody.
+ */
+export function nameMatcher(query: string): (name: string) => boolean {
+  if (!NAME_CHAR_RE.test(query)) return () => false;
+  const literal = query.normalize("NFKC").toLowerCase();
+  const key = nameKey(query);
+  return (name) => {
+    if (name.normalize("NFKC").toLowerCase().includes(literal)) return true;
+    if (key === null) return false;
+    return nameKey(name)?.includes(key) ?? false;
+  };
+}
+
 export class ManualLeagueProvider implements FantasyPlatform {
   readonly id = "manual" as const;
   private readonly opts: ManualLeagueProviderOptions;
@@ -438,7 +461,7 @@ export class ManualLeagueProvider implements FantasyPlatform {
               : q.status === "T"
                 ? new Set(["T"])
                 : new Set<string>();
-      const search = q.search === null ? null : q.search.normalize("NFKC").toLowerCase();
+      const matches = q.search === null ? null : nameMatcher(q.search);
       let items = all
         .filter((x) => wanted.has(x.kind))
         .map((x) => x.p)
@@ -448,7 +471,7 @@ export class ManualLeagueProvider implements FantasyPlatform {
             p.position === q.position ||
             p.eligible_positions.includes(q.position),
         )
-        .filter((p) => search === null || p.name.normalize("NFKC").toLowerCase().includes(search));
+        .filter((p) => matches === null || matches(p.name));
       if (q.sort === "NAME")
         items = [...items].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
       const total = items.length;
