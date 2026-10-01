@@ -255,6 +255,13 @@ export interface PublishOptions {
 /** The `PublishOutcome` error when `skipIfCurrent` found the version already published. */
 export const PUBLISH_ALREADY_CURRENT = "already_current";
 
+/**
+ * The `PublishOutcome` error when the new file WAS made live (renamed over the previous one) but its
+ * refresh_log row could not be written — a failure after the commit point (QA-1-032). The previous
+ * file is NOT intact; the next publish of the source records the live file before anything else.
+ */
+export const PUBLISH_UNRECORDED = "published_unrecorded";
+
 /** The result of publishing a dataset file. */
 export type PublishOutcome =
   | {
@@ -269,9 +276,13 @@ export type PublishOutcome =
  * Publishes a dataset atomically (implemented once, used by every source via `ff refresh`; obtained
  * from `StoreFactory.openPublisher` — critic C-07b). `publish` takes the source's `job_lock`, creates
  * the staging file, lets `fill` write it, `fsync`s, `rename()`s over `<cache>/ds/<stem>.sqlite`,
- * fsyncs the directory, then records refresh_log (a required write) with `checked_at = finished`.
- * Any failure deletes the staging file and leaves the previous dataset file untouched (plan 05 §2
- * `sources/*`). `recordUnchanged` is the skip path: the release version equals the attached one, so
+ * fsyncs the directory, then records refresh_log with `checked_at = finished` — the rename and the
+ * row are ONE commit: the store's writer lock is taken first (waiting up to
+ * PUBLISH_COMMIT_BUDGET_MS, plan 05 §4.1's 3-s lock row), then the file is renamed and the row
+ * inserted under it (QA-1-032). Any failure before the rename deletes the staging file and leaves the
+ * previous dataset file untouched (plan 05 §2 `sources/*`); a failure after it returns
+ * PUBLISH_UNRECORDED, and the next publish of that source records the live file first (it also
+ * repairs a crash between the rename and the commit). `recordUnchanged` is the skip path: the release version equals the attached one, so
  * no file is written and only refresh_log `checked_at` advances (the "release" age basis).
  * `options.skipIfCurrent` re-makes that check UNDER the job lock (single-flight, plan 01 §5.7): a
  * refresh that checked "unchanged" before another refresh published the same release and released
