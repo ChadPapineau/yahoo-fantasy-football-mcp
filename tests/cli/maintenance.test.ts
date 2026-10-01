@@ -27,6 +27,7 @@ import {
 import { backupDir, datasetDir, storePath } from "../../src/config/paths.js";
 import { fixedClock } from "../../src/domain/clock.js";
 import { fakeExec, makeIo, ROOT, sandbox, type Sandbox } from "./helpers.js";
+import { MIGRATIONS } from "../../src/store/migrations/index.js";
 
 let sb: Sandbox | undefined;
 afterEach(() => {
@@ -185,7 +186,10 @@ describe("ff backup", () => {
     const db = new DatabaseSync(path.join(backupDir(s.cacheDir), names[3] ?? ""), {
       readOnly: true,
     });
-    expect(db.prepare("SELECT MAX(version) AS v FROM schema_version").get()).toEqual({ v: 1 });
+    // the backup is at the binary's schema version (2 since migration 002, QA-1-061)
+    expect(db.prepare("SELECT MAX(version) AS v FROM schema_version").get()).toEqual({
+      v: MIGRATIONS.length,
+    });
     db.close();
     expect(lstatSync(backupDir(s.cacheDir)).mode & 0o777).toBe(0o700);
   });

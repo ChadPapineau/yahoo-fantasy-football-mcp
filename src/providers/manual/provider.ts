@@ -564,7 +564,7 @@ export class ManualLeagueProvider implements FantasyPlatform {
       const m: Matchup = Object.freeze({
         week,
         status,
-        is_playoffs: po.start_week !== null && week >= po.start_week,
+        is_playoffs: po.start_week === null ? null : week >= po.start_week,
         is_consolation: false,
         is_tied: false,
         winner_team_key: null,

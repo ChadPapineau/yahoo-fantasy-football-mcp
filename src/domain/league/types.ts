@@ -123,7 +123,8 @@ export interface LeagueWeek {
 
 /** Playoff settings (plan 07 A2 `rules.playoffs`). */
 export interface PlayoffRules {
-  readonly uses_playoff: boolean;
+  /** Null when the platform (or league.yaml) does not say (QA-1-045): unknown, never "no". */
+  readonly uses_playoff: boolean | null;
   readonly start_week: Week | null;
   readonly num_teams: number | null;
   readonly reseeding: boolean | null;
@@ -155,7 +156,8 @@ export interface LeagueRules {
   readonly waiver_type: string | null;
   readonly waiver_rule: string | null;
   readonly waiver_time_days: number | null;
-  readonly uses_faab: boolean;
+  /** Null when neither a waiver type nor a FAAB budget is known (QA-1-045). */
+  readonly uses_faab: boolean | null;
   /** Research 03 §E: not reliably exposed — null unless known. */
   readonly faab_budget: number | null;
   readonly trade_end_date: string | null;
@@ -401,7 +403,8 @@ export interface Matchup {
   readonly week: Week;
   /** `preevent` | `midevent` | `postevent` or another PLATFORM_CODE_RE code. */
   readonly status: string;
-  readonly is_playoffs: boolean;
+  /** Null when the playoff start week is unknown (QA-1-045). */
+  readonly is_playoffs: boolean | null;
   readonly is_consolation: boolean;
   readonly is_tied: boolean;
   readonly winner_team_key: string | null;

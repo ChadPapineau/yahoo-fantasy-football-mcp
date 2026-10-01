@@ -243,7 +243,7 @@ const a2Data = z.strictObject({
       waiver_type: platformCode.nullable(),
       waiver_rule: platformCode.nullable(),
       waiver_time_days: z.number().nullable(),
-      uses_faab: z.boolean(),
+      uses_faab: z.boolean().nullable(),
       faab_budget: z.number().nullable(),
       trade_end_date: isoDate.nullable(),
       trade_ratify_type: platformCode.nullable(),
@@ -252,7 +252,7 @@ const a2Data = z.strictObject({
       max_adds: z.number().nullable(),
       max_weekly_adds: z.number().nullable(),
       playoffs: z.strictObject({
-        uses_playoff: z.boolean(),
+        uses_playoff: z.boolean().nullable(),
         start_week: week.nullable(),
         num_teams: z.number().int().nullable(),
         reseeding: z.boolean().nullable(),
@@ -541,8 +541,8 @@ export const getStandings = defineTool({
       data: {
         teams,
         playoff_line: {
-          num_playoff_teams: po.uses_playoff ? po.num_teams : null,
-          start_week: po.uses_playoff ? po.start_week : null,
+          num_playoff_teams: po.uses_playoff === true ? po.num_teams : null,
+          start_week: po.uses_playoff === true ? po.start_week : null,
         },
       },
       inputs,
@@ -560,7 +560,7 @@ const a4Data = z.strictObject({
     .array(
       z.strictObject({
         status: platformCode.nullable(),
-        is_playoffs: z.boolean(),
+        is_playoffs: z.boolean().nullable(),
         is_consolation: z.boolean(),
         is_tied: z.boolean(),
         winner_team_key: teamKey.nullable(),
