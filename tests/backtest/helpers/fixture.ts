@@ -23,6 +23,8 @@ import type {
 } from "../../../src/domain/analytics/types.js";
 import type { Week } from "../../../src/domain/league/types.js";
 import {
+  DST_FUMBLE_RETURN_TD_COLUMN,
+  defensiveFumbleReturnTds,
   positionTypeForNflPosition,
   statLineFromPlayerWeek,
   statLineFromTeamDefense,
@@ -160,6 +162,9 @@ async function build(): Promise<FixtureData> {
       rushing_yards: 0,
     };
     for (const c of TEAM_DEFENSE_SUM_COLUMNS) acc[c] = (acc[c] ?? 0) + (num(r[c]) ?? 0);
+    // mirrors team-defense.ts: defensive fumble-return TDs, per row (QA-1-017)
+    acc[DST_FUMBLE_RETURN_TD_COLUMN] =
+      (acc[DST_FUMBLE_RETURN_TD_COLUMN] ?? 0) + defensiveFumbleReturnTds(r);
     acc.passing_yards = (acc.passing_yards ?? 0) + (num(r.passing_yards) ?? 0);
     acc.sack_yards_lost = (acc.sack_yards_lost ?? 0) + (num(r.sack_yards_lost) ?? 0);
     acc.rushing_yards = (acc.rushing_yards ?? 0) + (num(r.rushing_yards) ?? 0);

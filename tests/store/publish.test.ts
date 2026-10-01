@@ -7,6 +7,7 @@ import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DS_SCHEMA_VERSION } from "../../src/store/attach.js";
 import { DS_INJURIES, DS_GAMES } from "../../src/store/datasets/tables.js";
 import { errorCode, stagingPath, sweepDebris } from "../../src/store/publisher.js";
 import {
@@ -109,7 +110,7 @@ describe("publish: the happy path", () => {
       file_version: "2026-09-30 09:36:26 EDT",
       release_updated_at: "2026-09-30T13:36:26.000Z",
       published_at: t.clock.nowIso(),
-      ds_schema: "1",
+      ds_schema: String(DS_SCHEMA_VERSION),
       columns_hash: "h",
     });
     const { latest } = log();
