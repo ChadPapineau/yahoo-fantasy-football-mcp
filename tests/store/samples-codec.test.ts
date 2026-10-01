@@ -1,15 +1,17 @@
 // samples-codec.test.ts — src/store/repos/samples-codec.ts (plan 08 §5 "compressed; canonical names
 // only"; plan 10 A15): the compact form round-trips every engine-shaped batch exactly, anything else
-// falls back to exact JSON, legacy JSON rows still read, and a corrupt column is refused, never
-// half-decoded.
+// falls back to exact JSON, legacy JSON rows and v1 (uncompressed, row-major) rows still read, and a
+// corrupt column — of either compact form — is refused, never half-decoded (QA-1-031: v2 compresses).
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import type { StatLine } from "../../src/domain/scoring/types.js";
+import { deflateRawSync } from "node:zlib";
 import {
   decodeSamples,
   encodeSamples,
   MAX_COMPACT_SAMPLES,
   SAMPLES_ENCODING,
+  SAMPLES_ENCODING_V1,
 } from "../../src/store/repos/samples-codec.js";
 
 const SRC = "projection:v1-trailing";
@@ -21,9 +23,10 @@ const line = (values: Record<string, number>, pt: StatLine["position_type"] = "O
   source: SRC,
 });
 const isCompact = (text: string): boolean => text.startsWith(`{"enc":"${SAMPLES_ENCODING}"`);
+/** A v1 column (row-major f64le, uncompressed — what earlier builds wrote and this one still reads). */
 const header = (over: Record<string, unknown>): string =>
   JSON.stringify({
-    enc: SAMPLES_ENCODING,
+    enc: SAMPLES_ENCODING_V1,
     n: 1,
     position_type: "O",
     provisional: false,
@@ -175,6 +178,38 @@ describe("decodeSamples — a corrupt column is refused whole", () => {
     ],
   ])("%s", (_, text) => {
     expect(() => decodeSamples(text)).toThrow(/corrupt samples column/);
+  });
+
+  /** A v2 column whose `data` is `bytes` shuffled+deflated as given (cells of 8 bytes). */
+  const v2 = (over: Record<string, unknown>, bytes: Buffer = Buffer.alloc(8)): string =>
+    header({ enc: SAMPLES_ENCODING, data: deflateRawSync(bytes).toString("base64"), ...over });
+
+  it.each<[string, string]>([
+    ["v2 data that is not DEFLATE", header({ enc: SAMPLES_ENCODING, data: "////////" })],
+    ["v2 data inflating short", v2({}, Buffer.alloc(7))],
+    ["v2 data inflating long", v2({}, Buffer.alloc(16))],
+    ["v2 data inflating far past the header (bomb)", v2({}, Buffer.alloc(64 * 1024 * 1024))],
+    [
+      "a v2 infinite cell",
+      v2({}, Buffer.from(new Float64Array([Number.POSITIVE_INFINITY]).buffer)),
+    ],
+  ])("%s", (_, text) => {
+    expect(() => decodeSamples(text)).toThrow(/corrupt samples column/);
+  });
+
+  it("v1 rows still decode exactly (row-major), and a re-encode writes v2 with the same content", () => {
+    const keys = ["rec", "rec_yd"];
+    const m = Buffer.alloc(3 * 2 * 8);
+    [4, 51.5, Number.NaN, Number.NaN, 7.25, 90.125].forEach((v, i) => m.writeDoubleLE(v, i * 8));
+    const back = decodeSamples(header({ n: 3, keys, data: m.toString("base64") }));
+    expect(back.map((l) => l.values)).toEqual([
+      { rec: 4, rec_yd: 51.5 },
+      {},
+      { rec: 7.25, rec_yd: 90.125 },
+    ]);
+    const again = encodeSamples(back);
+    expect(isCompact(again)).toBe(true);
+    expect(decodeSamples(again)).toEqual(back);
   });
 
   it("malformed JSON throws", () => {

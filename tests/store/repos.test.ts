@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LOG_ID_RE } from "../../src/domain/reclog/types.js";
 import { newLogId } from "../../src/store/repos/reclog.js";
+import { SAMPLES_ENCODING } from "../../src/store/repos/samples-codec.js";
 import type { CrosswalkPair } from "../../src/domain/crosswalk/types.js";
 import type { Store } from "../../src/store/types.js";
 import { openStore, tempCache, type TempCache } from "./helpers/env.js";
@@ -363,7 +364,7 @@ describe("projections (best-effort, append-only, getAsOf)", () => {
     const stored = raw.prepare("SELECT samples_json FROM projection").get() as {
       samples_json: string;
     };
-    expect(stored.samples_json.startsWith('{"enc":"f64le-b64:1"')).toBe(true);
+    expect(stored.samples_json.startsWith(`{"enc":"${SAMPLES_ENCODING}"`)).toBe(true);
     expect(stored.samples_json.length * 3).toBeLessThan(JSON.stringify(samples).length);
     // a row written before the compact form: a plain JSON array
     raw
