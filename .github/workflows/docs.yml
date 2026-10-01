@@ -82,9 +82,10 @@ permissions:
 
 concurrency:
   group: docs-${{ github.event_name }}-${{ github.ref }}
-  # PRs: a superseded head is cancelled. Pushes to main: never — a cancelled run on main is a commit
-  # without a verdict (the run on 0722918 was cancelled by the next push seconds later).
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # PRs and pushes to any other branch: a superseded run is cancelled (a build branch pushes many
+  # commits; only the newest needs a verdict). Pushes to main: never — a cancelled run on main is a
+  # commit without a verdict (the run on 0722918 was cancelled by the next push seconds later).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
 
 env:
   # exact pins; bump deliberately and TOGETHER (see header — the Chrome we install is the one this

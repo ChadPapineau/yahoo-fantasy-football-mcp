@@ -60,6 +60,37 @@ describe.each(files)("%s", (file) => {
   });
 });
 
+/** The one cancel-in-progress expression ci, docs and secrets share. */
+const CANCEL_EXPR = "${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}";
+
+/** Evaluates CANCEL_EXPR-shaped expressions (==, !=, ||, string literals) for a run context. */
+function cancels(expr: unknown, ctx: { event_name: string; ref: string }): boolean {
+  const m = /^\$\{\{ (.*) \}\}$/.exec(String(expr));
+  if (m === null) throw new Error(`not an expression: ${String(expr)}`);
+  return (m[1] ?? "").split(" || ").some((term) => {
+    const t = /^github\.(event_name|ref) (==|!=) '([^']*)'$/.exec(term.trim());
+    if (t === null) throw new Error(`unsupported term: ${term}`);
+    const v = ctx[t[1] as "event_name" | "ref"];
+    return t[2] === "==" ? v === t[3] : v !== t[3];
+  });
+}
+
+describe("concurrency: ci, docs and secrets", () => {
+  for (const f of ["ci.yml", "docs.yml", "secrets.yml"]) {
+    const expr = load(f).concurrency?.["cancel-in-progress"];
+    it(`${f}: cancels a superseded PR or non-main push run, never a run on main`, () => {
+      expect(expr).toBe(CANCEL_EXPR);
+      expect(cancels(expr, { event_name: "pull_request", ref: "refs/pull/7/merge" })).toBe(true);
+      expect(cancels(expr, { event_name: "push", ref: "refs/heads/build/phase-1a" })).toBe(true);
+      expect(cancels(expr, { event_name: "push", ref: "refs/heads/main" })).toBe(false);
+      expect(cancels(expr, { event_name: "schedule", ref: "refs/heads/main" })).toBe(false);
+      expect(cancels(expr, { event_name: "workflow_dispatch", ref: "refs/heads/main" })).toBe(
+        false,
+      );
+    });
+  }
+});
+
 describe("ci.yml", () => {
   const wf = load("ci.yml");
   const jobs = wf.jobs ?? {};
@@ -71,10 +102,10 @@ describe("ci.yml", () => {
     expect(on.push).toBeNull(); // no branch/path filter: every push, every branch
   });
 
-  it("cancels superseded runs for pull requests only", () => {
-    expect(String(wf.concurrency?.["cancel-in-progress"])).toContain(
-      "github.event_name == 'pull_request'",
-    );
+  it("cancels superseded runs for pull requests and non-main pushes, never on main", () => {
+    // changed deliberately (round-1 gate): a build branch's superseded pushes are CI noise; main's
+    // runs stay uncancelled — a cancelled run on main is a commit without a verdict
+    expect(wf.concurrency?.["cancel-in-progress"]).toBe(CANCEL_EXPR);
   });
 
   it("has the plan 04 §4.1 jobs, process and smoke included", () => {
