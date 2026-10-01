@@ -6,8 +6,9 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { resolveArgs } from "../../scripts/skills/tool-sequences.mjs";
 import { ROOT } from "./helpers.js";
-import { T0, dataOf, skillWorld } from "./world.js";
+import { T0, codeSpans, dataOf, keysDeep, skillWorld } from "./world.js";
 
 type Json = Record<string, unknown>;
 interface Step {
@@ -65,5 +66,73 @@ describe("QA-1-065: start-sit's game-day log entry is scored as a lineup change"
     } finally {
       await sw.close();
     }
+  }, 60_000);
+});
+
+/** Sunday of week 4 after the 13:00 ET kickoffs, before the late games (the dry run's game-day clock). */
+const SUNDAY_WEEK4 = "2026-10-04T18:00:00.000Z";
+
+const skillMd = readFileSync(path.join(ROOT, "skills/start-sit/SKILL.md"), "utf8");
+/** The game-day branch's output step (§4, the step that starts "Output:"). */
+const gameDayOutput = (() => {
+  const branch = skillMd.slice(skillMd.indexOf("### 4. Game-day branch"));
+  const end = branch.indexOf("\n### ", 5);
+  const lines = (end === -1 ? branch : branch.slice(0, end)).split("\n");
+  return lines.filter((l) => /^\d+\.\s+Output:/.test(l)).join("\n");
+})();
+/** A code span that names a result field (`a`, `a[]`, `a.b`), as opposed to a value or a call. */
+const FIELD = /^[a-z_][a-z0-9_]*(?:\[\])?(?:\.[a-z_][a-z0-9_]*(?:\[\])?)*$/;
+
+describe("QA-1-071: start-sit's game-day branch reads what its calls return, for the players still open", () => {
+  it("the game_day sequence projects only players whose games have not started", async () => {
+    const step = gameDay?.steps.find((s) => s.tool === "ff_project_players");
+    const keys = (step?.args.players as { player_keys?: string[] } | undefined)?.player_keys ?? [];
+    expect(keys.length).toBeGreaterThan(0);
+    const sw = await skillWorld(SUNDAY_WEEK4);
+    try {
+      const ro = dataOf(await sw.call("ff_get_roster", { week: 4, force_refresh: true })) as {
+        players: { player_key: string; is_editable: boolean; lock_at: string | null }[];
+      };
+      // the variant really is mid-slate (control)
+      expect(ro.players.some((p) => !p.is_editable)).toBe(true);
+      const started = keys.filter((k) => {
+        const p = ro.players.find((x) => x.player_key === k);
+        return (
+          p === undefined ||
+          !p.is_editable ||
+          Date.parse(p.lock_at ?? "") <= Date.parse(SUNDAY_WEEK4)
+        );
+      });
+      expect(started).toEqual([]);
+    } finally {
+      await sw.close();
+    }
+  }, 60_000);
+
+  it("every field the game-day output names is in what the branch's calls return without an opponent", async () => {
+    expect(gameDayOutput, "the game-day branch has an Output step").not.toBe("");
+    const fields = codeSpans(gameDayOutput).filter((c) => FIELD.test(c) && !c.startsWith("ff_"));
+    expect(fields.length).toBeGreaterThan(0);
+    const sw = await skillWorld(SUNDAY_WEEK4);
+    const results = new Map<string, { tool: string; result: unknown }>();
+    let matchupCode: string | null = null;
+    try {
+      for (const step of gameDay?.steps ?? []) {
+        if (step.tool === "ff_record_recommendation") continue;
+        const c = await sw.call(step.tool, resolveArgs(step.args, results) as Json);
+        if (step.tool === "ff_analyze_matchup") matchupCode = c.code;
+        if (c.ok) results.set(step.id, { tool: step.tool, result: c.body });
+      }
+    } finally {
+      await sw.close();
+    }
+    // the common manual-league case: no opponent this week, so no matchup result (control)
+    expect(matchupCode).toBe("NOT_FOUND");
+    const keys = new Set<string>();
+    for (const r of results.values()) keysDeep(r.result, keys);
+    const missing = fields.filter((f) =>
+      f.split(".").some((seg) => !keys.has(seg.replace(/\[\]$/, ""))),
+    );
+    expect(missing).toEqual([]);
   }, 60_000);
 });
