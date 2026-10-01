@@ -145,7 +145,17 @@ export interface FfErrorDetails {
   readonly upstream_status?: number;
   /** A server-authored hint that replaces the table hint (never built from upstream text). */
   readonly hint?: string;
+  /**
+   * A fixed alternative message for the code (QA-1-038): `dataset_unreadable` — STALE_ONLY for a
+   * dataset the refresh log lists as current whose file is missing or cannot be attached, which is
+   * not "older than its hard limit" and which `allow_stale` cannot help.
+   */
+  readonly variant?: "dataset_unreadable";
 }
+
+/** STALE_ONLY's message when the current dataset file is missing or unreadable (QA-1-038). */
+export const DATASET_UNREADABLE_MESSAGE =
+  "The dataset file the last refresh recorded is missing or unreadable.";
 
 /**
  * The server's coded error. Its `message` is the table's fixed text; nothing caller-supplied goes
@@ -346,7 +356,10 @@ export function toToolError(e: unknown, requestId: string): ToolErrorResult {
   const spec = ERROR_TABLE[code];
   const error: Record<string, unknown> = {
     code,
-    message: spec.message,
+    message:
+      code === "STALE_ONLY" && details.variant === "dataset_unreadable"
+        ? DATASET_UNREADABLE_MESSAGE
+        : spec.message,
     hint:
       typeof details.hint === "string" && SAFE_HINT.test(details.hint) ? details.hint : spec.hint,
     retryable: spec.retryable,

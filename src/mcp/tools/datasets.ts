@@ -36,7 +36,7 @@ import {
   inputOf,
   leagueContext,
   optionalDataset,
-  requiredDataset,
+  requiredSource,
   rosterRows,
   seasonGames,
   seasonOfInstant,
@@ -173,7 +173,7 @@ export const getInjuries = defineTool({
         : await selectTargets(ctx, lc, args.players, w, inputs, warnings);
     const gsis = targets.flatMap((t) => (t.subject.kind === "player" ? [t.subject.gsis_id] : []));
     const reports = ctx.services.datasets.injuries.reports(season, w, gsis);
-    const rIn = requiredDataset(reports, ctx.nowMs, lc.allowStale);
+    const rIn = requiredSource(ctx, "nflverse:injuries", reports, lc.allowStale);
     if (rIn !== null) inputs.push(rIn);
     const byGsis = new Map(reports.rows.map((r) => [r.gsis_id, r]));
     const games = seasonGames(ctx, season);
@@ -451,7 +451,7 @@ export const getSchedule = defineTool({
     if (lc === null && args.weeks === undefined)
       warnings.push("no league configured: week 1 of the current NFL season is shown");
     const all = seasonGames(ctx, season);
-    const sIn = requiredDataset(all, ctx.nowMs, allowStale);
+    const sIn = requiredSource(ctx, "nflverse:schedules", all, allowStale);
     if (sIn !== null) inputs.push(sIn);
     // betting lines past their hard limit (24 h) are not served, as the projections omit them (QA-1-004)
     const linesExpired =

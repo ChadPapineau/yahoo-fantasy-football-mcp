@@ -56,7 +56,7 @@ import {
   lockModeOf,
   optionalDataset,
   platformInput,
-  requiredDataset,
+  requiredSource,
   rosterRows,
   scoringOf,
   slotsOf,
@@ -145,7 +145,7 @@ function datasetGate(ctx: ToolContext, lc: LeagueContext, weeks: readonly Week[]
   const d = ctx.services.datasets;
   const season = lc.league.season;
   const out: (InputStamp | null)[] = [
-    requiredDataset(d.schedules.games(season, weeks), ctx.nowMs, lc.allowStale),
+    requiredSource(ctx, "nflverse:schedules", d.schedules.games(season, weeks), lc.allowStale),
   ];
   const stats = d.playerWeeks.lines([], season, weeks);
   if (stats.stamp !== null) out.push(inputOf(stats.stamp, ctx.nowMs, lc.allowStale));
@@ -1085,7 +1085,7 @@ function kdefUniverse(
   inputs: InputStamp[],
 ): KdefCandidateInput[] {
   const rr = rosterRows(ctx, lc.league.season);
-  const rIn = requiredDataset(rr, ctx.nowMs, lc.allowStale);
+  const rIn = requiredSource(ctx, "nflverse:roster_weekly", rr, lc.allowStale);
   if (rIn !== null) inputs.push(rIn);
   const defs: KdefCandidateInput[] = NFL_TEAMS.map((t) => ({
     player_key: manualPlayerKeyFor({ kind: "defense", nfl_team: t }),

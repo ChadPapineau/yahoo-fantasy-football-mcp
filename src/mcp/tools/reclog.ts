@@ -47,7 +47,7 @@ import {
   leagueContext,
   leagueTypedLine,
   lockModeOf,
-  requiredDataset,
+  requiredSource,
   scoringOf,
   teamOf,
   weekFinal,
@@ -365,7 +365,7 @@ export const analyzeRetrospective = defineTool({
     const oppRoster = opp?.map(presenceOf) ?? null;
     for (const r of [...roster, ...(oppRoster ?? [])]) addSubject(keys, r);
     const lines = ctx.services.datasets.playerWeeks.lines([...keys.gsis], season, [w]);
-    const lIn = requiredDataset(lines, ctx.nowMs, lc.allowStale);
+    const lIn = requiredSource(ctx, "nflverse:stats_player_week", lines, lc.allowStale);
     if (lIn !== null) inputs.push(lIn);
     const dLines =
       keys.teams.size === 0

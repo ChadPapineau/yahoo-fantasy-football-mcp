@@ -14,6 +14,11 @@ import {
 import { datasetFilePath, storePath } from "../config/paths.js";
 import type { Config } from "../config/schema.js";
 import type { RefreshLogRow } from "../domain/analytics/types.js";
+import {
+  checkDatasetFile,
+  type DatasetCheck,
+  type DatasetHealth,
+} from "../sources/dataset-health.js";
 import { MIGRATIONS } from "../store/index.js";
 import type { Store, StoreFactory } from "../store/types.js";
 import { VERSION } from "../version.js";
@@ -43,8 +48,11 @@ export function configuredSources(config: Config): DatasetSourceId[] {
 export interface SourceStatus {
   readonly source: DatasetSourceId;
   readonly freshness_class: string;
-  /** `never_loaded` when no successful refresh exists. */
-  readonly state: FreshnessState | "never_loaded";
+  /**
+   * `never_loaded` when no successful refresh exists; `unreadable` when the current file is there
+   * but the server could not attach it (damaged, another layout or version — QA-1-038).
+   */
+  readonly state: FreshnessState | "never_loaded" | "unreadable";
   /** What the class does past its hard limit (`STALE_ONLY` error, or the driver is omitted). */
   readonly beyond_hard: string | null;
   readonly age_s: number | null;
@@ -57,6 +65,8 @@ export interface SourceStatus {
   readonly consecutive_failures: number;
   readonly file_present: boolean;
   readonly file_bytes: number | null;
+  /** The current file's health (src/sources/dataset-health.ts); null when there is none to check. */
+  readonly file_health: DatasetHealth | null;
 }
 
 /** Judges one source from its refresh_log rows. */
@@ -67,6 +77,7 @@ export function sourceStatus(
   failures: number,
   cacheDir: string,
   nowMs: number,
+  checkFile: DatasetCheck = checkDatasetFile,
 ): SourceStatus {
   const cls = freshnessClass(SOURCE_REGISTRY[source].freshness);
   let fileBytes: number | null = null;
@@ -85,6 +96,7 @@ export function sourceStatus(
       latest !== null && !latest.ok ? { at: latest.finished_at, error: latest.error } : null,
     file_present: fileBytes !== null,
     file_bytes: fileBytes,
+    file_health: null,
   };
   if (current === null) {
     return {
@@ -107,9 +119,15 @@ export function sourceStatus(
     },
     nowMs,
   );
+  // never "fresh" for a file the server cannot attach (QA-1-038): the same checks the refresh runs
+  const health =
+    fileBytes === null
+      ? null
+      : checkFile(source, datasetFilePath(cacheDir, source), current.file_version ?? "");
   return {
     ...base,
-    state: fileBytes === null ? "never_loaded" : judged.state,
+    file_health: health,
+    state: fileBytes === null ? "never_loaded" : health !== "ok" ? "unreadable" : judged.state,
     age_s: judged.age_s,
     basis_at: judged.basis_at,
     file_version: current.file_version,
@@ -296,6 +314,7 @@ const STATE_LABEL: Record<SourceStatus["state"], string> = {
   stale: "STALE",
   expired: "EXPIRED",
   never_loaded: "NEVER LOADED",
+  unreadable: "UNREADABLE",
 };
 
 /** Renders the text dashboard. */
@@ -328,6 +347,8 @@ export function renderStatus(r: StatusReport): string[] {
   const red = r.sources.filter((x) => x.state === "expired" || x.state === "never_loaded");
   if (red.length > 0)
     out.push(`→ run \`ff refresh all\` (${String(red.length)} source(s) expired or never loaded)`);
+  for (const x of r.sources.filter((y) => y.state === "unreadable"))
+    out.push(`→ ${x.source}: dataset file unreadable — run \`ff refresh ${x.source}\``);
   if (r.journal !== null) {
     const pending =
       (r.journal.counts.prepared ?? 0) +

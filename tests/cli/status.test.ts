@@ -111,6 +111,23 @@ describe("ff status", () => {
     });
   });
 
+  it("a damaged current dataset file is UNREADABLE with its repair, never fresh [QA-1-038]", async () => {
+    const s = refreshed();
+    writeFileSync(datasetFilePath(s.cacheDir, "nflverse:injuries"), "garbage ".repeat(1000));
+    const { r, text } = await report(s);
+    expect(r.sources.find((x) => x.source === "nflverse:injuries")).toMatchObject({
+      state: "unreadable",
+      file_present: true,
+      file_health: "unreadable",
+    });
+    expect(text).toMatch(/nflverse:injuries\s+UNREADABLE/);
+    expect(text).toContain(
+      "nflverse:injuries: dataset file unreadable — run `ff refresh nflverse:injuries`",
+    );
+    // control: an intact source is still judged by its age
+    expect(r.sources.find((x) => x.source === "nflverse:schedules")?.file_health).toBe("ok");
+  });
+
   it("a store from a newer version is reported, never migrated or rewritten", async () => {
     const s = refreshed();
     const db = new DatabaseSync(storePath(s.cacheDir));
