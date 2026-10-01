@@ -9,7 +9,7 @@ Agent Skills that teach Claude how to use the fantasy-football MCP server (plan 
 | Skill | Use it for | Tools it calls, in order |
 |---|---|---|
 | [start-sit](start-sit/SKILL.md) | who to start, sit or flex; Questionable players; conditional lineups; the game-day branch once any slot has locked | status → league → roster → (scoreboard, opponent roster) → injuries → projections → lineup → record |
-| [stream-kdef](stream-kdef/SKILL.md) | which kicker or defense to start or stream, two weeks ahead | status → league → roster → schedule → K/DEF pool → waivers (K/DEF) → record |
+| [stream-kdef](stream-kdef/SKILL.md) | which kicker or defense to start or stream, two weeks ahead | status → league → roster → schedule → K or DEF pool → waivers → record, once per position |
 | [retro](retro/SKILL.md) | how last week's advice did; calibration; decision quality versus luck | status → league → scoreboard → retrospective → (transactions) → record |
 | [onboard](onboard/SKILL.md) | writing and checking the private league file (manual-league mode) | status → leagues → interview, or league → roster → player stats → record |
 

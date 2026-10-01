@@ -704,12 +704,13 @@ describe("tool_sequence.json", () => {
       "stream-kdef: no waivers step",
       "stream-kdef",
       (j) => {
-        const q = (j.sequences as Json[])[0]!;
-        q.steps = (q.steps as Json[]).filter((s) => s.tool !== "ff_analyze_waivers");
-        ((q.steps as Json[]).at(-1)!.args as Json).rec = { $ref: "roster.data.rec" };
-        ((q.steps as Json[]).at(-1)!.args as Json).source_calls = {
-          $source_calls: ["roster"],
-        };
+        for (const q of j.sequences as Json[]) {
+          q.steps = (q.steps as Json[]).filter((s) => s.tool !== "ff_analyze_waivers");
+          ((q.steps as Json[]).at(-1)!.args as Json).rec = { $ref: "roster.data.rec" };
+          ((q.steps as Json[]).at(-1)!.args as Json).source_calls = {
+            $source_calls: ["roster"],
+          };
+        }
       },
       /no ff_analyze_waivers step/,
     ],
@@ -845,6 +846,18 @@ describe("QA-1-065: a recommendation is logged under the kind of the tool that p
     expect(errorsOf(t)).toMatch(
       /stream-kdef\/SKILL\.md: the tool_sequence records kind "stream" but the body never logs it/,
     );
+  });
+});
+
+describe("QA-1-063: stream-kdef ranks one position per ff_analyze_waivers call", () => {
+  it("rejects a ranking call over K and DEF together (one hold_vs_stream and one rec for both)", () => {
+    const t = fresh();
+    const j = t.readJson(SEQ("stream-kdef")) as Json;
+    for (const q of j.sequences as Json[])
+      for (const s of q.steps as Json[])
+        if (s.tool === "ff_analyze_waivers") (s.args as Json).positions = ["K", "DEF"];
+    t.write(SEQ("stream-kdef"), j);
+    expect(errorsOf(t)).toMatch(/ff_analyze_waivers must rank exactly one position per call/);
   });
 });
 
