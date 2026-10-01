@@ -396,6 +396,19 @@ describe("listPlayers", () => {
       (k) => k.name,
     );
     expect(all).toEqual(["Chris Boswell", "Brandon Aubrey", "Ka'imi Fairbairn", "Jake Bates"]);
+    // name provenance is explicit (QA-1-075): the dataset kicker's name is roster_weekly text; the
+    // file's players and the 32 defences (ownership unknown too) carry the platform's own names
+    const src = (await p.listPlayers(LEAGUE, Q({}), { limit: 500, offset: 0 })).value.items;
+    const by = (n: string) => src.find((x) => x.name === n)?.name_source;
+    expect(by("Jake Bates")).toBe("dataset");
+    expect(by("Chris Boswell")).toBe("platform");
+    expect(by("Ka'imi Fairbairn")).toBe("platform");
+    const defs = src.filter((x) => x.position === "DEF" && x.ownership?.type === "unknown");
+    expect(defs.length).toBeGreaterThan(0);
+    expect(defs.every((x) => x.name_source === "platform")).toBe(true);
+    expect(src.filter((x) => x.name_source === "dataset").map((x) => x.name)).toEqual([
+      "Jake Bates",
+    ]);
   });
 
   it("position filter accepts a slot name (W/R/T → RB/WR/TE only), search and NAME sort", async () => {

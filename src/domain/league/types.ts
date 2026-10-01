@@ -333,6 +333,12 @@ export interface PlatformPlayer {
   readonly ownership: PlayerOwnership | null;
   /** A gsis id the platform itself supplies (Sleeper, or a manual league.yaml entry); crosswalk seed. */
   readonly gsis_hint: string | null;
+  /**
+   * Where `name` came from: the platform's own record (`platform`, the default when absent), or a
+   * third-party dataset the provider merged in (`dataset`: the manual provider's nflverse kicker
+   * universe, whose names are roster_weekly text — QA-1-075).
+   */
+  readonly name_source?: "platform" | "dataset";
 }
 
 /** One player on a roster in one week. */
