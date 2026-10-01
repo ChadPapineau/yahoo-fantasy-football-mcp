@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { EXIT } from "../../src/cli/exit.js";
 import { main } from "../../src/cli/main.js";
 import {
+  backupWeekOf,
   KEEP_WEEKLY_BACKUPS,
   pruneFiles,
   rotateWeeklyBackups,
@@ -198,6 +199,72 @@ describe("ff backup", () => {
     writeFileSync(first, "");
     expect(path.basename(weeklyBackupPath(s.cacheDir, t))).toBe("store-2026-10-04-031007.sqlite");
     expect(rotateWeeklyBackups(path.join(s.dir, "nope"))).toEqual([]);
+  });
+
+  it("keeps four WEEKS of restore points: same-week extra backups never push older weeks out [QA-1-054]", async () => {
+    const s = sandbox();
+    sb = s;
+    const bdir = backupDir(s.cacheDir);
+    mkdirSync(bdir, { recursive: true, mode: 0o700 });
+    const prior = ["2026-09-06", "2026-09-13", "2026-09-20", "2026-09-27"].map(
+      (d) => `store-${d}.sqlite`,
+    );
+    for (const n of prior) writeFileSync(path.join(bdir, n), "x");
+    // four manual backups on Wednesday 2026-09-30 (before/after experimenting)
+    const clock = fixedClock("2026-09-30T22:35:24.000Z");
+    for (let i = 0; i < 4; i++) {
+      expect(await main(["backup"], makeIo(s, { clock }))).toBe(EXIT.OK);
+      clock.advance(1000);
+    }
+    const names = readdirSync(bdir)
+      .filter((n) => n.startsWith("store-"))
+      .sort();
+    // the oldest WEEK goes once a fifth week appears; the three newer weeks all survive
+    expect(names.filter((n) => prior.includes(n))).toEqual(prior.slice(1));
+    expect(names.filter((n) => n.startsWith("store-2026-09-30"))).toHaveLength(4);
+    // a fifth and sixth same-week backup still removes nothing
+    for (let i = 0; i < 2; i++) {
+      expect(await main(["backup"], makeIo(s, { clock }))).toBe(EXIT.OK);
+      clock.advance(1000);
+    }
+    expect(readdirSync(bdir).filter((n) => prior.includes(n))).toHaveLength(3);
+  });
+
+  it("rotateWeeklyBackups counts distinct weeks, keeps every file of the newest ones, and never deletes an undatable name [QA-1-054]", () => {
+    const s = sandbox({ create: true });
+    sb = s;
+    const files = [
+      "store-2026-08-30.sqlite", // week of Mon 08-24 (the oldest of five weeks: removed)
+      "store-2026-09-01.sqlite", // week of Mon 08-31
+      "store-2026-09-06.sqlite", // same week (its Sunday)
+      "store-2026-09-08.sqlite", // week of Mon 09-07
+      "store-2026-09-14-101010.sqlite", // week of Mon 09-14 (three files)
+      "store-2026-09-14.sqlite",
+      "store-2026-09-15-090000.sqlite",
+      "store-2026-09-22.sqlite", // week of Mon 09-21
+      "store-2026-13-45.sqlite", // the name's shape, but no date: never deleted
+    ];
+    for (const n of files) writeFileSync(path.join(s.cacheDir, n), "x");
+    expect(rotateWeeklyBackups(s.cacheDir)).toEqual(["store-2026-08-30.sqlite"]);
+    expect(rotateWeeklyBackups(s.cacheDir)).toEqual([]);
+    expect(rotateWeeklyBackups(s.cacheDir, 1)).toEqual([
+      "store-2026-09-01.sqlite",
+      "store-2026-09-06.sqlite",
+      "store-2026-09-08.sqlite",
+      "store-2026-09-14-101010.sqlite",
+      "store-2026-09-14.sqlite",
+      "store-2026-09-15-090000.sqlite",
+    ]);
+    expect(readdirSync(s.cacheDir).sort()).toEqual([
+      "store-2026-09-22.sqlite",
+      "store-2026-13-45.sqlite",
+    ]);
+    expect(backupWeekOf("store-2026-02-30.sqlite")).toBeNull();
+    expect(backupWeekOf("notes.sqlite")).toBeNull();
+    expect(backupWeekOf("store-2026-09-27.sqlite")).toBe(backupWeekOf("store-2026-09-21.sqlite"));
+    expect(backupWeekOf("store-2026-09-28.sqlite")).toBe(
+      (backupWeekOf("store-2026-09-27.sqlite") ?? 0) + 1,
+    );
   });
 
   it("--to writes an explicit backup and refuses an existing or relative destination", async () => {
