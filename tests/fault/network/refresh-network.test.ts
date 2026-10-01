@@ -1,7 +1,7 @@
 // refresh-network.test.ts — plan 05 §4.1 fault rows on the REFRESH path (plan 10 A4a "the
 // network-error-on-refresh row"; round 1 OBJ-22): an injected fetch that fails at the network layer
-// or answers 429/5xx/garbage → refresh_log ok=0 with error "network", the previous dataset file
-// intact (publish never called), never INTERNAL, no throw escapes, at most 3 attempts. Drives a
+// or answers 429/5xx/garbage → refresh_log ok=0 with error "network" (a 404: "not_found",
+// QA-1-033), the previous dataset file intact (publish never called), never INTERNAL, no throw escapes, at most 3 attempts. Drives a
 // release-style source (timestamp poll → streamed download) through the real runner + src/http.
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -136,7 +136,7 @@ describe("network failures on refresh (plan 05 §4.1, OBJ-22)", () => {
     ["500 on the version poll", onTimestamp(() => new Response("", { status: 500 })), 3],
     ["429 on the download", onDownload(() => new Response("", { status: 429 })), 3],
     ["a TLS failure (not transient)", onTimestamp(throwing("CERT_HAS_EXPIRED")), 1],
-    ["a 404 (not transient)", onDownload(() => new Response("", { status: 404 })), 1],
+    ["a 410 (not transient)", onDownload(() => new Response("", { status: 410 })), 1],
     ["a redirect off the allow-list", onDownload(() => redirect("https://evil.example/x")), 1],
     ["a body over the cap", onDownload(() => new Response(new Uint8Array(2 * 1024 * 1024))), 1],
   ])(
@@ -163,6 +163,17 @@ describe("network failures on refresh (plan 05 §4.1, OBJ-22)", () => {
       expect(JSON.stringify(r.result)).not.toContain("<html>");
     },
   );
+
+  it("[QA-1-033] a 404 (not transient) → failed not_found — upstream has no such file, not an outage", async () => {
+    const r = await run(onDownload(() => new Response("", { status: 404 })));
+    expect(r.escaped).toBeNull();
+    expect(r.result).toMatchObject({ status: "failed", error: "not_found" });
+    expect(r.refreshLog.rows[0]).toMatchObject({ ok: false, error: "not_found" });
+    expect(r.publisher.published).toEqual([]);
+    expect(r.errors).toHaveLength(1);
+    expect(classifyError(r.errors[0]).code).not.toBe("INTERNAL");
+    expect(r.left).toEqual([]);
+  });
 
   it("a hung connection hits the connect timeout, retried 3×, then failed network", async () => {
     const r = await run(() => new Promise<Response>(() => undefined), { connectTimeoutMs: 5 });

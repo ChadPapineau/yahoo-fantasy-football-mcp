@@ -149,6 +149,113 @@ describe("happy path", () => {
   });
 });
 
+describe("[QA-1-033] seasons a source reports as not published yet", () => {
+  /** A per-season source: one file per season, `missing` ones reported via ctx.notPublished. */
+  const seasonal = (missing: readonly number[], report: readonly number[] = missing) =>
+    fakeSource({
+      fetch: async (_v, ctx) => {
+        const out = [];
+        for (const s of ctx.seasons) {
+          if (missing.includes(s)) continue;
+          const path = join(ctx.tempDir ?? "/nonexistent", `${String(s)}.parquet`);
+          await writeFile(path, "PAR1");
+          out.push({ path, bytes: 4, season: s });
+        }
+        for (const s of report) ctx.notPublished?.(s);
+        return out;
+      },
+    });
+  const withSeasons = (src: ReturnType<typeof fakeSource>) =>
+    Object.assign(src, {
+      versionForSeasons: (
+        v: { version: string; released_at: string | null },
+        ss: readonly number[],
+      ) => ({
+        version: `${v.version}_${ss.join("-")}`,
+        released_at: v.released_at,
+      }),
+    });
+
+  it("the rest is published under a version naming only the published seasons, with a warning", async () => {
+    const d = deps();
+    const r = await runRefresh(
+      { source: withSeasons(seasonal([2027])), seasons: [2026, 2027], week: null },
+      d,
+    );
+    expectStatus(r, "published");
+    expect(r.file_version).toBe("2026-09-30T13:36:27Z_2026");
+    expect(d.publisher.published.map((p) => p.version)).toEqual(["2026-09-30T13:36:27Z_2026"]);
+    expect(r.warnings[0]).toMatch(/nflverse:injuries season 2027: not published upstream yet/);
+    expect(r.warnings).toContain("extra column new_col"); // the schema warnings are kept
+    expect(await tmpLeft()).toEqual([]);
+  });
+
+  it("already published at that narrower version (healthy file) → unchanged, nothing republished", async () => {
+    const d = deps({
+      refreshLog: fakeRefreshLog([okRow("nflverse:injuries", "2026-09-30T13:36:27Z_2026")]),
+    });
+    const r = await runRefresh(
+      { source: withSeasons(seasonal([2027])), seasons: [2026, 2027], week: null },
+      d,
+    );
+    expectStatus(r, "unchanged");
+    expect(r.version.version).toBe("2026-09-30T13:36:27Z_2026");
+    expect(d.publisher.published).toEqual([]);
+    expect(d.publisher.unchanged).toHaveLength(1);
+    expect(await tmpLeft()).toEqual([]);
+  });
+
+  it("no season left → skipped not_published (a success), temp cleaned, nothing recorded", async () => {
+    const d = deps();
+    const r = await runRefresh(
+      { source: withSeasons(seasonal([2027])), seasons: [2027], week: null },
+      d,
+    );
+    expect(r).toEqual({ status: "skipped", source: "nflverse:injuries", reason: "not_published" });
+    expect(isRefreshSuccess(r)).toBe(true);
+    expect(d.publisher.published).toEqual([]);
+    expect(d.refreshLog.rows).toEqual([]);
+    expect(await tmpLeft()).toEqual([]);
+  });
+
+  it("a season the run did not ask for is ignored; a source without versionForSeasons keeps its version", async () => {
+    const d = deps();
+    const r = await runRefresh({ source: seasonal([], [1999]), seasons: [2026], week: null }, d);
+    expectStatus(r, "published");
+    expect(r.warnings).toEqual(["extra column new_col"]);
+    const r2 = await runRefresh(
+      { source: seasonal([2027]), seasons: [2026, 2027], week: null },
+      deps(),
+    );
+    expectStatus(r2, "published");
+    expect(r2.file_version).toBe("2026-09-30T13:36:27Z");
+  });
+
+  it("reports from a failed attempt do not leak into the retry that succeeds", async () => {
+    const src = withSeasons(
+      fakeSource({
+        fetch: async (_v, ctx, n) => {
+          if (n === 1) {
+            ctx.notPublished?.(2027);
+            throw netError("ECONNRESET");
+          }
+          const out = [];
+          for (const s of ctx.seasons) {
+            const path = join(ctx.tempDir ?? "/nonexistent", `${String(s)}.parquet`);
+            await writeFile(path, "PAR1");
+            out.push({ path, bytes: 4, season: s });
+          }
+          return out;
+        },
+      }),
+    );
+    const r = await runRefresh({ source: src, seasons: [2026, 2027], week: null }, deps());
+    expectStatus(r, "published");
+    expect(r.file_version).toBe("2026-09-30T13:36:27Z");
+    expect(r.warnings).toEqual(["extra column new_col"]);
+  });
+});
+
 describe("unchanged release (plan 01 §5.5 'skips if unchanged')", () => {
   it("records the check and never fetches", async () => {
     const src = fakeSource();
@@ -373,16 +480,28 @@ describe("failures before publish are recorded; nothing is written", () => {
     expect(src.calls.fetch).toBe(1);
   });
 
-  it("a non-transient HTTP failure (404) is a network failure, not retried", async () => {
+  it("[QA-1-033] a 404 is labelled not_found (upstream has no such file — not an outage), not retried", async () => {
     const src = fakeSource({
       fetch: () =>
         Promise.reject(new HttpError({ kind: "http_4xx", status: 404, host: "github.com" })),
     });
     const r = await runRefresh({ source: src, seasons: [2026], week: null }, deps());
     expectStatus(r, "failed");
-    expect(r.error).toBe("network");
+    expect(r.error).toBe("not_found");
     expect(r.message).toBe("http: upstream answered with a client error (github.com) status 404");
     expect(src.calls.fetch).toBe(1);
+  });
+
+  it("any other non-transient client error (403, 410) is still a network failure", async () => {
+    for (const status of [403, 410]) {
+      const src = fakeSource({
+        fetch: () =>
+          Promise.reject(new HttpError({ kind: "http_4xx", status, host: "github.com" })),
+      });
+      const r = await runRefresh({ source: src, seasons: [2026], week: null }, deps());
+      expectStatus(r, "failed");
+      expect(r.error).toBe("network");
+    }
   });
 
   it("a record() that throws still returns the failure (logged)", async () => {

@@ -23,10 +23,13 @@ import { checkParquet, openParquet, readRowGroups, type ColumnTypeMismatch } fro
 import {
   NflverseSourceError,
   downloadAsset,
+  isNotFound,
+  mayBeUnpublished,
   releaseUrl,
   releaseVersion,
   runSeasons,
   sourceTempDir,
+  versionString,
   type NflverseTag,
 } from "./release.js";
 import type { TableLoader } from "./rows.js";
@@ -213,7 +216,14 @@ export function makeNflverseSource(def: NflverseSourceDef): DataSource {
         if (typeof def.file === "function") {
           for (const s of seasons) {
             const url = releaseUrl(def.tag, def.file(s));
-            out.push(await downloadAsset(ctx, url, join(dir, `${String(s)}.parquet`), s));
+            try {
+              out.push(await downloadAsset(ctx, url, join(dir, `${String(s)}.parquet`), s));
+            } catch (err) {
+              // a new season's file does not exist until the season has data (QA-1-033): the
+              // runner publishes the other seasons; any other 404 fails the run as not_found
+              if (!isNotFound(err) || !mayBeUnpublished(s, ctx) || !ctx.notPublished) throw err;
+              ctx.notPublished(s);
+            }
           }
         } else {
           // One upstream file holds every season: one download, one copy per season so each
@@ -237,6 +247,13 @@ export function makeNflverseSource(def: NflverseSourceDef): DataSource {
       }
       return out;
     },
+    versionForSeasons: (version: ReleaseVersion, seasons: readonly number[]): ReleaseVersion =>
+      version.released_at === null
+        ? version
+        : {
+            version: versionString(version.released_at, seasons),
+            released_at: version.released_at,
+          },
     assertSchema: (files: readonly TempFile[]): Promise<NflverseSchemaReport> =>
       assertNflverseSchema(def.id, files),
     async publish(files: readonly TempFile[], into: DatasetWriter): Promise<NflversePublishStats> {
