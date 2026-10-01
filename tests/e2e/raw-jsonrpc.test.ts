@@ -158,6 +158,25 @@ describe("malformed frames", () => {
     expect(proc.exitCode).toBeNull();
   }, 60_000);
 
+  it("an invalid request that carries an id gets -32600 under that id (QA-1-085)", async () => {
+    const frames = [
+      (id: number) => `{"jsonrpc":"1.0","id":${String(id)},"method":"ping"}`,
+      (id: number) => `{"jsonrpc":"2.0","id":${String(id)},"method":"ping","params":[1]}`,
+      (id: number) => `{"jsonrpc":"2.0","id":${String(id)},"method":"tools/call","params":"x"}`,
+      (id: number) =>
+        `{"jsonrpc":"2.0","id":${String(id)},"method":"tools/call","params":{"name":"ff_get_status","arguments":{},"_meta":{"progressToken":{}}}}`,
+    ];
+    for (const frame of frames) {
+      const id = nextId++;
+      const m = await request(frame(id), id);
+      expect(m.error?.code, frame(id)).toBe(-32600);
+      expect(m.result).toBeUndefined();
+    }
+    const id = nextId++;
+    const ok = await request(callFrame(id, "ff_get_status", "{}"), id);
+    expect(ok.result?.isError).not.toBe(true);
+  }, 60_000);
+
   it("stdout carried only JSON-RPC 2.0 frames; stderr only JSON log lines", () => {
     for (const m of out) expect(m.jsonrpc).toBe("2.0");
     for (const l of rawOut) expect(l).not.toContain("AAAAAAAAAAAAAAAA");
