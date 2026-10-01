@@ -29,7 +29,15 @@ describe("QA-1-065: start-sit's game-day log entry is scored as a lineup change"
   it("a lineup change logged with the game_day sequence's kind enters swap regret", async () => {
     expect(recordStep, "the game_day sequence records").toBeDefined();
     const args = recordStep?.args ?? {};
-    const sw = await skillWorld(BEFORE_WEEK3);
+    // a decisive change, not a coin flip: a starter ruled out (status O) must be benched. The plain
+    // fixture's week-3 swap (Chase out, Walker in) has a Δ interval straddling 0, which QA-1-060
+    // rightly reports as "keep the current lineup" — a no-move would never reach swap regret
+    const sw = await skillWorld(BEFORE_WEEK3, [
+      [
+        `{ name: Ja'Marr Chase, team: CIN, position: WR, gsis_id: "00-0036900", slot: WR }`,
+        `{ name: Ja'Marr Chase, team: CIN, position: WR, gsis_id: "00-0036900", slot: WR, status: O }`,
+      ],
+    ]);
     try {
       const ro = await sw.call("ff_get_roster", { week: 3, force_refresh: true });
       const lu = await sw.call("ff_analyze_lineup", { week: 3, objective: "mean" });
@@ -44,7 +52,8 @@ describe("QA-1-065: start-sit's game-day log entry is scored as a lineup change"
           inputs: (raw.confidence.inputs as Json[]).map((i) => ({ ...i, as_of: BEFORE_WEEK3 })),
         },
       };
-      // a real swap: the rec benches somebody (the case the retro must judge)
+      // a real swap: the rec benches somebody (the case the retro must judge) — and it is a move
+      expect(rec.no_move).toBe(false);
       expect(rec.subjects.some((s) => s.role === "sit")).toBe(true);
       const logged = await sw.call("ff_record_recommendation", {
         kind: args.kind,
