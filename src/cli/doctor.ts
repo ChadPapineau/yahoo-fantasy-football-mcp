@@ -46,7 +46,12 @@ import { installedPlists, JOBS, LAUNCHCTL, labelOf, launchctl } from "./launchd.
 import { redactString, SecretRegistry, truncate, type Logger } from "./log.js";
 import { SERVER_NAME, pasteTarget } from "./print-config.js";
 import { sourceStatuses, configuredSources, sourceStatus } from "./status.js";
-import { errorText, openExistingStore, type ExistingStore } from "./store-access.js";
+import {
+  errorText,
+  openExistingStore,
+  type ExistingStore,
+  type StoreOpenReason,
+} from "./store-access.js";
 
 /** The minimum Node (plan 01 D2, plan 03 §5 row 1). */
 export const MIN_NODE = [24, 15, 0] as const;
@@ -453,16 +458,27 @@ export function checkConfigDir(config: Config): DoctorRow {
           "league.yaml is a symbolic link",
           "replace it with a regular 0600 file",
         );
+      const mode = `0${(st.mode & 0o777).toString(8).padStart(3, "0")}`;
       if ((st.mode & 0o077) !== 0)
         return row(
           4,
           "config_dir",
           title,
           "fail",
-          "league.yaml is group/other-accessible",
+          `league.yaml is ${mode}: group/other-accessible`,
           "`ff doctor --fix --yes` (chmod 600)",
         );
-      details.push("league.yaml is 0600");
+      // the owner must be able to read it — a 0000/0200 file is not "0600" (QA-1-056)
+      if ((st.mode & 0o400) === 0)
+        return row(
+          4,
+          "config_dir",
+          title,
+          "fail",
+          `league.yaml is ${mode} — you cannot read it`,
+          "`ff doctor --fix --yes` (chmod 600)",
+        );
+      details.push(`league.yaml is ${mode}`);
     } catch {
       details.push("no league.yaml yet");
     }
@@ -569,6 +585,40 @@ export function quickCheckFile(file: string): string {
   }
 }
 
+/** What row 8 says for each store-open failure (`message: null` = the error text itself). */
+const STORE_OPEN_FAILURE: Readonly<
+  Record<StoreOpenReason, { readonly message: string | null; readonly fix: string }>
+> = {
+  not_a_database: {
+    message: "store.sqlite is not a SQLite database (overwritten or truncated)",
+    fix: "move it aside and restore a backup from <cache>/backups (or run `ff refresh all` to start a new store)",
+  },
+  corrupt: {
+    message: "store.sqlite is corrupt",
+    fix: "move it aside and restore a backup from <cache>/backups (or run `ff refresh all` to start a new store)",
+  },
+  readonly: {
+    message: "store.sqlite (or its -wal/-shm file) is read-only",
+    fix: "chmod 600 the store files in the cache dir (and `ff doctor --fix --yes` for the directory)",
+  },
+  busy: {
+    message: "store.sqlite is locked by another process",
+    fix: "wait for the running `ff` job or server, then re-run `ff doctor`",
+  },
+  cannot_open: {
+    message: "store.sqlite could not be opened by SQLite",
+    fix: "check the cache dir's permissions and free space, then re-run `ff doctor`",
+  },
+  unsupported_node: {
+    message: "this Node lacks the node:sqlite API the store needs",
+    fix: "use Node ≥ 24.15 (row 1)",
+  },
+  other: {
+    message: null,
+    fix: "move it aside and run `ff refresh all`; restore a backup if needed",
+  },
+};
+
 /** Row 8: cache dir, free space, store integrity + schema, dataset files. */
 export function checkStore(config: Config, ex: ExistingStore): DoctorRow {
   const title = "Cache dir + store";
@@ -597,6 +647,20 @@ export function checkStore(config: Config, ex: ExistingStore): DoctorRow {
       "fail",
       `${config.cacheDir}: ${refusal(e)}`,
       "`ff doctor --fix --yes` tightens our own directory's mode",
+    );
+  }
+  // plan 03 §5 row 8 "writable": the store, its WAL/-shm files, ds/ and backups/ are written here
+  // (QA-1-053: a 0500 cache dir was misreported as a store that could not be opened)
+  try {
+    accessSync(config.cacheDir, fsc.W_OK | fsc.X_OK);
+  } catch {
+    return row(
+      8,
+      "store",
+      title,
+      "fail",
+      `${config.cacheDir} is not writable by you`,
+      `\`ff doctor --fix --yes\` restores 0700 on our own directory (chmod 700 ${config.cacheDir})`,
     );
   }
   const free = freeBytes(config.cacheDir);
@@ -636,16 +700,18 @@ export function checkStore(config: Config, ex: ExistingStore): DoctorRow {
         null,
         details,
       );
-    case "error":
+    case "error": {
+      const d = STORE_OPEN_FAILURE[ex.reason ?? "other"];
       return row(
         8,
         "store",
         title,
         "fail",
-        `store.sqlite could not be opened: ${ex.message}`,
-        "move it aside and run `ff refresh all`; restore a backup if needed",
+        d.message ?? `store.sqlite could not be opened: ${ex.message}`,
+        d.fix,
         details,
       );
+    }
     case "open":
       break;
   }
@@ -705,6 +771,10 @@ export function checkStore(config: Config, ex: ExistingStore): DoctorRow {
 
 /** Row 9: every configured source's age against its hard limit. */
 export function checkDatasets(io: CliIo, config: Config, ex: ExistingStore): DoctorRow {
+  // a store that exists but is not open says nothing about the datasets (QA-1-053: an unreadable
+  // store listed every fresh dataset as never_loaded); a missing store means none was ever loaded
+  if (ex.kind !== "open" && ex.kind !== "missing")
+    return row(9, "datasets", "Datasets", "skip", "store not open");
   const now = io.clock.nowMs();
   const list =
     ex.kind === "open"
@@ -1107,7 +1177,8 @@ function dirFix(dir: string, what: string): Fix | null {
   }
   const uid = typeof process.getuid === "function" ? process.getuid() : null;
   if (st.isSymbolicLink() || !st.isDirectory() || (uid !== null && st.uid !== uid)) return null;
-  if ((st.mode & 0o077) === 0) return null;
+  // loose group/other bits, or an owner who cannot write/enter it (QA-1-053: a 0500 cache dir)
+  if ((st.mode & 0o077) === 0 && (st.mode & 0o700) === 0o700) return null;
   return {
     description: `chmod 700 ${dir}`,
     apply: () => {
@@ -1125,7 +1196,12 @@ export function plannedFixes(config: Config): Fix[] {
     try {
       const st = lstatSync(config.leagueFile);
       const uid = typeof process.getuid === "function" ? process.getuid() : null;
-      if (st.isFile() && (uid === null || st.uid === uid) && (st.mode & 0o077) !== 0)
+      // loose group/other bits, or an owner who cannot read it (QA-1-056)
+      if (
+        st.isFile() &&
+        (uid === null || st.uid === uid) &&
+        ((st.mode & 0o077) !== 0 || (st.mode & 0o400) === 0)
+      )
         fixes.push({
           description: `chmod 600 ${config.leagueFile}`,
           apply: () => {
