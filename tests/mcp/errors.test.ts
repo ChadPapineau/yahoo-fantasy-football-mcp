@@ -31,6 +31,7 @@ import {
   newRequestId,
   safeFieldPath,
   toToolError,
+  toWireError,
   wrapHandler,
   type ToolErrorBody,
 } from "../../src/mcp/errors.js";
@@ -39,6 +40,12 @@ const RID = "r-0123456789ab";
 // Fake credential-shaped strings built at runtime (never literal in the repo).
 const FAKE_TOKEN = ["eyJ", "a".repeat(20), ".eyJ", "b".repeat(20), ".", "c".repeat(20)].join("");
 const UPSTREAM_BODY = `<html><body><h1>Request denied</h1><p>token=${FAKE_TOKEN}</p><a href="https://fantasysports.yahooapis.com/fantasy/v2/league/461.l.1000?access_token=${FAKE_TOKEN}">x</a><script>alert(1)</script></body></html>`;
+
+/** The coded body of a wire result (its one text block). */
+function wireBody(r: { content: unknown }): ToolErrorBody {
+  const c = r.content as { text: string }[];
+  return JSON.parse(c[0]?.text ?? "{}") as ToolErrorBody;
+}
 
 function body(e: unknown): ToolErrorBody["error"] {
   const r = toToolError(e, RID);
@@ -452,14 +459,13 @@ describe("wrapHandler (unit)", () => {
   });
   it("a bad key is INVALID_KEY, an unknown arg VALIDATION, undefined args VALIDATION — all coded", async () => {
     const h = wrapHandler(schema, () => okResult("never"), { newId: () => RID });
-    const e1 = (await h({ league_key: "461.L.1" })).structuredContent as ToolErrorBody;
+    const e1 = wireBody(await h({ league_key: "461.L.1" }));
     expect(e1.error.code).toBe("INVALID_KEY");
     expect(e1.error.request_id).toBe(RID);
-    const e2 = (await h({ league_key: "manual.l.example", "<b>x</b>": 1 }))
-      .structuredContent as ToolErrorBody;
+    const e2 = wireBody(await h({ league_key: "manual.l.example", "<b>x</b>": 1 }));
     expect(e2.error.code).toBe("VALIDATION");
     expect(JSON.stringify(e2)).not.toContain("<b>");
-    const e3 = (await h(undefined)).structuredContent as ToolErrorBody;
+    const e3 = wireBody(await h(undefined));
     expect(e3.error.code).toBe("VALIDATION");
   });
   it("a sync throw, an async rejection and a thrown non-Error all map through the table", async () => {
@@ -482,7 +488,7 @@ describe("wrapHandler (unit)", () => {
       const text = JSON.stringify(r);
       expect(text).not.toContain(FAKE_TOKEN);
       expect(text).not.toContain("<html>");
-      expect((r.structuredContent as ToolErrorBody).error.code).toBe("INTERNAL");
+      expect(wireBody(r).error.code).toBe("INTERNAL");
     }
     expect(logged).toHaveLength(3);
   });
@@ -498,9 +504,27 @@ describe("wrapHandler (unit)", () => {
         },
       },
     )({ league_key: "manual.l.example" });
-    const b = (r.structuredContent as ToolErrorBody).error;
+    const b = wireBody(r).error;
     expect(b.code).toBe("NOT_FOUND");
     expect(b.request_id).toMatch(/^r-[0-9a-f]{12}$/);
+  });
+});
+
+describe("wrapHandler error results carry no structuredContent (QA-1-007)", () => {
+  const schema = z.strictObject({ league_key: leagueKeySchema });
+  const okResult = (text: string): ToolSuccessResult => ({ content: [{ type: "text", text }] });
+  it("the coded body is in the text block only — success results are untouched", async () => {
+    const h = wrapHandler(schema, () => okResult("ok"), { newId: () => RID });
+    for (const r of [await h({ league_key: "461.L.1" }), await h(undefined)]) {
+      expect(r.isError).toBe(true);
+      expect(r).not.toHaveProperty("structuredContent");
+      expect(wireBody(r).error.request_id).toBe(RID);
+    }
+    expect(await h({ league_key: "manual.l.example" })).toEqual(okResult("ok"));
+  });
+  it("toWireError is toToolError's text block, verbatim", () => {
+    const e = new FfError("VALIDATION", { field: "week", reason: "too_small" });
+    expect(toWireError(e, RID)).toEqual({ isError: true, content: toToolError(e, RID).content });
   });
 });
 
