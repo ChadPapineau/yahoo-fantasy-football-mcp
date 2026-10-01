@@ -3,9 +3,10 @@
 // (a second publisher for the same source SKIPS with `job_locked` — no double download, no retry
 // storm, plan 01 §5.7), sweep crashed runs' temp debris, fill a fresh 0600 staging file
 // (journal_mode=DELETE: one file, no -wal) through a DatasetWriter (one transaction per insert),
-// stamp dataset_meta, fsync the file, rename() it over `<ds>/<stem>.sqlite`, fsync the directory,
-// then record refresh_log (a required write). Any failure deletes the staging file and leaves the
-// previous dataset file untouched.
+// stamp dataset_meta, fsync the file, then ONE commit (QA-1-032): take the store's writer lock,
+// rename() the file over `<ds>/<stem>.sqlite`, fsync the directory and insert the refresh_log row
+// under it. A failure before the rename deletes the staging file and leaves the previous dataset file
+// untouched; one after it is PUBLISH_UNRECORDED, and the next publish records the live file first.
 import { randomBytes } from "node:crypto";
 import {
   closeSync,
@@ -31,12 +32,14 @@ import {
   currentRefreshRow,
   insertRefreshRow,
   jobLockRepository,
+  markCheckedRow,
   REFRESH_ERROR_RE,
 } from "./repos/ops.js";
-import { createPrivateFile, StatementGuard, WriteExecutor } from "./sqlite.js";
+import { createPrivateFile, immediate, StatementGuard, WriteExecutor } from "./sqlite.js";
 import { openMigrated } from "./store.js";
 import {
   PUBLISH_ALREADY_CURRENT,
+  PUBLISH_UNRECORDED,
   StoreBusyError,
   type DatasetPublisher,
   type DatasetRow,
@@ -54,6 +57,13 @@ export const PUBLISH_LOCK_STALE_MS = 15 * 60 * 1000;
 export const VERSION_MAX = 128;
 /** Most rows one `insert` call takes (one transaction; the source batches). */
 export const INSERT_MAX_ROWS = 1_000_000;
+
+/**
+ * How long the publish commit (rename + refresh_log row) waits for the store's writer lock. The
+ * refresh process is not interactive, so it outwaits plan 05 §4.1's "write lock held 3 s by another
+ * process" instead of failing a finished download on the server's 1-s required-write budget.
+ */
+export const PUBLISH_COMMIT_BUDGET_MS = 30_000;
 
 /** The job name of a source's publish lock. */
 export const publishJob = (source: DatasetSourceId): string => `publish:${source}`;
@@ -223,6 +233,57 @@ export interface PublisherInternals {
   readonly migrations?: readonly Migration[];
   /** Runs after fsync, before rename (fault injection: a crash here must leave the old file). */
   readonly beforeRename?: (stagingFile: string) => void;
+  /** Runs right after the rename, inside the commit (fault injection: live but unrecorded). */
+  readonly afterRename?: (finalFile: string) => void;
+  /** Overrides PUBLISH_COMMIT_BUDGET_MS (tests). */
+  readonly commitBudgetMs?: number;
+}
+
+/**
+ * The refresh_log row a live dataset file stands for, rebuilt from its own dataset_meta (the
+ * publisher stamps rows and seasons there too), or null when the meta is not a complete, valid
+ * stamp of `source` in this layout.
+ */
+function rowFromMeta(
+  source: DatasetSourceId,
+  file: string,
+  meta: Readonly<Record<string, string>>,
+): RefreshLogRow | null {
+  if (meta.source !== source || parseDsSchema(meta.ds_schema) !== DS_SCHEMA_VERSION) return null;
+  const version = meta.file_version;
+  const at = meta.published_at;
+  if (version === undefined || at === undefined || !Number.isFinite(Date.parse(at))) return null;
+  let seasons: number[] = [];
+  try {
+    const parsed: unknown = JSON.parse(meta.seasons ?? "[]");
+    if (Array.isArray(parsed) && parsed.every((x) => Number.isInteger(x)))
+      seasons = parsed as number[];
+  } catch {
+    seasons = [];
+  }
+  const rows =
+    meta.rows !== undefined && /^[0-9]{1,15}$/.test(meta.rows) ? Number(meta.rows) : null;
+  const release = meta.release_updated_at ?? null;
+  const row: RefreshLogRow = {
+    source,
+    file,
+    file_version: version,
+    release_updated_at: release !== null && Number.isFinite(Date.parse(release)) ? release : null,
+    seasons,
+    rows,
+    columns_hash: meta.columns_hash ?? null,
+    started_at: at,
+    finished_at: at,
+    ok: true,
+    error: null,
+    checked_at: at,
+  };
+  try {
+    checkRefreshRow(row);
+  } catch {
+    return null;
+  }
+  return row;
 }
 
 export function openPublisher(
@@ -246,6 +307,8 @@ export function openPublisher(
     throw e;
   }
   const deps: RepoDeps = { db, writes: new WriteExecutor(undefined, db) };
+  /** The publish commit's executor: same connection, a budget that outwaits a 3-s foreign lock. */
+  const commitWrites = new WriteExecutor(internals.commitBudgetMs ?? PUBLISH_COMMIT_BUDGET_MS, db);
   const jobLock = jobLockRepository(deps);
   const clock = opts.clock;
   let closed = false;
@@ -283,12 +346,30 @@ export function openPublisher(
         "store: the current dataset file is not this version in this layout; publish it again",
       );
   };
+  /** A successful "unchanged" check: advances checked_at and ends any failure streak (QA-1-037). */
   const markChecked = (sourceId: DatasetSourceId, checkedAt: string): Promise<void> =>
     deps.writes.required("refresh_log", () => {
-      db.prepare(
-        `UPDATE refresh_log SET checked_at = ? WHERE id = (SELECT MAX(id) FROM refresh_log WHERE source = ? AND ok = 1)`,
-      ).run(checkedAt, sourceId);
+      markCheckedRow(deps, sourceId, checkedAt);
     });
+  /**
+   * Records the live file of `sourceId` when refresh_log does not list its version as current — a
+   * publish that renamed but could not record (PUBLISH_UNRECORDED), or crashed between its rename
+   * and its commit (QA-1-032). Runs under the source's job lock; best-effort (a busy store or an
+   * unreadable file just leaves things as they are, and the publish then proceeds normally).
+   */
+  const recordLiveFile = async (sourceId: DatasetSourceId, finalPath: string): Promise<void> => {
+    try {
+      const meta = readDatasetFileMeta(finalPath);
+      const live = meta === null ? null : rowFromMeta(sourceId, finalPath, meta);
+      if (live === null || currentRefreshRow(deps, sourceId)?.file_version === live.file_version)
+        return;
+      await commitWrites.required("refresh_log", () => {
+        insertRefreshRow(deps, live);
+      });
+    } catch {
+      // left unrecorded: the publish below writes (and records) a file of its own
+    }
+  };
   const isCurrent = (sourceId: DatasetSourceId, version: string): boolean => {
     try {
       assertCurrent(sourceId, version);
@@ -338,6 +419,7 @@ export function openPublisher(
     let writer: StagingWriter | null = null;
     let stage = "sweep_failed";
     try {
+      await recordLiveFile(sourceId, finalPath);
       // single-flight (plan 01 §5.7): the caller's "unchanged" check ran before this lock; another
       // refresh may have published this very release and released the lock since
       if (options?.skipIfCurrent === true && isCurrent(sourceId, version)) {
@@ -373,6 +455,9 @@ export function openPublisher(
         ["published_at", publishedAt],
         ["ds_schema", String(DS_SCHEMA_VERSION)],
         ["columns_hash", stats.columns_hash],
+        // what refresh_log records, so a live-but-unrecorded file can be recorded later (QA-1-032)
+        ["rows", String(stats.rows)],
+        ["seasons", JSON.stringify(stats.seasons)],
       ] as const)
         if (v !== null) meta.run(k, v);
       wdb.close();
@@ -381,12 +466,7 @@ export function openPublisher(
       fsyncPath(staging, fsc.O_RDONLY);
       internals.beforeRename?.(staging);
       stage = "rename_failed";
-      renameSync(staging, finalPath);
-      staging = null;
-      fsyncPath(opts.datasetDir, fsc.O_RDONLY);
-      const finishedAt = clock.nowIso();
-      stage = "refresh_log_failed";
-      await record({
+      const success = (finishedAt: string): RefreshLogRow => ({
         source: sourceId,
         file: finalPath,
         file_version: version,
@@ -400,6 +480,29 @@ export function openPublisher(
         error: null,
         checked_at: finishedAt,
       });
+      checkRefreshRow(success(startedAt)); // nothing that can be refused is left past the rename
+      // The commit point (QA-1-032): the writer lock FIRST (a busy store fails here, before the
+      // rename — the previous file really is intact), then rename + directory fsync + the row, one
+      // transaction. A retry after a busy try never renames twice.
+      const from = staging;
+      const commit = { renamed: false };
+      try {
+        await commitWrites.required("refresh_log", () => {
+          immediate(db, () => {
+            if (!commit.renamed) {
+              renameSync(from, finalPath);
+              commit.renamed = true;
+              staging = null;
+              fsyncPath(opts.datasetDir, fsc.O_RDONLY);
+              internals.afterRename?.(finalPath);
+            }
+            insertRefreshRow(deps, success(clock.nowIso()));
+          });
+        });
+      } catch (e) {
+        if (commit.renamed) throw new PublishError(PUBLISH_UNRECORDED);
+        throw e;
+      }
       return { ok: true, file: finalPath, file_version: version, stats };
     } catch (e) {
       writer?.close();
@@ -415,7 +518,8 @@ export function openPublisher(
         rmSync(`${staging}-journal`, { force: true });
       }
       const code = errorCode(e, stage);
-      if (stage !== "refresh_log_failed") {
+      // no failure row for a failed check write, nor for a file that IS live (PUBLISH_UNRECORDED)
+      if (stage !== "refresh_log_failed" && code !== PUBLISH_UNRECORDED) {
         const now = clock.nowIso();
         try {
           await record({
