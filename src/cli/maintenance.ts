@@ -3,12 +3,29 @@
 // weekly Sun 03:10: a consistent `VACUUM INTO`/backup-API copy of store.sqlite, keep 4; plan 01 §5.1
 // "never pruned": recommendation_log, league_settings, write_journal are not touched here; plan 03 L7
 // consistent backups). Only files this program created, matched by exact name patterns, are removed.
-import { lstatSync, readdirSync, rmSync } from "node:fs";
+import {
+  closeSync,
+  constants as fsc,
+  fchmodSync,
+  fsyncSync,
+  lstatSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeSync,
+} from "node:fs";
 import path from "node:path";
 import {
+  assertNotSynced,
+  assertOutsideRepo,
   backupDir,
   datasetDir,
   ensureSecureDir,
+  insecureAncestors,
   PathSecurityError,
   resolveAbsolute,
   runTempDir,
@@ -17,7 +34,7 @@ import type { Config } from "../config/schema.js";
 import { prunePreMigrationBackups } from "../store/backup.js";
 import { PUBLISH_LOCK_STALE_MS } from "../store/index.js";
 import type { StoreFactory } from "../store/types.js";
-import { EXIT } from "./exit.js";
+import { EXIT, UsageError } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
 import type { Logger } from "./log.js";
 import { createNotifier } from "./notify.js";
@@ -56,6 +73,14 @@ function ownDirExists(dir: string, what: string): boolean {
   } catch (e) {
     if (e instanceof PathSecurityError && e.reason === "missing") return false;
     throw e;
+  }
+}
+
+function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
+  try {
+    return lstatSync(p);
+  } catch {
+    return null;
   }
 }
 
@@ -218,6 +243,100 @@ export function rotateWeeklyBackups(dir: string, keep = KEEP_WEEKLY_BACKUPS): st
   return removed.sort();
 }
 
+/**
+ * Validates a `--to` destination the user chose (QA-1-050, QA-1-101) and returns where the file
+ * will be written: the parent directory resolved to its real path (so `/tmp/x` works through the
+ * `/tmp` symlink) plus the file name. The user's directory keeps its own mode — the privacy
+ * property is the 0600 file, created exclusively — but the same location rules as FF_CACHE_DIR
+ * apply (the copy holds the same recommendation log): never a cloud-synced folder, never the
+ * checkout, and never a directory others could write into without the sticky bit (the backup
+ * could be swapped for a planted file before a restore). Every refusal is a UsageError (exit 2)
+ * that says what to change; none points at `ff doctor --fix`, which manages only our own dirs.
+ */
+export function resolveBackupDestination(to: string, home: string, repoRoot: string): string {
+  let abs: string;
+  try {
+    abs = resolveAbsolute(to, home, "--to");
+  } catch {
+    throw new UsageError("backup: --to: the path must be absolute (or start with ~/)");
+  }
+  const name = path.basename(abs);
+  if (to.endsWith("/") || to === "~" || name === "" || name === "." || name === "..")
+    throw new UsageError(
+      "backup: --to must name a file (e.g. ~/ff-store-backup.sqlite), not a directory",
+    );
+  const parent = path.dirname(abs);
+  let realParent: string;
+  try {
+    realParent = realpathSync.native(parent);
+  } catch {
+    throw new UsageError(`backup: --to: the directory ${parent} does not exist; create it first`);
+  }
+  if (!statSync(realParent).isDirectory())
+    throw new UsageError(`backup: --to: ${parent} is not a directory`);
+  const dest = path.join(realParent, name);
+  for (const check of [
+    () => {
+      assertNotSynced(abs, home, "--to");
+      assertNotSynced(dest, home, "--to");
+    },
+    () => {
+      assertOutsideRepo(abs, repoRoot, "--to");
+      assertOutsideRepo(dest, repoRoot, "--to");
+    },
+  ]) {
+    try {
+      check();
+    } catch (e) {
+      if (e instanceof PathSecurityError) throw new UsageError(`backup: --to: ${e.detail}`);
+      throw e;
+    }
+  }
+  if (insecureAncestors(dest).length > 0)
+    throw new UsageError(
+      `backup: --to: ${realParent} (or a directory above it) is writable by others without the sticky bit, so the backup could be replaced; choose a directory only you can write to`,
+    );
+  return dest;
+}
+
+/**
+ * Copies a finished backup to `dest` as a NEW 0600 file: `O_CREAT|O_EXCL|O_NOFOLLOW` (never
+ * overwrites, never follows a pre-placed or dangling symlink), fsynced; a partial file is removed.
+ */
+export function copyToNewPrivateFile(src: string, dest: string): number {
+  let out: number;
+  try {
+    out = openSync(dest, fsc.O_WRONLY | fsc.O_CREAT | fsc.O_EXCL | fsc.O_NOFOLLOW, 0o600);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "EEXIST" || code === "ELOOP")
+      throw new Error("store: backup destination already exists");
+    throw e;
+  }
+  let bytes = 0;
+  const input = openSync(src, fsc.O_RDONLY | fsc.O_NOFOLLOW);
+  try {
+    fchmodSync(out, 0o600);
+    const buf = Buffer.alloc(1024 * 1024);
+    for (;;) {
+      const n = readSync(input, buf, 0, buf.length, bytes);
+      if (n === 0) break;
+      let off = 0;
+      while (off < n) off += writeSync(out, buf, off, n - off);
+      bytes += n;
+    }
+    fsyncSync(out);
+  } catch (e) {
+    closeSync(out);
+    closeSync(input);
+    rmSync(dest, { force: true });
+    throw e;
+  }
+  closeSync(out);
+  closeSync(input);
+  return bytes;
+}
+
 /** `ff backup [--to <abs path>]`. */
 export async function backup(
   io: CliIo,
@@ -235,30 +354,53 @@ export async function backup(
     clock: io.clock,
     cacheDir: config.cacheDir,
   });
-  let dest: string;
+  // a destination the user named is validated first: a refusal is a usage error (exit 2)
+  const userDest =
+    opts.to === undefined ? null : resolveBackupDestination(opts.to, io.home, io.packageRoot);
   let rotated: string[] = [];
   try {
-    if (opts.to !== undefined) {
-      dest = resolveAbsolute(opts.to, io.home, "--to");
+    if (userDest !== null) {
+      // fail before the work, not after it (the copy's O_EXCL still decides any race)
+      if (lstatOrNull(userDest) !== null)
+        throw new Error("store: backup destination already exists");
+    }
+    let dest: string;
+    let staging: string | null = null;
+    if (userDest !== null) {
+      // the consistent backup is taken into our own private run-temp dir, then copied as a new
+      // 0600 file into the user's directory (whose mode stays theirs); prune clears a dead run's
+      const tmp = runTempDir(config.cacheDir);
+      ensureSecureDir(tmp, { create: true, what: "run temp directory" });
+      staging = mkdtempSync(path.join(tmp, "backup-"));
+      dest = path.join(staging, "store.sqlite");
     } else {
       const dir = backupDir(config.cacheDir);
       ensureSecureDir(dir, { create: true, what: "backups directory" });
       dest = weeklyBackupPath(dir, io.clock.nowMs());
     }
-    const store = openStore(config, io.clock, log, {
-      migrate: true,
-      ...(opts.factory ? { factory: opts.factory } : {}),
-    });
     try {
-      const r = await store.backup(dest);
+      const store = openStore(config, io.clock, log, {
+        migrate: true,
+        ...(opts.factory ? { factory: opts.factory } : {}),
+      });
+      let r;
+      try {
+        r = await store.backup(dest);
+      } finally {
+        store.close();
+      }
+      const written =
+        userDest === null
+          ? { path: r.path, bytes: r.bytes }
+          : { path: userDest, bytes: copyToNewPrivateFile(dest, userDest) };
       await writeLine(
         io.stdout,
-        `backup written: ${r.path} (${String(r.bytes)} bytes, ${r.method})`,
+        `backup written: ${written.path} (${String(written.bytes)} bytes, ${r.method})`,
       );
     } finally {
-      store.close();
+      if (staging !== null) rmSync(staging, { recursive: true, force: true });
     }
-    if (opts.to === undefined) rotated = rotateWeeklyBackups(backupDir(config.cacheDir));
+    if (userDest === null) rotated = rotateWeeklyBackups(backupDir(config.cacheDir));
   } catch (e) {
     await writeLine(io.stderr, `ff backup: ${errorText(e)}`);
     if (opts.notify) await notifier.notifyFailure("store-backup", "backup");
