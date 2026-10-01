@@ -9,8 +9,11 @@ import {
   defaultIo,
   distEntry,
   loadRuntime,
+  tolerateClosedPipe,
   write,
 } from "../../src/cli/io.js";
+import { EXIT } from "../../src/cli/exit.js";
+import { main } from "../../src/cli/main.js";
 import { errorText, openExistingStore, storeWeatherSource } from "../../src/cli/store-access.js";
 import { PathSecurityError } from "../../src/config/paths.js";
 import { loadConfig } from "../../src/config/schema.js";
@@ -91,6 +94,65 @@ describe("io helpers", () => {
     expect(io.err.text).not.toContain(planted);
     expect(io.err.text).toContain("[redacted:api_key]");
     expect(io.err.text).toContain("config.warning");
+  });
+});
+
+/** A stdout whose reader went away: every write fails with EPIPE, as a pipe to `head` does. */
+class ClosedPipe extends Writable {
+  /** An 'error' was emitted with no listener — in a real process, an unhandled crash with a stack. */
+  unhandled = 0;
+  writes = 0;
+  override _write(_c: unknown, _e: BufferEncoding, cb: (e?: Error | null) => void): void {
+    this.writes++;
+    cb(Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+  }
+  override emit(event: string | symbol, ...args: unknown[]): boolean {
+    if (event === "error" && this.listenerCount("error") === 0) {
+      this.unhandled++;
+      return false;
+    }
+    return super.emit(event, ...args);
+  }
+}
+
+describe("a closed output pipe (`ff status | head -1`) [QA-1-055]", () => {
+  it.each([["help"], ["version"], ["status"], ["doctor"]])(
+    "%s ends quietly: no unhandled EPIPE, its own exit code",
+    async (cmd) => {
+      const s = sandbox();
+      sb = s;
+      const stdout = new ClosedPipe();
+      const io = { ...makeIo(s), stdout };
+      const code = await main([cmd], io);
+      await new Promise((r) => setImmediate(r));
+      expect(stdout.writes).toBeGreaterThan(0);
+      expect(stdout.unhandled).toBe(0);
+      expect([EXIT.OK, EXIT.ERROR]).toContain(code);
+      if (cmd !== "doctor") expect(code).toBe(EXIT.OK);
+    },
+  );
+  it("a closed stderr is tolerated the same way", async () => {
+    const s = sandbox();
+    sb = s;
+    const stderr = new ClosedPipe();
+    const io = { ...makeIo(s), stderr };
+    expect(await main(["nope"], io)).toBe(EXIT.USAGE);
+    await new Promise((r) => setImmediate(r));
+    expect(stderr.unhandled).toBe(0);
+  });
+  it("any other output error is not swallowed", () => {
+    const w = new Writable({
+      write: (_c, _e, cb) => {
+        cb();
+      },
+    });
+    tolerateClosedPipe(w);
+    tolerateClosedPipe(w); // idempotent: one listener
+    expect(w.listenerCount("error")).toBe(1);
+    expect(() => w.emit("error", Object.assign(new Error("disk"), { code: "EIO" }))).toThrow(
+      "disk",
+    );
+    expect(w.emit("error", Object.assign(new Error("gone"), { code: "EPIPE" }))).toBe(true);
   });
 });
 

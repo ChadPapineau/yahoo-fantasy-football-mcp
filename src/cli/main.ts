@@ -11,7 +11,14 @@ import { backup, prune } from "./maintenance.js";
 import { doctor } from "./doctor.js";
 import { EXIT, UsageError } from "./exit.js";
 import { installLaunchd } from "./install-launchd.js";
-import { bootLevel, loadRuntime, makeLogger, writeLine, type CliIo } from "./io.js";
+import {
+  bootLevel,
+  loadRuntime,
+  makeLogger,
+  tolerateClosedPipe,
+  writeLine,
+  type CliIo,
+} from "./io.js";
 import { printConfig } from "./print-config.js";
 import { refresh } from "./refresh.js";
 import { status } from "./status.js";
@@ -201,6 +208,9 @@ export async function main(
       clock: io.clock,
     });
   }
+  // `ff status | head -1`: a reader that closes early ends the output, not the process (QA-1-055)
+  tolerateClosedPipe(io.stdout);
+  tolerateClosedPipe(io.stderr);
   const bootLog = makeLogger(io, bootLevel(io.env));
   try {
     const p = parseCommand(command, rest);
