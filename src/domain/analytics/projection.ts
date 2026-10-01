@@ -174,8 +174,12 @@ interface Loaded {
   readonly games: Map<string, NflGame[]>;
   readonly playerLines: Map<string, WindowGame[]>;
   readonly defenseLines: WindowGame[];
+  /** Report rows keyed `gsis:week` (the target weeks and each one's previous week). */
   readonly injuries: Map<string, InjuryReport>;
+  /** Whether the injury dataset is loaded at all, per target week. */
   readonly injuriesLoaded: Map<Week, boolean>;
+  /** Teams whose report for the week is published (any row), per week (QA-1-021). */
+  readonly reportTeams: Map<Week, ReadonlySet<NflTeam>>;
   readonly weather: Map<string, WeatherObservation>;
   readonly stamps: (DatasetStamp | null)[];
 }
@@ -360,19 +364,32 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
     }
   }
 
+  // the whole week's report (every team), so "not listed" can be told from "not published yet":
+  // a team's report exists once it has any row for the week (QA-1-021)
   const injuries = new Map<string, InjuryReport>();
   const injuriesLoaded = new Map<Week, boolean>();
-  for (const w of req.weeks) {
+  const reportTeams = new Map<Week, ReadonlySet<NflTeam>>();
+  const wanted = new Set(gsisIds);
+  const reportWeeks = [...new Set(req.weeks.flatMap((w) => (w > 1 ? [w - 1, w] : [w])))].sort(
+    (a, b) => a - b,
+  );
+  for (const w of reportWeeks) {
+    const target = req.weeks.includes(w);
     if (gsisIds.length === 0) {
-      injuriesLoaded.set(w, false);
+      if (target) injuriesLoaded.set(w, false);
       continue;
     }
-    const r = req.readers.injuries.reports(season, w, gsisIds);
-    injuriesLoaded.set(w, r.stamp !== null);
-    if (r.stamp !== null) stamps.push(r.stamp);
+    const r = req.readers.injuries.reports(season, w, null);
+    if (target) injuriesLoaded.set(w, r.stamp !== null);
+    if (r.stamp === null) continue;
+    if (target) stamps.push(r.stamp);
+    const teams = new Set<NflTeam>();
     for (const rep of r.rows) {
-      if (rep.season === season && rep.week === w) injuries.set(`${rep.gsis_id}:${String(w)}`, rep);
+      if (rep.season !== season || rep.week !== w) continue;
+      teams.add(rep.nfl_team);
+      if (wanted.has(rep.gsis_id)) injuries.set(`${rep.gsis_id}:${String(w)}`, rep);
     }
+    reportTeams.set(w, teams);
   }
 
   const weather = new Map<string, WeatherObservation>();
@@ -391,6 +408,7 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
     defenseLines,
     injuries,
     injuriesLoaded,
+    reportTeams,
     weather,
     stamps,
   };
@@ -817,17 +835,30 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
         }
       }
       const loadedInj = loaded.injuriesLoaded.get(week) === true;
+      const rowOf = (w: Week): InjuryReport | null =>
+        t.subject.kind === "player"
+          ? (loaded.injuries.get(`${t.subject.gsis_id}:${String(w)}`) ?? null)
+          : null;
+      const prior = week - 1;
       availability = pActive({
-        report:
-          t.subject.kind === "player"
-            ? (loaded.injuries.get(`${t.subject.gsis_id}:${String(week)}`) ?? null)
-            : null,
+        report: rowOf(week),
         injuriesLoaded: loadedInj,
+        reportPublished: loadedInj && loaded.reportTeams.get(week)?.has(team) === true,
+        priorPublished: prior >= 1 && loaded.reportTeams.get(prior)?.has(team) === true,
+        priorReport: prior >= 1 ? rowOf(prior) : null,
         platformStatus: t.platform_status ?? null,
         gameDayStatus: t.game_day_status,
         kickoffMs: ko,
         nowMs: req.clock.nowMs(),
       });
+      if (availability.carried_from !== undefined) {
+        assumptions.push(
+          A(
+            `week ${String(week)} injury report not published yet for ${team}: the week ${String(availability.carried_from)} designation is carried forward`,
+            `${team}'s week ${String(week)} injury report is published (Wednesday–Friday)`,
+          ),
+        );
+      }
       if (availability.p === null) {
         assumptions.push(
           A(
