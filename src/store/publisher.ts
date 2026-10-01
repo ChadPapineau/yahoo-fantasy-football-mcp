@@ -22,7 +22,7 @@ import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { isDatasetSourceId, type DatasetSourceId } from "../config/freshness.js";
 import { BACKUP_DIR_NAME, datasetFileStem, ensureSecureDir } from "../config/paths.js";
 import type { RefreshLogRow } from "../domain/analytics/types.js";
-import { DATASET_META_TABLE, DS_SCHEMA_VERSION } from "./attach.js";
+import { DATASET_META_TABLE, DS_SCHEMA_VERSION, parseDsSchema } from "./attach.js";
 import { ddlFor, tablesFor } from "./datasets/tables.js";
 import { MIGRATIONS, type Migration } from "./migrations/index.js";
 import type { RepoDeps } from "./repos/common.js";
@@ -84,6 +84,37 @@ export function sweepDebris(datasetDir: string, source: DatasetSourceId): string
     }
   }
   return removed.sort();
+}
+
+/**
+ * The `dataset_meta` of a published dataset file, read through its own read-only connection; null
+ * when the path is not a regular file, is not a SQLite database, or carries no dataset_meta.
+ */
+export function readDatasetFileMeta(file: string): Readonly<Record<string, string>> | null {
+  try {
+    if (!lstatSync(file).isFile()) return null;
+  } catch {
+    return null;
+  }
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(file, { readOnly: true, enableDoubleQuotedStringLiterals: false });
+    const has = db
+      .prepare("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(DATASET_META_TABLE);
+    if (has === undefined) return null;
+    const out: Record<string, string> = Object.create(null) as Record<string, string>; // a "__proto__" key stays data
+    for (const r of db.prepare(`SELECT key, value FROM ${DATASET_META_TABLE}`).all() as unknown as {
+      key: unknown;
+      value: unknown;
+    }[])
+      if (typeof r.key === "string" && typeof r.value === "string") out[r.key] = r.value;
+    return out;
+  } catch {
+    return null;
+  } finally {
+    db?.close();
+  }
 }
 
 function fsyncPath(p: string, flags: number): void {
@@ -226,7 +257,12 @@ export function openPublisher(
     });
   };
 
-  /** The current row carries `version` and its file exists (else: RangeError naming why not). */
+  /**
+   * The current row carries `version`, its file exists, and that file is the one this binary would
+   * serve — its dataset_meta names this source and version in THIS layout (plan 03 §7 ds_schema,
+   * QA-1-098: a file of another layout is republished, never kept as "unchanged"). Else a
+   * RangeError naming why not.
+   */
   const assertCurrent = (sourceId: DatasetSourceId, version: string): void => {
     const cur = currentRefreshRow(deps, sourceId);
     if (cur?.file_version !== version)
@@ -237,6 +273,15 @@ export function openPublisher(
     } catch {
       throw new RangeError("store: the current dataset file is missing; publish it again");
     }
+    const meta = readDatasetFileMeta(file);
+    if (
+      meta?.source !== sourceId ||
+      meta.file_version !== version ||
+      parseDsSchema(meta.ds_schema) !== DS_SCHEMA_VERSION
+    )
+      throw new RangeError(
+        "store: the current dataset file is not this version in this layout; publish it again",
+      );
   };
   const markChecked = (sourceId: DatasetSourceId, checkedAt: string): Promise<void> =>
     deps.writes.required("refresh_log", () => {

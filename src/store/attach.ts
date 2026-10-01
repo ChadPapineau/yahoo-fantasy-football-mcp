@@ -21,6 +21,16 @@ export const DATASET_META_TABLE = "dataset_meta";
 /** Version of the dataset-file layout (plan 03 §7 `ds_schema`: bumped when ds_* tables change). */
 export const DS_SCHEMA_VERSION = 1;
 
+/**
+ * A `dataset_meta.ds_schema` value as a layout version: digits only (so "1x" or " 1" is not 1),
+ * else null. A file whose value is not DS_SCHEMA_VERSION is of another layout and is never served
+ * or treated as current (plan 03 §7: never migrated in place — the next refresh writes a new file;
+ * QA-1-098).
+ */
+export function parseDsSchema(value: string | null | undefined): number | null {
+  return typeof value === "string" && /^[0-9]{1,9}$/.test(value) ? Number(value) : null;
+}
+
 /** Metadata the publisher stamps into the file itself. */
 export interface DatasetFileMeta {
   readonly source: string | null;
@@ -120,7 +130,7 @@ export class Attachments {
     const has = this.o.db
       .prepare(`SELECT 1 AS x FROM ${q(schema)}.sqlite_master WHERE type = 'table' AND name = ?`)
       .get(DATASET_META_TABLE);
-    const out: Record<string, string> = {};
+    const out: Record<string, string> = Object.create(null) as Record<string, string>; // a "__proto__" key stays data
     if (has !== undefined) {
       const rows = this.o.db
         .prepare(`SELECT key, value FROM ${q(schema)}.${DATASET_META_TABLE}`)
@@ -128,13 +138,12 @@ export class Attachments {
       for (const r of rows)
         if (typeof r.key === "string" && typeof r.value === "string") out[r.key] = r.value;
     }
-    const n = out.ds_schema === undefined ? null : Number.parseInt(out.ds_schema, 10);
     return {
       source: out.source ?? null,
       file_version: out.file_version ?? null,
       release_updated_at: out.release_updated_at ?? null,
       published_at: out.published_at ?? null,
-      ds_schema: n !== null && Number.isFinite(n) ? n : null,
+      ds_schema: parseDsSchema(out.ds_schema),
     };
   }
 
@@ -176,9 +185,23 @@ export class Attachments {
       this.o.warn("dataset_source_mismatch");
       return null;
     }
+    // Another layout (plan 03 §7 ds_schema; QA-1-098): its READER_QUERIES columns may not exist, so
+    // it is refused like a source mismatch — never served, a refresh writes a file of this layout.
+    const stamped = meta.ds_schema !== null;
+    if (stamped && meta.ds_schema !== DS_SCHEMA_VERSION) {
+      this.o.db.exec(`DETACH DATABASE ${q(schema)}`);
+      this.o.warn("dataset_schema_mismatch");
+      return null;
+    }
     if (!this.hasContractTables(schema, source)) {
       this.o.db.exec(`DETACH DATABASE ${q(schema)}`);
       this.o.warn("dataset_tables_missing");
+      return null;
+    }
+    if (!stamped) {
+      // Every file this publisher writes carries ds_schema: an unstamped one is of unknown layout.
+      this.o.db.exec(`DETACH DATABASE ${q(schema)}`);
+      this.o.warn("dataset_schema_mismatch");
       return null;
     }
     const version =
