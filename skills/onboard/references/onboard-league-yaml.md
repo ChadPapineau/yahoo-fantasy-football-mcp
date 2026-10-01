@@ -82,7 +82,7 @@ opponents:                     # optional; which team the user plays each week
   - { week: 4, team: 2 }
 ```
 
-Players are `{ name, team, position, slot }` with the nflverse team abbreviation (`LA` for the Rams, `LV`, `JAX`) and a position of QB, RB, WR, TE or K; a team defense is `{ defense: TEAM, slot }`. Add `status: O` (or `Q`, `D`, `IR`) when the app shows one. A player the server cannot match to NFL data is listed by `ff status` under unmatched rostered players; adding the NFL id to that line (`gsis_id: "00-0034857"`, quoted) settles it. Free agents, waiver-wire players and transactions may be pasted too (`free_agents`, `waivers`, `transactions`), but nothing requires them.
+Players are `{ name, team, position, slot }` with the nflverse team abbreviation (`LA` for the Rams, `LV`, `JAX`) and a position of QB, RB, WR, TE or K; a team defense is `{ defense: TEAM, slot }`. Add `status: O` (or `Q`, `D`, `IR`) when the app shows one. A player the server cannot match to NFL data is listed by the assistant's status check (`ff_get_status`, under `crosswalk.unmatched_rostered`) with the reason and the number of close NFL candidates. The usual cause is an old NFL team: check the player's current team in the fantasy app and correct `team:`. If he is still unmatched, the assistant lists that NFL team's players with `ff_project_players` and `players: { nfl_team: "<TEAM>" }`, which shows each player's NFL id (`gsis_id`); adding that id to his line (`gsis_id: "00-0034857"`, quoted) settles it. Free agents, waiver-wire players and transactions may be pasted too (`free_agents`, `waivers`, `transactions`), but nothing requires them.
 
 ### Saving it
 
