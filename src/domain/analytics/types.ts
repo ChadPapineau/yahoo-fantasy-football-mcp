@@ -254,8 +254,11 @@ export interface OptionValue {
 
 /** One recommended swap (plan 07 E2 `swaps[]`); `D` is the ΔP(win) form its basis allows. */
 export interface SwapOf<D extends DeltaPwin> {
-  /** Player key leaving the slot. */
-  readonly out: PlayerKey;
+  /**
+   * Player key of the starter this entrant replaces (following any slot moves), or null when he
+   * fills a seat that is empty now — a starter on IR, dropped or unmatched (QA-1-020).
+   */
+  readonly out: PlayerKey | null;
   /** Player key entering the slot. */
   readonly in: PlayerKey;
   readonly slot: string;
