@@ -115,6 +115,13 @@ export interface SourceContext {
   readonly tempDir?: string;
   /** Streaming download to a file (src/http); additive, set by the runner when it has one. */
   readonly download?: HttpDownload;
+  /**
+   * Reports that `season`'s data is not published upstream YET (a new season before its first
+   * data: the release answers 404 — plan 06 §2; QA-1-033). The source leaves that season out of
+   * its TempFiles; the runner publishes the rest under `versionForSeasons`, warning, or skips the
+   * run when no season is left. Additive, set by the runner.
+   */
+  readonly notPublished?: (season: number) => void;
 }
 
 /**
@@ -181,4 +188,10 @@ export interface DataSource {
   assertSchema(files: readonly TempFile[]): Promise<SchemaReport>;
   /** Writes every season's rows into the fresh staging dataset file; never touches store.sqlite. */
   publish(files: readonly TempFile[], into: DatasetWriter): Promise<PublishStats>;
+  /**
+   * The version of `version`'s release restricted to `seasons` — used when `fetch` reported a
+   * season as not published, so the published file's version names only the seasons it holds and
+   * a later run (that season now out) is never skipped as "unchanged". Optional (QA-1-033).
+   */
+  versionForSeasons?(version: ReleaseVersion, seasons: readonly number[]): ReleaseVersion;
 }

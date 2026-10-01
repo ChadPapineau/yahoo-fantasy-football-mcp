@@ -50,10 +50,21 @@ export const JOB_LOCKED_ERROR = "job_locked";
 
 /** Fixed-vocabulary refresh_log errors (never an upstream body — plan 01 §8.2 RefreshLogRow). */
 export type RefreshErrorCode =
-  "network" | "schema" | "publish" | "store" | "aborted" | "invalid_request" | "internal";
+  | "network"
+  /** Upstream answered 404 for a file that should exist (a past season; QA-1-033). */
+  | "not_found"
+  | "schema"
+  | "publish"
+  | "store"
+  | "aborted"
+  | "invalid_request"
+  | "internal";
 
-/** Why a run did nothing, successfully. */
-export type SkipReason = "off_season" | "schedules_never_loaded" | "locked";
+/**
+ * Why a run did nothing, successfully. `not_published`: none of the run's seasons is published
+ * upstream yet (a new season before its first data — plan 06 §2; QA-1-033).
+ */
+export type SkipReason = "off_season" | "schedules_never_loaded" | "locked" | "not_published";
 
 /** The result of one refresh run. */
 export type RefreshResult =
@@ -207,7 +218,14 @@ function validRequest(req: RefreshRequest): boolean {
 
 function errorCodeFor(e: unknown, signal: AbortSignal): RefreshErrorCode {
   if (signal.aborted || (e instanceof HttpError && e.kind === "aborted")) return "aborted";
+  // a 404 is upstream saying "no such file", not an outage (QA-1-033)
+  if (e instanceof HttpError && e.kind === "http_4xx" && e.status === 404) return "not_found";
   return isNetworkFailure(e) ? "network" : "internal";
+}
+
+/** The warning a published result carries for a season dropped as not yet published. */
+export function notPublishedWarning(id: DatasetSourceId, season: number): string {
+  return `${id} season ${String(season)}: not published upstream yet — skipped (the other seasons were published)`;
 }
 
 function messageFor(e: unknown): string {
@@ -331,40 +349,45 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
     if (version === null) return await fail("network", "the upstream version is unavailable");
 
     // Set when the current file is damaged: publish without the publisher's under-lock "already
-    // current" check, which reads refresh_log (and the file's existence) only.
+    // current" check, which does not read the data pages.
     let repair = false;
-    if (source.versioning === "release" && req.force !== true) {
+    /**
+     * The release short-circuit: when `ver` is the published release AND the current file is
+     * servable, records the check and returns "unchanged"; a damaged file sets `repair` (QA-1-097).
+     */
+    const unchanged = async (ver: ReleaseVersion): Promise<RefreshResult | null> => {
+      if (source.versioning !== "release" || req.force === true) return null;
       const prev = previous();
-      if (prev !== null && prev.file_version === version.version) {
-        let health: DatasetHealth;
-        try {
-          health = (deps.checkDataset ?? checkDatasetFile)(id, prev.file, version.version);
-        } catch {
-          health = "unreadable";
-        }
-        if (health === "ok") {
-          try {
-            await deps.publisher.recordUnchanged(id, version.version, deps.clock.nowIso());
-            deps.log?.info("refresh.unchanged", { source: id, version: version.version });
-            return { status: "unchanged", source: id, version, attempts };
-          } catch {
-            // the check could not be recorded (the file vanished since, or the store is busy):
-            // publishing is always a correct answer — the publisher re-checks under its lock
-            deps.log?.warn("refresh.unchanged_check_failed", { source: id });
-          }
-        } else {
-          repair = true;
-          deps.log?.warn("refresh.dataset_repair", {
-            source: id,
-            health,
-            version: version.version,
-          });
-        }
+      if (prev?.file_version !== ver.version) return null;
+      let health: DatasetHealth;
+      try {
+        health = (deps.checkDataset ?? checkDatasetFile)(id, prev.file, ver.version);
+      } catch {
+        health = "unreadable";
       }
-    }
+      if (health !== "ok") {
+        repair = true;
+        deps.log?.warn("refresh.dataset_repair", { source: id, health, version: ver.version });
+        return null;
+      }
+      try {
+        await deps.publisher.recordUnchanged(id, ver.version, deps.clock.nowIso());
+      } catch {
+        // the check could not be recorded (the file vanished since, or the store is busy):
+        // publishing is always a correct answer — the publisher re-checks under its lock
+        deps.log?.warn("refresh.unchanged_check_failed", { source: id });
+        return null;
+      }
+      deps.log?.info("refresh.unchanged", { source: id, version: ver.version });
+      return { status: "unchanged", source: id, version: ver, attempts };
+    };
+    const early = await unchanged(version);
+    if (early !== null) return early;
 
-    const v = version;
+    let v = version;
     let files: readonly TempFile[] = [];
+    // seasons the source reported as not published upstream yet (reset per fetch attempt)
+    const notPublished = new Set<number>();
     let dir: string | null = null;
     const cleanup = async (): Promise<void> => {
       for (const f of files) {
@@ -380,11 +403,39 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
       try {
         files = await withRetry(async () => {
           await cleanup();
+          notPublished.clear();
           dir = await deps.temp.create(id);
-          return source.fetch(v, { ...baseCtx, tempDir: dir });
+          return source.fetch(v, {
+            ...baseCtx,
+            tempDir: dir,
+            notPublished: (season) => {
+              if (req.seasons.includes(season)) notPublished.add(season);
+            },
+          });
         });
       } catch (e) {
         return await fail(errorCodeFor(e, signal), messageFor(e));
+      }
+
+      // A new season before its first data (QA-1-033; plan 06 §2): publish the seasons that
+      // exist, under a version naming only them; nothing at all yet → a skip, not a failure.
+      const seasonWarnings: string[] = [];
+      if (notPublished.size > 0) {
+        const published = [...new Set(req.seasons)].filter((s) => !notPublished.has(s));
+        for (const s of [...notPublished].sort((a, b) => a - b)) {
+          seasonWarnings.push(notPublishedWarning(id, s));
+          deps.log?.warn("refresh.season_not_published", { source: id, season: s });
+        }
+        if (published.length === 0) {
+          deps.log?.info("refresh.skipped", { source: id, reason: "not_published" });
+          return { status: "skipped", source: id, reason: "not_published" };
+        }
+        if (source.versionForSeasons !== undefined) {
+          v = source.versionForSeasons(v, published);
+          version = v;
+          const same = await unchanged(v);
+          if (same !== null) return same;
+        }
       }
 
       let report: SchemaReport;
@@ -441,7 +492,7 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
         file_version: outcome.file_version,
         stats: outcome.stats,
         attempts,
-        warnings: report.warnings,
+        warnings: [...seasonWarnings, ...report.warnings],
       };
     } finally {
       await cleanup();

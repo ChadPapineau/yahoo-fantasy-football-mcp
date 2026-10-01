@@ -6,7 +6,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IsoInstant } from "../../domain/league/types.js";
-import { isTransientNetworkError } from "../../http/errors.js";
+import { HttpError, isTransientNetworkError } from "../../http/errors.js";
 import type { HttpGet, ReleaseVersion, SourceContext, TempFile } from "../source.js";
 
 /** Where every nflverse release asset lives. */
@@ -23,13 +23,57 @@ export const MAX_RELEASE_FILE_BYTES = 16 * 1024 * 1024;
 export const MIN_SEASON = 1999;
 export const MAX_SEASON = 2100;
 
+/**
+ * How long after a season's first kickoff a per-season file may still be missing upstream before a
+ * 404 for it is a real failure (QA-1-033). nflverse builds a season's stats after its first games
+ * and its injury reports from the first practice report; two weeks covers both with margin.
+ */
+export const SEASON_PUBLISH_GRACE_DAYS = 14;
+
+/**
+ * The NFL season in progress at `nowMs`: the calendar year from September (UTC), the previous year
+ * through August — the same rule `ff refresh` picks its default seasons by.
+ */
+export function nflSeasonAt(nowMs: number): number {
+  const d = new Date(nowMs);
+  const y = d.getUTCFullYear();
+  return d.getUTCMonth() >= 8 ? y : y - 1;
+}
+
+/** Whether `err` is upstream answering 404 for the URL (thrown by src/http, or a returned status). */
+export function isNotFound(err: unknown): boolean {
+  if (err instanceof HttpError) return err.kind === "http_4xx" && err.status === 404;
+  return err instanceof NflverseSourceError && err.status === 404;
+}
+
+/**
+ * Whether a 404 for `season`'s file can mean "not published yet" rather than a real failure: the
+ * season is the current one (or later) and has not been under way for SEASON_PUBLISH_GRACE_DAYS
+ * (its week-1 first kickoff, when schedules know it). A past season's file always exists.
+ */
+export function mayBeUnpublished(season: number, ctx: SourceContext): boolean {
+  const now = ctx.clock.nowMs();
+  if (season < nflSeasonAt(now)) return false;
+  let kickoff: string | null = null;
+  try {
+    kickoff = ctx.datasets.schedules.firstKickoff(season, 1);
+  } catch {
+    kickoff = null;
+  }
+  const k = kickoff === null ? Number.NaN : Date.parse(kickoff);
+  return !Number.isFinite(k) || now < k + SEASON_PUBLISH_GRACE_DAYS * 86_400_000;
+}
+
 /** An nflverse source failed in a way the run must report (never retried silently). */
 export class NflverseSourceError extends Error {
   readonly code: "bad_timestamp" | "bad_season" | "download" | "not_parquet" | "schema";
-  constructor(code: NflverseSourceError["code"], message: string) {
+  /** The HTTP status of a non-200 download answered by a status-returning transport, else null. */
+  readonly status: number | null;
+  constructor(code: NflverseSourceError["code"], message: string, status: number | null = null) {
     super(message);
     this.name = "NflverseSourceError";
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -221,6 +265,7 @@ export async function downloadAsset(
         throw new NflverseSourceError(
           "download",
           `nflverse: ${url} answered ${String(res.status)}`,
+          res.status,
         );
       }
       assertHttps(res.final_url, url);
@@ -231,6 +276,7 @@ export async function downloadAsset(
         throw new NflverseSourceError(
           "download",
           `nflverse: ${url} answered ${String(res.status)}`,
+          res.status,
         );
       }
       assertHttps(res.final_url, url);

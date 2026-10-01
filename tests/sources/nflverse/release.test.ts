@@ -9,8 +9,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   MAX_RELEASE_FILE_BYTES,
   NflverseSourceError,
+  SEASON_PUBLISH_GRACE_DAYS,
   assertSeason,
   downloadAsset,
+  isNotFound,
+  mayBeUnpublished,
+  nflSeasonAt,
   parseNflverseTimestamp,
   releaseUrl,
   releaseVersion,
@@ -306,5 +310,75 @@ describe("downloadAsset", () => {
     expect(dir).toContain("ff-fallback-");
     expect(realpathSync(dir).startsWith(realpathSync(tmpdir()))).toBe(true);
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("[QA-1-033] the new-season window: which 404 may mean 'not published yet'", () => {
+  const DAY = 86_400_000;
+  it("nflSeasonAt: the calendar year from 1 September (UTC), else the previous one", () => {
+    expect(nflSeasonAt(Date.parse("2027-08-31T23:59:59Z"))).toBe(2026);
+    expect(nflSeasonAt(Date.parse("2027-09-01T00:00:00Z"))).toBe(2027);
+    expect(nflSeasonAt(Date.parse("2028-02-10T12:00:00Z"))).toBe(2027); // the Super Bowl
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 4_102_444_800_000 }), (ms) => {
+        const s = nflSeasonAt(ms);
+        const y = new Date(ms).getUTCFullYear();
+        return s === y || s === y - 1;
+      }),
+    );
+  });
+
+  it("isNotFound: a 404 from src/http or a status-returning transport, nothing else", () => {
+    expect(isNotFound(new HttpError({ kind: "http_4xx", status: 404 }))).toBe(true);
+    expect(isNotFound(new NflverseSourceError("download", "x answered 404", 404))).toBe(true);
+    expect(isNotFound(new HttpError({ kind: "http_4xx", status: 403 }))).toBe(false);
+    expect(isNotFound(new HttpError({ kind: "http_5xx", status: 404 }))).toBe(false);
+    expect(isNotFound(new NflverseSourceError("download", "x answered 500", 500))).toBe(false);
+    expect(isNotFound(new Error("404"))).toBe(false);
+    expect(isNotFound({ status: 404 })).toBe(false);
+  });
+
+  const ctxAt = (now: string, firstKickoff: (s: number, w: number) => string | null) => {
+    const c = ctxFor([2027]);
+    return {
+      ...c.ctx,
+      clock: { nowMs: () => Date.parse(now), nowIso: () => now },
+      datasets: { schedules: { games: () => ({ rows: [], stamp: null }), firstKickoff } },
+    } as typeof c.ctx;
+  };
+
+  it("a past season never; the current season until GRACE days after its first kickoff", () => {
+    const k = "2027-09-10T00:20:00.000Z";
+    const sched = (s: number, w: number) => (s === 2027 && w === 1 ? k : null);
+    expect(mayBeUnpublished(2026, ctxAt("2027-09-01T12:00:00.000Z", sched))).toBe(false);
+    expect(mayBeUnpublished(2027, ctxAt("2027-09-01T12:00:00.000Z", sched))).toBe(true);
+    const edge = Date.parse(k) + SEASON_PUBLISH_GRACE_DAYS * DAY;
+    expect(mayBeUnpublished(2027, ctxAt(new Date(edge - 1).toISOString(), sched))).toBe(true);
+    expect(mayBeUnpublished(2027, ctxAt(new Date(edge).toISOString(), sched))).toBe(false);
+    // a future season (an explicit --seasons) is not published either
+    expect(mayBeUnpublished(2028, ctxAt("2027-12-01T12:00:00.000Z", sched))).toBe(true);
+  });
+
+  it("schedules that do not know the season (or throw) cannot prove it started: may be unpublished", () => {
+    expect(
+      mayBeUnpublished(
+        2027,
+        ctxAt("2027-12-01T12:00:00.000Z", () => null),
+      ),
+    ).toBe(true);
+    expect(
+      mayBeUnpublished(
+        2027,
+        ctxAt("2027-12-01T12:00:00.000Z", () => {
+          throw new Error("schedules unreadable");
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      mayBeUnpublished(
+        2027,
+        ctxAt("2027-12-01T12:00:00.000Z", () => "garbage"),
+      ),
+    ).toBe(true);
   });
 });
