@@ -5,6 +5,7 @@
 // errors naming the argument; a legal comparison is reported in `comparisons[]`, apart from the
 // recommended `swaps[]` that rec.action counts.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { splitComparisons } from "../../src/mcp/tools/analytics.js";
 import { TEAM_B, connect, makeWorld, type World } from "./helpers/env.js";
 
 const ALLEN = "manual.p.00-0034857"; // QB, starter (Team A)
@@ -31,7 +32,9 @@ let world: World;
 beforeAll(async () => {
   world = await makeWorld();
 }, 60_000);
-afterAll(() => { world.cleanup(); });
+afterAll(() => {
+  world.cleanup();
+});
 
 async function call(args: Record<string, unknown>): Promise<{ isError: boolean; b: unknown }> {
   const { client, close } = await connect(world);
@@ -125,5 +128,26 @@ describe("honoured (QA-1-010)", () => {
   it("a valid force_start and exclude are applied", async () => {
     const r = (await call({ force_start: [LOVE], exclude: [ALLEN] })).b as Ok;
     expect(r.data.swaps.some((s) => s.out === ALLEN && s.in === LOVE)).toBe(true);
+  });
+});
+
+describe("splitComparisons never hides a recommended swap (QA-1-010)", () => {
+  const sw = (out: string, inn: string) => ({ out, in: inn });
+  it("recommended first, then the asked pairs", () => {
+    const rows = [sw("a", "b"), sw("c", "d")];
+    expect(splitComparisons(rows, 1, [{ out: "c", in: "d" }])).toEqual({
+      swaps: [sw("a", "b")],
+      comparisons: [sw("c", "d")],
+    });
+  });
+  it("a trailing row nobody asked for stays a swap", () => {
+    const rows = [sw("a", "b"), sw("x", "y"), sw("c", "d")];
+    expect(splitComparisons(rows, 1, [{ out: "c", in: "d" }])).toEqual({
+      swaps: [sw("a", "b"), sw("x", "y")],
+      comparisons: [sw("c", "d")],
+    });
+  });
+  it("no compare argument: everything is a swap and no comparisons key", () => {
+    expect(splitComparisons([sw("a", "b")], 0, undefined)).toEqual({ swaps: [sw("a", "b")] });
   });
 });
