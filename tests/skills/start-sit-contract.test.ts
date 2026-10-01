@@ -41,7 +41,11 @@ describe("QA-1-065: start-sit's game-day log entry is scored as a lineup change"
     try {
       const ro = await sw.call("ff_get_roster", { week: 3, force_refresh: true });
       const lu = await sw.call("ff_analyze_lineup", { week: 3, objective: "mean" });
-      const raw = dataOf(lu).rec as { subjects: { role: string }[]; confidence: Json } & Json;
+      const raw = dataOf(lu).rec as {
+        subjects: { role: string }[];
+        confidence: Json;
+        no_move: boolean;
+      } & Json;
       // the fixture world publishes its datasets at T0, after this clock: re-date the rec to the
       // clock, as the dry run's A9 chain does, so E12 does not reject it as "in the future"
       const rec = {
