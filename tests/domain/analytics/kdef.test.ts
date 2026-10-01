@@ -122,10 +122,27 @@ describe("analyzeKdef", () => {
     const means = proj.result.projections.map((p) => p.weeks[0]?.points.mean ?? 0);
     const weak = defs[means.indexOf(Math.min(...means))];
     if (weak === undefined) throw new Error("no weak DEF");
-    const streamed = analyzeKdef(req({ positions: ["DEF"], current: [weak] }));
-    expect(streamed.analysis.hold_vs_stream?.current_starter_delta).toBeGreaterThan(0);
-    expect(streamed.analysis.hold_vs_stream?.streamability).toBeGreaterThan(1);
-    expect(streamed.analysis.candidates[0]?.marginal_value.mean).toBeGreaterThan(0);
+    const weakRun = analyzeKdef(req({ positions: ["DEF"], current: [weak] }));
+    expect(weakRun.analysis.hold_vs_stream?.current_starter_delta).toBeGreaterThan(0);
+    expect(weakRun.analysis.hold_vs_stream?.streamability).toBeGreaterThan(1);
+    expect(weakRun.analysis.candidates[0]?.marginal_value.mean).toBeGreaterThan(0);
+    // ~3 points over a DEF is a coin flip against holding (QA-1-060): the call is hold, and says so
+    const d = weakRun.analysis.rec.delta_vs_next;
+    if (weakRun.analysis.rec.no_move) {
+      expect(weakRun.analysis.rec.action).toBe("hold the current DEF");
+      expect(
+        weakRun.analysis.rec.assumptions.some((a) =>
+          a.text.startsWith("the best stream is a coin flip"),
+        ),
+      ).toBe(true);
+    } else expect(d.p10 < 0 && d.p90 > 0).toBe(false);
+    // a starter on bye (week 5) is streamed over decisively, with a drop subject and a deadline
+    const playing = new Set(
+      data.games.filter((g) => g.season === 2026 && g.week === 5).flatMap((g) => [g.home, g.away]),
+    );
+    const bye = defs.find((u) => !playing.has(u.nfl_team));
+    if (bye === undefined) throw new Error("no week-5 bye");
+    const streamed = analyzeKdef(req({ positions: ["DEF"], week: 5, current: [bye] }));
     expect(streamed.analysis.rec.subjects.map((s) => s.role)).toEqual(["stream", "drop"]);
     expect(streamed.analysis.rec.latest_execution_time).not.toBeNull();
   });
