@@ -26,7 +26,6 @@ import {
   datasetFilePath,
   ensureSecureDir,
   insecureAncestors,
-  isInside,
   PathSecurityError,
   readSecureFile,
 } from "../config/paths.js";
@@ -422,9 +421,12 @@ function refusal(e: unknown): string {
   return e instanceof PathSecurityError ? e.detail : errorText(e);
 }
 
-/** Whether the league file is the in-repo fixture league (fixture mode: 0600 not required). */
+/**
+ * Whether the league file is the package's in-repo fixture league (fixture mode: 0600 not
+ * required) — decided once by the config (QA-1-094), never by FF_FIXTURE_DIR alone.
+ */
 export function isFixtureLeague(config: Config): boolean {
-  return config.fixtureDir !== null && isInside(config.leagueFile, config.fixtureDir);
+  return config.fixtureLeague;
 }
 
 /** Row 4: config dir 0700 + owner; league.yaml 0600 if present. */
