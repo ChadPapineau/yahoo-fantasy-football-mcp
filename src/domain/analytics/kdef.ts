@@ -318,13 +318,35 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
   }
 
   // the call: the candidate with the largest gain over my starter (or the largest mean without one)
+  // whose move is decisive — research 05 §14.4: a stream whose Δ interval against holding includes 0
+  // (it could lose points) is no move (QA-1-060). An empty K/DEF slot is filled by any candidate.
   const order = [...scored].sort(
     (a, b) =>
       (b.delta ?? meanOf(b.p, 0)) - (a.delta ?? meanOf(a.p, 0)) ||
       cmpStr(a.cand.player_key, b.cand.player_key),
   );
   const top = order[0] ?? null;
-  const streamIt = top !== null && (top.delta === null || top.delta > KDEF.holdMargin);
+  const vsHold = (x: Scored): { value: number; p10: number; p90: number } => {
+    const d = at(x.p.weeks, 0).dist;
+    if (x.cur === null) return { value: d.mean, p10: d.p10, p90: d.p90 };
+    const c = at(x.cur.weeks, 0).dist;
+    const dv = d.mean - c.mean;
+    const sd = Math.sqrt(sigmaOf(d) ** 2 + sigmaOf(c) ** 2);
+    return { value: dv, p10: dv - Z90 * sd, p90: dv + Z90 * sd };
+  };
+  const straddles = (iv: { p10: number; p90: number }): boolean => iv.p10 < 0 && iv.p90 > 0;
+  const beatsHold = (x: Scored): boolean => x.delta === null || x.delta > KDEF.holdMargin;
+  const pick = order.find((x) => beatsHold(x) && !straddles(vsHold(x))) ?? null;
+  const streamIt = pick !== null;
+  if (!streamIt && top?.cur != null && beatsHold(top)) {
+    const iv = vsHold(top);
+    assumptions.push(
+      A(
+        `the best stream is a coin flip: its Δ interval against holding (${String(round(iv.p10, 3))} to ${String(round(iv.p90, 3))} points) includes 0, so the call is hold (research 05 §14.4)`,
+        "lines or injury news move the interval off 0",
+      ),
+    );
+  }
   const subject = (p: ProjectedPlayer, role: RecSubject["role"]): RecSubject => ({
     player_key: p.target.player_key,
     gsis_id: p.target.subject.kind === "player" ? p.target.subject.gsis_id : null,
@@ -332,37 +354,50 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
     role,
     slot: null,
   });
-  const lead: ProjectedPlayer | null = top === null ? null : streamIt ? top.p : (top.cur ?? top.p);
-  const other: ProjectedPlayer | null =
-    top === null ? null : streamIt ? (top.cur ?? order[1]?.p ?? null) : top.p;
+  const chosen = pick ?? top;
+  const lead: ProjectedPlayer | null =
+    chosen === null ? null : streamIt ? chosen.p : (chosen.cur ?? chosen.p);
   const leadDist = lead?.weeks[0]?.dist ?? zeroDist("position_cv");
-  const otherDist = other?.weeks[0]?.dist ?? null;
-  const dv = otherDist === null ? 0 : leadDist.mean - otherDist.mean;
-  const sdv = Math.sqrt(
-    sigmaOf(leadDist) ** 2 + (otherDist === null ? 0 : sigmaOf(otherDist) ** 2),
-  );
-  const kick = streamIt ? (top.p.weeks[0]?.kickoff_ms ?? null) : null;
+  let delta: { value: number; p10: number; p90: number };
+  if (chosen === null) delta = { value: 0, p10: 0, p90: 0 };
+  else if (streamIt) delta = vsHold(chosen);
+  else {
+    // holding: the margin of my starter over the best stream (its interval, negated)
+    const iv = vsHold(chosen);
+    delta =
+      chosen.cur === null
+        ? { value: 0, p10: 0, p90: 0 }
+        : {
+            value: -iv.value,
+            p10: -iv.p90,
+            p90: -iv.p10,
+          };
+  }
+  const kick = streamIt ? (pick.p.weeks[0]?.kickoff_ms ?? null) : null;
   const nowMs = req.clock.nowMs();
   const rec: Rec = {
     action:
-      top === null
+      chosen === null
         ? "no K/DEF candidate could be projected"
         : streamIt
-          ? `stream ${top.cand.position} ${top.cand.player_key} for week ${String(req.week)}`
-          : `hold the current ${top.cand.position}`,
+          ? `stream ${chosen.cand.position} ${chosen.cand.player_key} for week ${String(req.week)}`
+          : `hold the current ${chosen.cand.position}`,
     subjects:
-      top === null
+      chosen === null
         ? []
         : streamIt
-          ? [subject(top.p, "stream"), ...(top.cur === null ? [] : [subject(top.cur, "drop")])]
-          : [subject(top.cur ?? top.p, "start")],
+          ? [
+              subject(chosen.p, "stream"),
+              ...(chosen.cur === null ? [] : [subject(chosen.cur, "drop")]),
+            ]
+          : [subject(chosen.cur ?? chosen.p, "start")],
     lineup: null,
     point_estimate: round(leadDist.mean, 3),
     distribution: leadDist,
     delta_vs_next: {
-      value: round(dv, 3),
-      p10: round(dv - Z90 * sdv, 3),
-      p90: round(dv + Z90 * sdv, 3),
+      value: round(delta.value, 3),
+      p10: round(delta.p10, 3),
+      p90: round(delta.p90, 3),
     },
     decision_metric: "expected_points",
     drivers: lead === null ? [] : lead.projection.drivers.map((d) => ({ ...d })),
