@@ -2,6 +2,7 @@
 // §3.3 position types) and the team-defence DT line (READER_QUERIES["PlayerWeekReader.defenseLines"]
 // mapping). Lives in src/store because the store may not import src/sources (plan 01 §1.1): the
 // plan names src/sources/nflverse/columns.ts, which the store cannot reach.
+import { DST_TD_COLUMNS } from "../../domain/scoring/nflverse.js";
 import type { Canonical, PositionType, StatLine } from "../../domain/scoring/types.js";
 
 /** A row as SQLite returns it. */
@@ -45,7 +46,7 @@ export const DEFENSE_STAT_MAP: Readonly<Record<Canonical, readonly string[]>> = 
   dst_sack: ["def_sacks"],
   dst_int: ["def_interceptions"],
   dst_fum_rec: ["fumble_recovery_opp"],
-  dst_td: ["def_tds"],
+  dst_td: DST_TD_COLUMNS, // interception- AND fumble-return TDs (QA-1-017)
   dst_ret_td: ["special_teams_tds"],
   dst_safety: ["def_safeties"],
   dst_blk: ["def_fg_blocks", "def_punt_blocks"],

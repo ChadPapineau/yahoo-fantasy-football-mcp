@@ -18,8 +18,12 @@ import { MAX_ATTACHED, RESERVED_ATTACH_SLOTS, type ReattachReport } from "./type
 
 /** The metadata table the publisher writes into every dataset file (not a ds_* table). */
 export const DATASET_META_TABLE = "dataset_meta";
-/** Version of the dataset-file layout (plan 03 §7 `ds_schema`: bumped when ds_* tables change). */
-export const DS_SCHEMA_VERSION = 1;
+/**
+ * Version of the dataset-file layout (plan 03 §7 `ds_schema`: bumped when ds_* tables change).
+ * 2: ds_team_defense_week gained fumble_recovery_tds_opp (QA-1-017) — a file of layout 1 is refused
+ * like any other layout and the next refresh republishes it.
+ */
+export const DS_SCHEMA_VERSION = 2;
 
 /**
  * A `dataset_meta.ds_schema` value as a layout version: digits only (so "1x" or " 1" is not 1),

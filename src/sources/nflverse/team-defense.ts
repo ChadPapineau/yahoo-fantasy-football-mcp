@@ -4,6 +4,10 @@
 // rows in the same game; plan 08 §3.2 dst_* inputs). A team-level row (no player_id — nflverse's
 // unattributed team credits, e.g. the BUF week-2 2026 safety) adds its TEAM_DEFENSE_SUM_COLUMNS only:
 // no player count and no offence yardage. Memory: one accumulator per team-week.
+import {
+  DST_FUMBLE_RETURN_TD_COLUMN,
+  defensiveFumbleReturnTds,
+} from "../../domain/scoring/nflverse.js";
 import { TEAM_DEFENSE_SUM_COLUMNS } from "../../store/datasets/tables.js";
 import { asInt, asReal, asText } from "./rows.js";
 
@@ -61,7 +65,9 @@ export class TeamDefenseAggregator {
         season_type: null,
         opponent_team: null,
         game_id: null,
-        sums: Object.fromEntries(TEAM_DEFENSE_SUM_COLUMNS.map((c) => [c, 0])),
+        sums: Object.fromEntries(
+          [...TEAM_DEFENSE_SUM_COLUMNS, DST_FUMBLE_RETURN_TD_COLUMN].map((c) => [c, 0]),
+        ),
         pass: 0,
         sackYds: 0,
         rush: 0,
@@ -78,6 +84,9 @@ export class TeamDefenseAggregator {
     }
     for (const c of TEAM_DEFENSE_SUM_COLUMNS)
       acc.sums[c] = (acc.sums[c] ?? 0) + (asReal(raw[c]) ?? 0);
+    // per-row derived, not a plain sum: def_tds holds interception returns only (QA-1-017)
+    acc.sums[DST_FUMBLE_RETURN_TD_COLUMN] =
+      (acc.sums[DST_FUMBLE_RETURN_TD_COLUMN] ?? 0) + defensiveFumbleReturnTds(raw);
     if (!player) return;
     acc.pass += asReal(raw.passing_yards) ?? 0;
     acc.sackYds += asReal(raw.sack_yards_lost) ?? 0;
@@ -112,6 +121,7 @@ export class TeamDefenseAggregator {
         game_id: a.game_id,
       };
       for (const c of TEAM_DEFENSE_SUM_COLUMNS) row[c] = a.sums[c] ?? 0;
+      row[DST_FUMBLE_RETURN_TD_COLUMN] = a.sums[DST_FUMBLE_RETURN_TD_COLUMN] ?? 0;
       row.opp_passing_yards = sameGame ? opp.pass : null;
       row.opp_sack_yards_lost = sameGame ? opp.sackYds : null;
       row.opp_rushing_yards = sameGame ? opp.rush : null;

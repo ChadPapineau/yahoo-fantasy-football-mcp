@@ -4,6 +4,7 @@
 // schema assertion (schemas.ts) is what verifies these column names exist (A-1).
 // PURE: imports only domain types, no I/O, no store/sources modules — so it can move into
 // src/domain verbatim if the store's readers need it (store may not import src/sources).
+import { DST_TD_COLUMNS } from "../../domain/scoring/nflverse.js";
 import type { Canonical, PositionType, StatLine } from "../../domain/scoring/types.js";
 
 /** One canonical stat and the nflverse columns summed to produce it. */
@@ -255,7 +256,7 @@ export function toDefenseStatLine(
   put("dst_sack", ["def_sacks"], "measure"); // half sacks are legitimate
   put("dst_int", ["def_interceptions"], "count");
   put("dst_fum_rec", ["fumble_recovery_opp"], "count");
-  put("dst_td", ["def_tds"], "count");
+  put("dst_td", DST_TD_COLUMNS, "count");
   put("dst_ret_td", ["special_teams_tds"], "count");
   put("dst_safety", ["def_safeties"], "count");
   put(
