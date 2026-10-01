@@ -350,8 +350,10 @@ describe("analyzeLineup — objectives", () => {
 
 describe("analyzeLineup — swaps, conditionals, option value, stacks", () => {
   it("a better bench player produces one swap with the coarse ΔP(win), interval and Rec", () => {
-    const qbBench = player("QB", 25, { slot: "BN", lock_at: SUN_425 });
-    const qbStart = player("QB", 12, { slot: "QB" });
+    // spreads tight enough that the Δ interval excludes 0 — a decisive change (a coin flip is no
+    // move since QA-1-060; tests/domain/analytics/no-move.test.ts)
+    const qbBench = player("QB", 25, { slot: "BN", lock_at: SUN_425, points: dist(25, 5) });
+    const qbStart = player("QB", 12, { slot: "QB", points: dist(12, 3) });
     const rec = analyzeLineup({
       slots: LEAGUE_SLOTS,
       players: [qbStart, qbBench],

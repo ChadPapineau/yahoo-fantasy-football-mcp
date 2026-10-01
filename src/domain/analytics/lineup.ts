@@ -697,19 +697,50 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   const movers = new Set<LineupPlayer>([...flow.entrants, ...flow.leavers, ...flow.slotMovers]);
   const recLatest = latestExecutionTime(lockGroups([...movers]), nowMs);
   const changes = flow.changes;
-  const noMove = changes === 0;
   const inputs = [...(req.inputs ?? [])];
 
-  // the Rec
+  // the Rec. Δ = recommended − current lineup: the swapped part by the normal approximation (with the
+  // same-team covariances), each fill (a seat that scores 0 now) by its entrant's own quantiles — a
+  // fill cannot lose points, so its p10 is never pushed below 0 by a symmetric approximation
   const recM = lineupMoments(recMembers);
   const curMembers = curStarters.map(member);
   const curM = lineupMoments(curMembers);
-  const covRC = lineupCov(recMembers, curMembers);
-  const sdDelta = Math.sqrt(Math.max(0, recM.v + curM.v - 2 * covRC));
+  const fills = flow.pairs.filter((pr) => pr.out === null).map((pr) => pr.in);
+  const swappedMembers = recStarters.filter((p) => !fills.includes(p)).map(member);
+  const swappedM = lineupMoments(swappedMembers);
+  const covSC = lineupCov(swappedMembers, curMembers);
+  const sdSwapped = Math.sqrt(Math.max(0, swappedM.v + curM.v - 2 * covSC));
+  const dMuSwapped = swappedM.mu - curM.mu;
+  const fillSum = (q: (d: Dist) => number): number => fills.reduce((x, p) => x + q(p.points), 0);
   const dMu = recM.mu - curM.mu;
+  const delta = {
+    value: round(dMu),
+    p10: round(dMuSwapped - Z90 * sdSwapped + fillSum((d) => d.p10)),
+    p90: round(dMuSwapped + Z90 * sdSwapped + fillSum((d) => d.p90)),
+  };
+  // research 05 §14.4 (the no-op baseline): a change whose Δ interval includes 0 — it could lose
+  // points (p10 < 0 < p90) — is reported as no move; the swaps still show it, coin_flip set (QA-1-060)
+  const coinFlip = changes > 0 && delta.p10 < 0 && delta.p90 > 0;
+  const noMove = changes === 0 || coinFlip;
+  if (coinFlip) {
+    assumptions.push(
+      A(
+        `the best lineup change is a coin flip: its Δ interval (${String(delta.p10)} to ${String(delta.p90)} points) includes 0, so the call is no move (research 05 §14.4)`,
+        "a status or projection change moves the interval off 0",
+      ),
+    );
+  }
   // subjects: the paired entrants first, in pair order, then the fills and the other starters; the
   // sits in the same pair order — so the retrospective's k-th start ↔ k-th sit pairing holds
   const subjects: RecSubject[] = [];
+  const keepSubjects = (): RecSubject[] =>
+    curStarters.map((p) => ({
+      player_key: p.player_key,
+      gsis_id: p.gsis_id ?? null,
+      nfl_team: p.positions.includes("DEF") ? p.nfl_team : null,
+      role: "start",
+      slot: slotIn(curA, p.player_key),
+    }));
   const paired = pairs.filter(
     (pr): pr is { out: LineupPlayer; in: LineupPlayer; slot: string } => pr.out !== null,
   );
@@ -736,21 +767,22 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
       slot: slotIn(curA, o.player_key),
     });
   }
-  const roleGames = recStarters.map((p) => p.role_games ?? 0);
+
+  // no move: the rec is the current lineup (what the user keeps; what the retrospective checks)
+  const keptA = noMove ? curA : chosen.a;
+  const keptStarters = noMove ? curStarters : recStarters;
+  const keptM = noMove ? curM : recM;
+  const roleGames = keptStarters.map((p) => p.role_games ?? 0);
   const rec: Rec = {
     action: noMove ? "keep the current lineup" : actionText(flow, req.fills_in_swaps === true),
-    subjects,
-    lineup: assignments(chosen.a, recStarters, slots).map((s) => ({
+    subjects: coinFlip ? keepSubjects() : subjects,
+    lineup: assignments(keptA, keptStarters, slots).map((s) => ({
       slot: s.slot,
       player_key: s.player_key,
     })),
-    point_estimate: round(recM.mu),
-    distribution: normalDist(recM.mu, Math.sqrt(recM.v), basis),
-    delta_vs_next: {
-      value: round(dMu),
-      p10: round(dMu - Z90 * sdDelta),
-      p90: round(dMu + Z90 * sdDelta),
-    },
+    point_estimate: round(keptM.mu),
+    distribution: normalDist(keptM.mu, Math.sqrt(keptM.v), basis),
+    delta_vs_next: delta,
     decision_metric:
       objective === "mean" ? "expected_points" : objective === "pwin" ? "p_win" : "blend",
     drivers: swapRaw

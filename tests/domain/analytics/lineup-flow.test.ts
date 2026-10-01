@@ -167,7 +167,10 @@ describe("QA-1-020/040 — filling an empty starting seat is a move", () => {
           expect(ins).toEqual(entrants);
           const same = cur.size === rec.size && [...cur].every(([k, v]) => rec.get(k) === v);
           if (same) expect(r.no_move).toBe(true);
-          if (entrants.length > 0) expect(r.rec.action).not.toBe("keep the current lineup");
+          // a change is reported unless its Δ interval straddles 0 (QA-1-060's no-move rule)
+          const d = r.rec.delta_vs_next;
+          if (entrants.length > 0 && !(d.p10 < 0 && d.p90 > 0))
+            expect(r.rec.action).not.toBe("keep the current lineup");
           for (const s of r.swaps) {
             if (s.out !== null) expect(cur.has(s.out) && !rec.has(s.out)).toBe(true);
           }

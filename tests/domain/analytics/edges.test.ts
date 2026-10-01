@@ -431,7 +431,11 @@ describe("E5 edges", () => {
     expect(calls).toBeGreaterThan(0);
     expect(out.analysis.candidates).toHaveLength(1);
     expect(out.analysis.inputs.map((i) => i.source)).toContain("manual");
-    expect(out.analysis.rec.delta_vs_next.value).toBe(0);
+    // no current starter: the margin is against doing nothing (an empty slot scores 0 — QA-1-060)
+    const only = out.analysis.candidates[0]?.marginal_value;
+    expect(out.analysis.rec.delta_vs_next.value).toBeCloseTo(only?.mean ?? Number.NaN, 3);
+    expect(out.analysis.rec.delta_vs_next.p10).toBeCloseTo(only?.p10 ?? Number.NaN, 3);
+    expect(out.analysis.rec.no_move).toBe(false);
   });
 
   it("no lines: candidates carry no implied_total signal and next_week implied is null", () => {
