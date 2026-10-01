@@ -6,6 +6,7 @@
 // league, said plainly (plan 07 E5 manual block; changelog OBJ-29). Pure.
 import type { Clock, Rng } from "../clock.js";
 import type { NflTeam } from "../../config/schema.js";
+import { kickoffMs, lockAtFor, type LockMode } from "../league/schedule.js";
 import type { PlayerKey, Week } from "../league/types.js";
 import type {
   Dist,
@@ -74,6 +75,8 @@ export interface KdefRequest {
   readonly n_sims?: number;
   readonly engine?: ScoringEngine;
   readonly extra_stamps?: readonly AnyStamp[];
+  /** The league's lineup lock (plan 07 B1): `per_game` (default) or `weekly` (QA-1-022). */
+  readonly lock_mode?: LockMode;
 }
 
 /** E5 output: the tool's `data` plus whether the manual-league availability warning applies. */
@@ -174,17 +177,37 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
   );
   const weeks: Week[] = [];
   for (let w = req.week; w <= Math.min(22, req.week + look); w++) weeks.push(w);
+  // locks (QA-1-022, QA-1-059): a K/DEF whose game has started can be neither dropped nor added for
+  // the decision week — research 05 §14.2, plan 09 guardrail "never a move on a locked player"
+  const nowMs = req.clock.nowMs();
+  const mode: LockMode = req.lock_mode ?? "per_game";
+  const weekGames = req.readers.schedules.games(req.season, [req.week]).rows;
+  const lockOf = (team: NflTeam | null): number | null =>
+    kickoffMs(lockAtFor(team, weekGames, mode));
+  const lockedNow = (team: NflTeam | null): boolean => {
+    const at = lockOf(team);
+    return at !== null && nowMs >= at;
+  };
   const mine = new Set(req.current.map((c) => c.player_key));
   // one entry per key (the first wins): a duplicated universe must not list a candidate twice
   const seen = new Set<PlayerKey>();
+  let lockedOut = 0;
   const pool = req.universe.filter((c) => {
     if (!positions.includes(c.position) || mine.has(c.player_key) || seen.has(c.player_key)) {
+      return false;
+    }
+    if (lockedNow(c.nfl_team)) {
+      lockedOut += 1;
       return false;
     }
     seen.add(c.player_key);
     return true;
   });
   const current = req.current.filter((c) => positions.includes(c.position));
+  /** Positions whose current starter is locked: no move there this week. */
+  const frozen = new Set<KdefPosition>(
+    current.filter((c) => lockedNow(c.nfl_team)).map((c) => c.position),
+  );
   const all = [...current, ...pool];
   const uniq = new Map<PlayerKey, KdefCandidateInput>();
   for (const c of all) if (!uniq.has(c.player_key)) uniq.set(c.player_key, c);
@@ -240,6 +263,23 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
     ),
   ];
   if (out.lines_omitted || first.lines_omitted) assumptions.push(LINES_OMITTED);
+  for (const c of current) {
+    if (!frozen.has(c.position) || !lockedNow(c.nfl_team)) continue;
+    assumptions.push(
+      A(
+        `your ${c.position} ${c.player_key} is locked for week ${String(req.week)} (his game has started): no ${c.position} move this week`,
+        `week ${String(req.week + 1)}'s ${c.position} decision`,
+      ),
+    );
+  }
+  if (lockedOut > 0) {
+    assumptions.push(
+      A(
+        `${String(lockedOut)} ${positions.join("/")} candidates whose week ${String(req.week)} games have started are not offered`,
+        "never — a started game is locked",
+      ),
+    );
+  }
   if (!req.availability_known) {
     assumptions.push(
       A(
@@ -297,7 +337,15 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
         kdef: kd,
       };
       candidates.push(cand);
-      scored.push({ cand, p, cur: cur ?? null, delta: curE === null ? null : w0.dist.mean - curE });
+      // a locked current starter cannot be dropped: his position is listed but never called
+      if (!frozen.has(pos)) {
+        scored.push({
+          cand,
+          p,
+          cur: cur ?? null,
+          delta: curE === null ? null : w0.dist.mean - curE,
+        });
+      }
     }
     const leader = ranked[0];
     if (cur !== undefined && leader !== undefined) {
@@ -336,7 +384,9 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
   };
   const straddles = (iv: { p10: number; p90: number }): boolean => iv.p10 < 0 && iv.p90 > 0;
   const beatsHold = (x: Scored): boolean => x.delta === null || x.delta > KDEF.holdMargin;
-  const pick = order.find((x) => beatsHold(x) && !straddles(vsHold(x))) ?? null;
+  // executable: the candidate has a known lock still ahead (an unknown kickoff has no deadline)
+  const executable = (x: Scored): boolean => lockOf(x.p.target.nfl_team) !== null;
+  const pick = order.find((x) => beatsHold(x) && !straddles(vsHold(x)) && executable(x)) ?? null;
   const streamIt = pick !== null;
   if (!streamIt && top?.cur != null && beatsHold(top)) {
     const iv = vsHold(top);
@@ -373,12 +423,20 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
             p90: -iv.p10,
           };
   }
-  const kick = streamIt ? (pick.p.weeks[0]?.kickoff_ms ?? null) : null;
-  const nowMs = req.clock.nowMs();
+  // the deadline: the earliest future lock among the move's subjects — the streamed candidate AND
+  // the starter it drops (a Thursday kicker locks days before a Sunday one — QA-1-059)
+  const subjectLocks = streamIt
+    ? [pick.p.target.nfl_team, pick.cur?.target.nfl_team ?? null]
+        .map((t) => (t === null ? null : lockOf(t)))
+        .filter((x): x is number => x !== null && x > nowMs)
+    : [];
+  const deadline = subjectLocks.length === 0 ? null : Math.min(...subjectLocks);
   const rec: Rec = {
     action:
       chosen === null
-        ? "no K/DEF candidate could be projected"
+        ? frozen.size > 0 || lockedOut > 0
+          ? `no ${positions.join("/")} move left for week ${String(req.week)}: locked`
+          : "no K/DEF candidate could be projected"
         : streamIt
           ? `stream ${chosen.cand.position} ${chosen.cand.player_key} for week ${String(req.week)}`
           : `hold the current ${chosen.cand.position}`,
@@ -404,7 +462,7 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
     assumptions,
     confidence: { role_games: lead?.role_games ?? 0, inputs },
     as_of: newestAsOf(inputs, req.clock.nowIso()),
-    latest_execution_time: kick !== null && kick > nowMs ? new Date(kick).toISOString() : null,
+    latest_execution_time: deadline === null ? null : new Date(deadline).toISOString(),
     no_move: !streamIt,
     log_id: null,
   };
