@@ -17,7 +17,7 @@ let world: World;
 beforeAll(async () => {
   world = await makeWorld();
 }, 60_000);
-afterAll(() => world.cleanup());
+afterAll(() => { world.cleanup(); });
 
 async function status(weather: "open-meteo" | "off"): Promise<G1["data"]> {
   const { client, close } = await connect(world, { options: { weatherSource: weather } });
