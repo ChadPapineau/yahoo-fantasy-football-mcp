@@ -18,6 +18,7 @@ import {
   MAX_ROSTER_SIZE,
   slotByName,
   slotRefusal,
+  type SlotDefinitionProblem,
 } from "../../domain/league/slots.js";
 import type { ScoringSettings } from "../../domain/scoring/types.js";
 import { manualPlayerKeyFor } from "../../domain/league/types.js";
@@ -187,6 +188,18 @@ export function unverifiedRuleFields(f: LeagueFile): readonly string[] {
   return Object.freeze(out);
 }
 
+/** Fixed hint for a slot name the model cannot classify (ESPN/Sleeper `FLEX`, `D/ST`; QA-1-047). */
+export const UNKNOWN_SLOT_HINT =
+  "a flex is named by its positions (W/R/T, W/R, W/T, Q/W/R/T) or given an eligible list; " +
+  "the team defence slot is DEF, the bench BN, injured reserve IR";
+
+/** Value-free reason for a rejected slot definition (the problem code, plus a hint when unknown). */
+export function slotProblemReason(problem: SlotDefinitionProblem): string {
+  return problem === "unknown_slot"
+    ? `invalid slot (${problem}): ${UNKNOWN_SLOT_HINT}`
+    : `invalid slot (${problem})`;
+}
+
 /**
  * The set of players already listed in a scope, compared by the PLAYER rather than by the entry's
  * spelling (QA-1-046): two entries are the same player when they share a gsis id, or when their
@@ -254,7 +267,7 @@ export function normalizeLeague(f: LeagueFile): NormalizeResult {
   const names = new Set<string>();
   f.roster_slots.forEach((s, i) => {
     const r = defineSlot(s);
-    if (typeof r === "string") issue(`roster_slots[${String(i)}]`, `invalid slot (${r})`);
+    if (typeof r === "string") issue(`roster_slots[${String(i)}]`, slotProblemReason(r));
     else if (names.has(r.name)) issue(`roster_slots[${String(i)}].name`, "duplicate slot name");
     else {
       names.add(r.name);

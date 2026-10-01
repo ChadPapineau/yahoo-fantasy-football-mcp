@@ -2,9 +2,13 @@
 // §3.1a platform seam + D5 FAAB budget/acquisition limits; plan 02 §5 "zod .strict(), every string
 // has max, every number has int().min().max()"; plan 02 §6.2 length caps: league/team name 64,
 // manager 32, player name 64). Code fields obey the league-model grammars (critic C-15). Every
-// issue message here is fixed server text — `issuesOf` never echoes a value from the file.
+// issue message here is fixed server text — `issuesOf` never echoes a value from the file — and,
+// so `ff doctor` can say what to write instead (QA-1-047), names the schema's own vocabulary: the
+// nflverse code for a known alias, the allowed values of an enum, `required field is missing` for
+// an absent key, and the `{ defense: TEAM }` form for a defence written as a player.
 import { z } from "zod/v4";
-import { GSIS_ID_RE, isNflTeam } from "../../config/schema.js";
+import { GSIS_ID_RE, isNflTeam, NFL_TEAMS } from "../../config/schema.js";
+import { normalizeTeam } from "../../domain/crosswalk/teams.js";
 import { KNOWN_CANONICAL } from "../../domain/scoring/types.js";
 import { SLOT_NAME_RE, STATUS_CODE_RE } from "../../domain/league/types.js";
 import type { LeagueFileIssue } from "../platform.js";
@@ -33,10 +37,20 @@ const text = (max: number) =>
       message: "contains control, zero-width or bidi characters",
     });
 
+/** Why a team code is refused: the nflverse code for a known alias or case, else the 32 codes. */
+export function teamCodeReason(s: string): string {
+  const canonical = normalizeTeam(s);
+  return canonical !== null
+    ? `not an nflverse team abbreviation (use ${canonical})`
+    : `not an nflverse team abbreviation (one of: ${NFL_TEAMS.join(", ")})`;
+}
+
 const nflTeam = z
   .string()
   .max(3)
-  .refine((s) => isNflTeam(s), { message: "not an nflverse team abbreviation" });
+  .refine((s) => isNflTeam(s), {
+    error: (iss) => teamCodeReason(typeof iss.input === "string" ? iss.input : ""),
+  });
 const gsisId = z.string().max(10).regex(GSIS_ID_RE, { message: "not a gsis id (00-0012345)" });
 const slotName = z.string().max(10).regex(SLOT_NAME_RE, { message: "not a slot name" });
 const statusCode = z.string().max(8).regex(STATUS_CODE_RE, { message: "not a status code" });
@@ -227,8 +241,36 @@ export function formatPath(path: readonly PropertyKey[]): string {
   return out === "" ? "$" : out;
 }
 
-/** Fixed, value-free reason text for one zod issue. */
-function reasonOf(issue: z.core.$ZodIssue): string {
+/** Enum vocabularies longer than this are not spelled out in a reason (the guide lists them). */
+const MAX_LISTED_VALUES = 12;
+
+/** The hint for a player entry whose position is not an offensive position or K. */
+export const DEFENSE_FORM_HINT = "a team defence is written { defense: TEAM }";
+
+/** Whether the key at `path` is absent from its (present) parent object in the raw document. */
+function isAbsent(raw: unknown, path: readonly PropertyKey[]): boolean {
+  if (path.length === 0) return false;
+  let cur: unknown = raw;
+  for (const seg of path.slice(0, -1)) {
+    if (typeof seg === "number" && Array.isArray(cur)) cur = cur[seg];
+    else if (typeof seg === "string" && isRecord(cur) && Object.hasOwn(cur, seg)) cur = cur[seg];
+    else return false;
+  }
+  const last = path[path.length - 1];
+  return typeof last === "string" && isRecord(cur) && !Object.hasOwn(cur, last);
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Fixed, value-free reason text for one zod issue. `absent` is true when the issue's key is not in
+ * the file at all (a missing or misspelled key), which zod reports as a wrong type or value.
+ */
+function reasonOf(issue: z.core.$ZodIssue, absent: boolean, path: readonly PropertyKey[]): string {
+  if (absent && (issue.code === "invalid_type" || issue.code === "invalid_value"))
+    return "required field is missing";
   switch (issue.code) {
     case "invalid_type":
       return `wrong type (expected ${issue.expected})`;
@@ -240,8 +282,15 @@ function reasonOf(issue: z.core.$ZodIssue): string {
       // Every regex in this schema carries a fixed message authored above; other formats are
       // zod's own checks (iso date/datetime) and get a fixed text naming the format.
       return issue.format === "regex" ? issue.message : `invalid format (${issue.format})`;
-    case "invalid_value":
-      return "not an allowed value";
+    case "invalid_value": {
+      // The values are the schema's own enum/literal vocabulary, never file content.
+      const listed =
+        issue.values.length <= MAX_LISTED_VALUES
+          ? ` (one of: ${issue.values.map((v) => String(v)).join(", ")})`
+          : "";
+      const defense = path[path.length - 1] === "position" ? `; ${DEFENSE_FORM_HINT}` : "";
+      return `not an allowed value${listed}${defense}`;
+    }
     case "unrecognized_keys":
       return `unknown key(s) (${String(issue.keys.length)})`;
     case "invalid_union":
@@ -258,9 +307,11 @@ function reasonOf(issue: z.core.$ZodIssue): string {
 
 /**
  * Value-free issues for a failed parse (plan 01 §8; critic C-13b): a schema path and a fixed reason.
- * Never the input value, never an unknown key's name (a key is file content too).
+ * Never the input value, never an unknown key's name (a key is file content too). `raw` (the parsed
+ * YAML the schema saw) lets an absent key read as missing rather than as a wrong value; it is only
+ * probed for key presence, never quoted.
  */
-export function issuesOf(error: z.ZodError): LeagueFileIssue[] {
+export function issuesOf(error: z.ZodError, raw?: unknown): LeagueFileIssue[] {
   const out: LeagueFileIssue[] = [];
   const walk = (issues: readonly z.core.$ZodIssue[], prefix: readonly PropertyKey[]): void => {
     for (const i of issues) {
@@ -273,7 +324,8 @@ export function issuesOf(error: z.ZodError): LeagueFileIssue[] {
         walk(best, at);
         continue;
       }
-      out.push({ path: formatPath(at), reason: reasonOf(i) });
+      const absent = raw !== undefined && isAbsent(raw, at);
+      out.push({ path: formatPath(at), reason: reasonOf(i, absent, at) });
     }
   };
   walk(error.issues, []);
