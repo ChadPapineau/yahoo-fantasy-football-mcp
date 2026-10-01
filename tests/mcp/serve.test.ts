@@ -2,7 +2,15 @@
 // given stdout only, logs JSON lines on stderr only, exits 0 on stdin EOF / stdout EPIPE / SIGHUP
 // with the store closed, 2 on bad usage/config/unsafe cache dir, 1 on a newer store or a failed close;
 // and the helpers (frontmatter, package texts, overrides, weather mapping).
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -147,6 +155,27 @@ describe("serve: lifecycle", () => {
     expect(process.listenerCount("SIGHUP")).toBe(before);
   });
 
+  it("an over-10 MiB frame closes the transport → the clean close sequence, exit 1 [QA-1-077, QA-1-090]", async () => {
+    const done = run();
+    send(INIT);
+    await waitFor(() => h.out.length >= 1);
+    // one line past the SDK's stdio read buffer cap (STDIO_DEFAULT_MAX_BUFFER_SIZE, 10 MiB)
+    h.stdin.write(
+      `{"jsonrpc":"2.0","id":2,"method":"ping","params":{"x":"${"a".repeat(10 * 1024 * 1024 + 16)}"}}\n`,
+    );
+    const code = await Promise.race([
+      done,
+      new Promise<string>((r) => {
+        setTimeout(() => {
+          r("hung");
+        }, 5000);
+      }),
+    ]);
+    expect(code).toBe(EXIT.error);
+    const shutdown = h.err.find((l) => l.includes('"event":"serve.shutdown"')) ?? "";
+    expect(shutdown).toContain('"reason":"transport_closed"');
+  }, 20_000);
+
   it("a store close failure turns the exit code into 1", async () => {
     const factory: StoreFactory = {
       open: (o) => {
@@ -186,14 +215,62 @@ describe("serve: startup refusals (plan 03 §1.3 exit codes)", () => {
     expect(await run()).toBe(EXIT.config);
     expect(h.err.join("\n")).toContain("store.open_failed");
   });
-  it("a store from a newer binary → 1", async () => {
+  it("a store from a newer binary → 1, and the log line says what happened and what to do [QA-1-051, QA-1-099]", async () => {
     const factory: StoreFactory = {
       open: () => {
-        throw new StoreVersionError(99, 1);
+        throw new StoreVersionError(99, 2);
       },
       openPublisher: (o) => storeFactory.openPublisher(o),
     };
     expect(await run({}, factory)).toBe(EXIT.error);
+    const line = h.err.find((l) => l.includes("store.open_failed")) ?? "";
+    const ev = JSON.parse(line) as Record<string, unknown>;
+    expect(ev).toMatchObject({
+      reason: "newer_version",
+      store_version: 99,
+      binary_version: 2,
+      message:
+        "store.sqlite was written by a newer version (v99); this binary supports v2. Upgrade the package or restore the backup.",
+    });
+    for (const l of h.err) expect(() => JSON.parse(l) as unknown).not.toThrow();
+  });
+  it("a store file that is not a database → 1 with a fixed reason and the ff doctor hint, no path [QA-1-051]", async () => {
+    writeFileSync(path.join(h.root, "cache", "store.sqlite"), "GARBAGE".repeat(1000), {
+      mode: 0o600,
+    });
+    expect(await run()).toBe(EXIT.error);
+    const ev = JSON.parse(h.err.find((l) => l.includes("store.open_failed")) ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(ev.reason).toBe("not_a_database");
+    expect(ev.hint).toBe("run `ff doctor`");
+    expect(JSON.stringify(ev)).not.toContain(h.root);
+  });
+  it("an arbitrary FF_FIXTURE_DIR never exempts its league file from 0600 [QA-1-094]", async () => {
+    const fx = path.join(h.root, "fx");
+    mkdirSync(fx, { mode: 0o700 });
+    const league = path.join(fx, "league.yaml");
+    writeFileSync(league, readFileSync(FIXTURE_LEAGUE, "utf8"), { mode: 0o644 });
+    chmodSync(league, 0o644);
+    const done = run({ env: { FF_FIXTURE_DIR: fx, FF_LEAGUE_FILE: league } });
+    send(INIT);
+    await waitFor(() => h.out.length >= 1);
+    send({ jsonrpc: "2.0", method: "notifications/initialized" });
+    send({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "ff_list_leagues", arguments: {} },
+    });
+    await waitFor(() => h.out.length >= 2);
+    h.stdin.end();
+    expect(await done).toBe(EXIT.ok);
+    const res = JSON.parse(h.out[1] ?? "{}") as {
+      result: { isError?: boolean; content: { text: string }[] };
+    };
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0]?.text).toContain("league.yaml is invalid or unsafe");
   });
   it("a relative FF_CACHE_DIR → 2", async () => {
     expect(await run({ env: { FF_CACHE_DIR: "relative/cache" } })).toBe(EXIT.config);
