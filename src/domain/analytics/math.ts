@@ -95,6 +95,103 @@ export function gammaMultiplier(rng: Rng, cv: number): number {
   return gammaDraw(rng, shape) / shape;
 }
 
+// --- deterministic expectations (QA-1-024) -----------------------------------------------------------
+
+const LANCZOS: readonly number[] = [
+  0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313,
+  -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6,
+  1.5056327351493116e-7,
+];
+
+/** ln Γ(x) for x > 0 (Lanczos, g = 7; relative error ≲ 1e-13). */
+export function lnGamma(x: number): number {
+  if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - lnGamma(1 - x);
+  const y = x - 1;
+  let a = at(LANCZOS, 0);
+  for (let i = 1; i < LANCZOS.length; i++) a += at(LANCZOS, i) / (y + i);
+  const t = y + 7.5;
+  return 0.5 * Math.log(2 * Math.PI) + (y + 0.5) * Math.log(t) - t + Math.log(a);
+}
+
+/**
+ * The regularized lower incomplete gamma P(a, x) = the Gamma(a, 1) CDF at x (series below a + 1, the
+ * Lentz continued fraction above — Numerical Recipes §6.2). Throws RangeError for a ≤ 0.
+ */
+export function gammaCdf(a: number, x: number): number {
+  if (!Number.isFinite(a) || a <= 0) throw new RangeError("math: gamma shape must be > 0");
+  if (!(x > 0)) return 0;
+  if (x === Infinity) return 1;
+  const lead = Math.exp(-x + a * Math.log(x) - lnGamma(a));
+  if (x < a + 1) {
+    let ap = a;
+    let del = 1 / a;
+    let sum = del;
+    for (let n = 0; n < 1000; n++) {
+      ap += 1;
+      del *= x / ap;
+      sum += del;
+      if (Math.abs(del) < Math.abs(sum) * 1e-16) break;
+    }
+    return clamp(sum * lead, 0, 1);
+  }
+  const tiny = 1e-300;
+  let b = x + 1 - a;
+  let c = 1 / tiny;
+  let d = 1 / b;
+  let h = d;
+  for (let i = 1; i < 1000; i++) {
+    const an = -i * (i - a);
+    b += 2;
+    d = an * d + b;
+    if (Math.abs(d) < tiny) d = tiny;
+    c = b + an / c;
+    if (Math.abs(c) < tiny) c = tiny;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < 1e-16) break;
+  }
+  return clamp(1 - lead * h, 0, 1);
+}
+
+/** The Gamma(shape, 1) quantile at p ∈ (0, 1), by bisection on the (monotone) CDF. */
+export function gammaQuantile(p: number, shape: number): number {
+  if (!(p > 0)) return 0;
+  if (p >= 1) return Infinity;
+  let lo = 0;
+  let hi = Math.max(1, shape);
+  while (gammaCdf(shape, hi) < p) hi *= 2;
+  for (let i = 0; i < 200 && hi - lo > 1e-13 * hi; i++) {
+    const mid = (lo + hi) / 2;
+    if (gammaCdf(shape, mid) < p) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+const NODE_CACHE = new Map<string, readonly number[]>();
+
+/**
+ * `n` equal-probability quadrature nodes of the mean-1 gamma multiplier with coefficient of variation
+ * `cv` (the same law `gammaMultiplier` samples): the quantiles at the midpoints (i + ½)/n, rescaled
+ * so their average is exactly 1 — so a linear score's expectation is reproduced exactly and a
+ * bonus/bracket score's to within the 1/n probability grid. Deterministic (no Rng) and memoised.
+ * cv ≤ 0 → [1].
+ */
+export function gammaNodes(cv: number, n: number): readonly number[] {
+  if (!(cv > 0)) return [1];
+  if (!Number.isInteger(n) || n < 1) throw new RangeError("math: node count must be ≥ 1");
+  const key = `${String(cv)}:${String(n)}`;
+  const hit = NODE_CACHE.get(key);
+  if (hit !== undefined) return hit;
+  const shape = 1 / (cv * cv);
+  const raw = Array.from({ length: n }, (_, i) => gammaQuantile((i + 0.5) / n, shape) / shape);
+  const m = raw.reduce((s, x) => s + x, 0) / n;
+  const nodes = Object.freeze(raw.map((x) => x / m));
+  NODE_CACHE.set(key, nodes);
+  return nodes;
+}
+
 /** A Poisson(λ) draw: Knuth for λ ≤ 30, else a rounded normal approximation floored at 0. */
 export function poissonDraw(rng: Rng, lambda: number): number {
   if (!(lambda > 0)) return 0;

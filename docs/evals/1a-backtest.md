@@ -92,22 +92,25 @@ practice-squad ones included, + my own K/DEF — exceeded E1's 64-target bound: 
 <!-- generated:kdef:begin -->
 | position | week | n (played) | candidates | implied_total populated | ρ model | ρ last week's points | ρ implied total |
 |---|---|---|---|---|---|---|---|
-| K | 1 | 32 | 10 | yes | -0.021 | n/a | 0.022 |
-| DEF | 1 | 32 | 10 | yes | 0.293 | n/a | 0.322 |
-| K | 2 | 32 | 10 | yes | -0.121 | -0.28 | -0.095 |
-| DEF | 2 | 32 | 10 | yes | 0.231 | 0.025 | 0.213 |
-| K | 3 | 32 | 10 | yes | -0.064 | -0.008 | -0.218 |
-| DEF | 3 | 32 | 10 | yes | 0.188 | -0.036 | 0.046 |
+| K | 1 | 32 | 10 | yes | 0.022 | n/a | 0.022 |
+| DEF | 1 | 32 | 10 | yes | 0.322 | n/a | 0.322 |
+| K | 2 | 32 | 10 | yes | -0.093 | -0.28 | -0.095 |
+| DEF | 2 | 32 | 10 | yes | 0.24 | 0.025 | 0.213 |
+| K | 3 | 32 | 10 | yes | -0.091 | -0.008 | -0.218 |
+| DEF | 3 | 32 | 10 | yes | 0.17 | -0.036 | 0.046 |
 <!-- generated:kdef:end -->
 
 **Findings.**
 
 - **Hard — met:** ≥ 3 candidates per position every week (10 each), `implied_total` populated for
   every candidate.
-- **Reported:** for **DEF** the model's ρ is positive every week (0.19–0.29) and beats "last week's
-  points" in weeks 2–3 (0.23 vs 0.03; 0.19 vs −0.04); against the implied-total baseline it is
-  lower in week 1 (0.29 vs 0.32) and higher in weeks 2–3 (0.23 vs 0.21; 0.19 vs 0.05) —
-  research 05 §8's bar "beat (a) clearly and at least match (b)" is met on these three weeks.
+- **Reported:** for **DEF** the model's ρ is positive every week (0.17–0.32) and beats "last week's
+  points" in weeks 2–3 (0.24 vs 0.03; 0.17 vs −0.04); against the implied-total baseline it ties in
+  week 1 (0.32 vs 0.32 — with no trailing games the model's ranking *is* the implied-total ranking)
+  and is higher in weeks 2–3 (0.24 vs 0.21; 0.17 vs 0.05) — research 05 §8's bar "beat (a) clearly
+  and at least match (b)" is met on these three weeks. Since QA-1-024 the ranking reads each
+  candidate's expected points (a deterministic quadrature over the model's own width), not a
+  400-sample mean, so these rows no longer move with the seed.
   For **K** no ranking — model or either baseline — has a meaningful correlation on one week of 32
   kickers (|ρ| ≤ 0.28, signs flip week to week): the evidence that kicker scoring is close to noise
   week to week (research 05 §8.1, §18) shows up plainly, and three weeks cannot separate the methods.

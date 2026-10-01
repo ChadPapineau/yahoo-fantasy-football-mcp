@@ -24,6 +24,7 @@ import type {
 import { pActive, type Availability } from "./availability.js";
 import {
   DEF_SIM,
+  EXPECTATION,
   INDOOR_ROOFS,
   isMarketScaled,
   KDEF,
@@ -39,9 +40,11 @@ import {
 } from "./constants.js";
 import { AnalyticsError } from "./errors.js";
 import { type AnyStamp, collectInputs, newestAsOf } from "./inputs.js";
+import { denoise } from "../scoring/numeric.js";
 import {
   clamp,
   gammaMultiplier,
+  gammaNodes,
   normalDist,
   poissonDraw,
   round,
@@ -128,9 +131,14 @@ export interface ProjectedWeek {
   readonly expectation: Readonly<Record<Canonical, number>>;
   /** scoreSamples output (bracket/bonus probabilities); null on a zero week. */
   readonly samples: ScoreSamplesResult | null;
-  /** Expected points of the active line, before and after the market multiplier. */
+  /**
+   * Expected points if active, before and after the market multiplier — the model's expectation
+   * (deterministic quadrature over the gamma width, never a sample mean; QA-1-024).
+   */
   readonly e_active_base: number;
   readonly e_active: number;
+  /** The expected bracket points if active (deterministic); null on a zero week. */
+  readonly brackets_e: number | null;
   readonly market_multiplier: number | null;
   readonly weather_factor: number | null;
 }
@@ -510,6 +518,74 @@ function simulateDefense(
   return out;
 }
 
+// --- the model's expectation (QA-1-024) ----------------------------------------------------------------
+
+/** Expected points (league FINAL points, as a Dist's quantiles) and, for a defence, its brackets. */
+interface Expected {
+  readonly points: number;
+  readonly brackets: number;
+}
+
+/**
+ * E[points | active] of a player: the stat line scaled by each equal-probability node of the same
+ * mean-1 gamma multiplier `simulatePlayer` samples from, scored by the league's own engine, averaged.
+ * Deterministic; exact for linear scoring, bonuses and brackets on a 1/EXPECTATION.nodes grid.
+ */
+function expectPlayer(
+  expectation: Readonly<Record<Canonical, number>>,
+  pos: Exclude<ProjectablePosition, "DEF">,
+  engine: ScoringEngine,
+  settings: ScoringSettings,
+): Expected {
+  const pt = positionTypeOf(pos);
+  const keys = Object.keys(expectation)
+    .filter((k) => statOf(expectation, k) > 0)
+    .sort();
+  if (keys.length === 0) return { points: 0, brackets: 0 };
+  const nodes = gammaNodes(POSITION_CV[pos], EXPECTATION.nodes);
+  let total = 0;
+  let brackets = 0;
+  for (const g of nodes) {
+    const values: Record<Canonical, number> = {};
+    for (const k of keys) values[k] = statOf(expectation, k) * g;
+    const r = engine.score(lineOf(values, pt), settings);
+    total += r.points;
+    for (const c of r.contributions) if (c.kind === "bracket") brackets += c.points;
+  }
+  return { points: denoise(total / nodes.length), brackets: denoise(brackets / nodes.length) };
+}
+
+/**
+ * E[points] of a defence: points and yards allowed at each equal-probability node of the gamma
+ * widths `simulateDefense` samples from (rounded as the samples are), the Poisson counts at their
+ * expectation (linear), scored by the engine and averaged; `brackets` = the bracket share.
+ */
+function expectDefense(
+  expectation: Readonly<Record<Canonical, number>>,
+  engine: ScoringEngine,
+  settings: ScoringSettings,
+): Expected {
+  const pa = statOf(expectation, "dst_pa");
+  const ya = statOf(expectation, "dst_ya");
+  const nPa = gammaNodes(DEF_SIM.pointsAllowedCv, EXPECTATION.nodes);
+  const nYa = gammaNodes(DEF_SIM.yardsAllowedCv, EXPECTATION.nodes);
+  const counts = Object.keys(expectation)
+    .filter((k) => k !== "dst_pa" && k !== "dst_ya")
+    .sort();
+  let total = 0;
+  let brackets = 0;
+  for (const [i, gPa] of nPa.entries()) {
+    const values: Record<Canonical, number> = {};
+    values.dst_pa = Math.round(pa * gPa);
+    values.dst_ya = Math.round(ya * at(nYa, i));
+    for (const k of counts) values[k] = statOf(expectation, k);
+    const r = engine.score(lineOf(values, "DT"), settings);
+    total += r.points;
+    for (const c of r.contributions) if (c.kind === "bracket") brackets += c.points;
+  }
+  return { points: denoise(total / nPa.length), brackets: denoise(brackets / nPa.length) };
+}
+
 // --- per-target projection ------------------------------------------------------------------------------
 
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
@@ -629,6 +705,7 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
         samples: null,
         e_active_base: 0,
         e_active: 0,
+        brackets_e: null,
         market_multiplier: null,
         weather_factor: null,
       });
@@ -738,11 +815,15 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
         ? simulateDefense(expectation, nWeek, rng)
         : simulatePlayer(expectation, pos, p, nWeek, rng);
     const samples = engine.scoreSamples(lines, req.settings, "position_cv");
-    const eBase = engine.score(lineOf(base, pt), req.settings).points_exact;
-    const eActive =
+    // the model's expectation (QA-1-024): the samples give the spread, never the mean
+    const exp =
       pos === "DEF"
-        ? samples.mean_of_exact
-        : engine.score(lineOf(expectation, pt), req.settings).points_exact;
+        ? expectDefense(expectation, engine, req.settings)
+        : expectPlayer(expectation, pos, engine, req.settings);
+    const eActive = exp.points;
+    const eBase = pos === "DEF" ? eActive : expectPlayer(base, pos, engine, req.settings).points;
+    const mean = denoise(p * eActive);
+    const dist: Dist = { ...samples.dist, mean };
 
     if (firstExpectation === null) {
       firstExpectation = Object.freeze(
@@ -750,17 +831,15 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
       );
       firstMarket = marketMult;
       firstWeather = weatherFactor;
+      // the drivers decompose the mean exactly (QA-1-025): availability = (p − 1) × E[active]
       if (pos === "DEF") {
-        const br = bracketPoints(req.settings, "DT", samples);
+        const br = exp.brackets;
         drivers.push({ name: "points_allowed_brackets", contribution: round(br, 3) });
-        drivers.push({
-          name: "counts_and_rare_events",
-          contribution: round(samples.dist.mean - br, 3),
-        });
+        drivers.push({ name: "counts_and_rare_events", contribution: round(mean - br, 3) });
       } else {
         drivers.push({ name: "trailing_mean", contribution: round(eBase, 3) });
         drivers.push({ name: "implied_total", contribution: round(eActive - eBase, 3) });
-        drivers.push({ name: "availability", contribution: round(samples.dist.mean - eActive, 3) });
+        drivers.push({ name: "availability", contribution: round(mean - eActive, 3) });
       }
     }
     if (req.repository !== undefined) {
@@ -779,7 +858,7 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
     }
     weeks.push({
       week,
-      dist: samples.dist,
+      dist,
       p_active: availability.p,
       p_active_basis: availability.basis,
       game,
@@ -792,6 +871,7 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
       samples,
       e_active_base: eBase,
       e_active: eActive,
+      brackets_e: exp.brackets,
       market_multiplier: marketMult,
       weather_factor: weatherFactor,
     });

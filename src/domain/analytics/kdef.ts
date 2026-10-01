@@ -21,7 +21,6 @@ import { round, sigmaOf, zeroDist } from "./math.js";
 import { at } from "../scoring/numeric.js";
 import { cmpStr } from "./lineup.js";
 import {
-  bracketPoints,
   type ProjectedPlayer,
   type ProjectionReaders,
   type ProjectionTarget,
@@ -109,7 +108,7 @@ function detail(settings: ScoringSettings, p: ProjectedPlayer, pos: KdefPosition
   return {
     implied_total: round2OrNull(w.implied_total),
     opp_implied_total: round2OrNull(w.opp_implied_total),
-    brackets_e: w.samples === null ? null : round(bracketPoints(settings, pt, w.samples), 3),
+    brackets_e: w.brackets_e === null ? null : round(w.brackets_e, 3),
     sacks_e: isDef ? round(pts("dst_sack"), 3) : null,
     takeaways_e: isDef ? round(pts("dst_int") + pts("dst_fum_rec"), 3) : null,
     rare_c: isDef
