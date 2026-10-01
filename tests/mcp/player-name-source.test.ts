@@ -20,7 +20,9 @@ let world: World;
 beforeAll(async () => {
   world = await makeWorld();
 }, 60_000);
-afterAll(() => { world.cleanup(); });
+afterAll(() => {
+  world.cleanup();
+});
 
 async function call(name: string, args: Record<string, unknown>): Promise<Env> {
   const { client, close } = await connect(world);

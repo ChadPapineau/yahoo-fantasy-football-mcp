@@ -27,7 +27,9 @@ beforeAll(async () => {
   db.close();
   newest = new Map(rows.map((r) => [r.gsis_id, { status: r.status, team: r.team }]));
 }, 60_000);
-afterAll(() => { world.cleanup(); });
+afterAll(() => {
+  world.cleanup();
+});
 
 async function injuries(team: string, w: World = world): Promise<D2["data"]["players"]> {
   const { client, close } = await connect(w);
