@@ -504,6 +504,27 @@ const recRow = (r: Rec): z.infer<typeof recSchema> =>
 
 type E2Data = z.infer<typeof e2Data>;
 
+/**
+ * Splits the engine's swaps into the advice and the caller's comparisons (QA-1-010). The engine
+ * lists the recommended pairs first — `rec.drivers` has one per recommended pair — then each
+ * `compare` pair that is not already one of them. A trailing row that matches no `compare` pair
+ * stays in `swaps`: a recommended swap is never hidden among the comparisons.
+ */
+export function splitComparisons<S extends { readonly out: string | null; readonly in: string }>(
+  rows: readonly S[],
+  recommended: number,
+  compare: readonly { readonly out: string; readonly in: string }[] | undefined,
+): { swaps: S[]; comparisons?: S[] } {
+  if (compare === undefined) return { swaps: [...rows] };
+  const asked = (r: S): boolean => compare.some((c) => c.out === r.out && c.in === r.in);
+  const head = rows.slice(0, recommended);
+  const tail = rows.slice(recommended);
+  return {
+    swaps: [...head, ...tail.filter((r) => !asked(r))],
+    comparisons: tail.filter(asked),
+  };
+}
+
 /** The hint every refused E2 constraint carries (QA-1-010). */
 export const LINEUP_CONSTRAINT_HINT =
   "Use player keys from ff_get_roster for the team analysed; never force_start and exclude the same player; compare a current starter (out) with a player eligible for his slot (in).";
@@ -769,12 +790,7 @@ export const analyzeLineupTool = defineTool({
             }))
           : rec.current_lineup.map((a) => ({ slot: a.slot, player_key: a.player_key })),
       recommended_lineup: rec.recommended_lineup.map(assignmentRow),
-      // the engine lists the recommended pairs first (rec.drivers counts them), then the caller's
-      // compare pairs: those go to comparisons[], apart from the advice (QA-1-010)
-      swaps: swapRows.slice(0, rec.rec.drivers.length),
-      ...(args.compare === undefined
-        ? {}
-        : { comparisons: swapRows.slice(rec.rec.drivers.length) }),
+      ...splitComparisons(swapRows, rec.rec.drivers.length, args.compare),
       p_win_interval:
         rec.p_win_interval === null
           ? null
