@@ -129,6 +129,38 @@ export function refreshLogRepository(deps: RepoDeps): RefreshLogRepository {
   };
 }
 
+/**
+ * Records a successful "unchanged" check of `source` at `checkedAt` (the "release" age basis, critics
+ * C-12/C-08b): advances checked_at of the newest success row. When failures were recorded after that
+ * row, the check is the recovery that ends their streak (plan 01 §5.7; QA-1-037): it appends a copy
+ * of the success row carrying the new checked_at, so consecutiveFailures counts 0 and the newest row
+ * (the "last error" consumers read) is a success. Publish times are the copied row's, so "last
+ * success" stays the publish; refresh_log grows by one row per recovery, never per check. No-op
+ * when the source has no success row. Callers run it as a required write.
+ */
+export function markCheckedRow(deps: RepoDeps, source: DatasetSourceId, checkedAt: string): void {
+  isoMs(checkedAt, "checked_at");
+  const { db } = deps;
+  immediate(db, () => {
+    const cur = db
+      .prepare("SELECT id FROM refresh_log WHERE source = ? AND ok = 1 ORDER BY id DESC LIMIT 1")
+      .get(source) as { id: number } | undefined;
+    if (cur === undefined) return;
+    const failedSince =
+      db
+        .prepare("SELECT 1 AS x FROM refresh_log WHERE source = ? AND id > ? LIMIT 1")
+        .get(source, cur.id) !== undefined;
+    if (failedSince)
+      db.prepare(
+        `INSERT INTO refresh_log (source, file, file_version, release_updated_at, seasons_json, rows,
+           columns_hash, started_at, finished_at, ok, error, checked_at)
+         SELECT source, file, file_version, release_updated_at, seasons_json, rows, columns_hash,
+           started_at, finished_at, ok, error, ? FROM refresh_log WHERE id = ?`,
+      ).run(checkedAt, cur.id);
+    else db.prepare("UPDATE refresh_log SET checked_at = ? WHERE id = ?").run(checkedAt, cur.id);
+  });
+}
+
 /** The newest successful refresh_log row of `source` (or null). */
 export function currentRefreshRow(deps: RepoDeps, source: DatasetSourceId): RefreshLogRow | null {
   const r = deps.db
