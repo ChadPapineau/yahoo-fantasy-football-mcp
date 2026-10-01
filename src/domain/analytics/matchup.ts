@@ -11,7 +11,7 @@ import type { Dist } from "../scoring/types.js";
 import { LIMITS, SIMS, Z90 } from "./constants.js";
 import { AnalyticsError } from "./errors.js";
 import { newestAsOf } from "./inputs.js";
-import { type LineupPlayer, bestLineup } from "./lineup.js";
+import { type LineupPlayer, opponentLineup, standInAssumption } from "./lineup.js";
 import { clamp, normalCdf, normalDraw, normalDist, round } from "./math.js";
 import { diffSd, pairMoments, pWinInterval, pWinNormal, rho, type TotalMember } from "./totals.js";
 import type {
@@ -123,7 +123,7 @@ function pWinMc(
 
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
 
-/** E3 `pre`. Throws AnalyticsError `no_opponent` / `invalid_request`. */
+/** E3 `pre`. Throws AnalyticsError `no_opponent` / `incomplete_opponent` / `invalid_request`. */
 export function analyzeMatchupPre(req: MatchupRequest): MatchupWinProb {
   if (req.opponent === null || req.opponent.length === 0) {
     throw new AnalyticsError("no_opponent", "no opponent roster for this week");
@@ -141,11 +141,21 @@ export function analyzeMatchupPre(req: MatchupRequest): MatchupWinProb {
     throw new AnalyticsError("invalid_request", "n_sims out of range", ["n_sims"]);
   }
   const nowMs = req.clock.nowMs();
+  // never a P(win) against empty seats scored 0 (an opponent typed in partially — QA-1-043): an empty
+  // skill seat refuses; an empty K/DEF seat gets a stand-in at my own starter's projection, named
+  const side = opponentLineup(req.slots, req.opponent, req.players, nowMs);
+  if (side.empty.length > 0) {
+    throw new AnalyticsError(
+      "incomplete_opponent",
+      "the opponent's listed players leave starting slots empty",
+      side.empty,
+    );
+  }
   const mine = req.players.filter((p) => {
     const s = req.slots.slots.find((x) => x.name === p.slot);
     return s !== undefined && (s.class === "starter" || s.class === "flex");
   });
-  const theirs = bestLineup(req.slots, req.opponent, nowMs);
+  const theirs = side.starters;
   const me = mine.map(member);
   const opp = theirs.map(member);
   const pm = pairMoments(me, opp);
@@ -200,6 +210,7 @@ export function analyzeMatchupPre(req: MatchupRequest): MatchupWinProb {
         "the interval reflects projection-mean error, not only sampling error",
         "the retrospective calibrates P(win)",
       ),
+      ...(side.stood_in.length > 0 ? [standInAssumption(side.stood_in)] : []),
     ],
     confidence: {
       role_games: mine.length === 0 ? 0 : Math.min(...mine.map((p) => p.role_games ?? 0)),

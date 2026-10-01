@@ -17,7 +17,7 @@ import {
 } from "../../../src/domain/analytics/totals.js";
 import { fixedClock, seededRng } from "../../../src/domain/clock.js";
 import { MANUAL_NO_OPPONENT_HINT } from "../../../src/providers/platform.js";
-import { dist, LEAGUE_SLOTS, NOW, PAST, player, SUN_1PM } from "./helpers.js";
+import { complete, dist, LEAGUE_SLOTS, NOW, PAST, player, SUN_1PM } from "./helpers.js";
 
 const clock = fixedClock(NOW);
 const mine = [
@@ -27,11 +27,12 @@ const mine = [
   player("TE", 9, { slot: "TE" }),
   player("K", 8, { slot: "BN" }),
 ];
-const theirs = [
+// his empty seats get 0-point fillers: P(win) is refused against empty seats (QA-1-043)
+const theirs = complete([
   player("QB", 18, { slot: "BN", nfl_team: "KC" }),
   player("WR", 14, { slot: "WR", nfl_team: "KC" }),
   player("RB", 12, { slot: "RB", nfl_team: "SF" }),
-];
+]);
 const req = (over: Partial<MatchupRequest> = {}): MatchupRequest => ({
   slots: LEAGUE_SLOTS,
   players: mine,

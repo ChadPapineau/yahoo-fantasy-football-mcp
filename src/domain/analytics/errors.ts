@@ -6,6 +6,8 @@
 export type AnalyticsErrorCode =
   /** E3 / E2 `pwin` without an opponent roster for the week. */
   | "no_opponent"
+  /** E3 / E2 `pwin` when the opponent's listed players leave starting slots empty (QA-1-043). */
+  | "incomplete_opponent"
   /** A required dataset was never loaded (no file attached). */
   | "dataset_never_loaded"
   /** The request is outside what the engine accepts (bounds, positions, empty lineup). */
@@ -19,8 +21,16 @@ export type AnalyticsErrorCode =
 export const NO_OPPONENT_HINT =
   "No opponent roster in league.yaml for this week: add it to get a win probability, or use objective mean.";
 
+/**
+ * The fixed hint for `incomplete_opponent` (QA-1-043). The error mapper honours it once it is one of
+ * SERVER_HINTS (src/providers/platform.ts); until then the refusal is a bare NOT_FOUND.
+ */
+export const INCOMPLETE_OPPONENT_HINT =
+  "The opponent's players in league.yaml leave starting slots empty: list his full starting lineup to get a win probability, or use objective mean.";
+
 const FF_CODE = Object.freeze({
   no_opponent: "NOT_FOUND",
+  incomplete_opponent: "NOT_FOUND",
   dataset_never_loaded: "STALE_ONLY",
   invalid_request: "VALIDATION",
 } as const);
@@ -31,7 +41,7 @@ export class AnalyticsError extends Error {
   readonly code: AnalyticsErrorCode;
   /** The plan 01 §4.3 code the MCP layer answers with. */
   readonly ffCode: (typeof FF_CODE)[AnalyticsErrorCode];
-  /** A fixed server hint (only for `no_opponent`), else undefined. */
+  /** A fixed server hint (`no_opponent`, `incomplete_opponent`), else undefined. */
   readonly ffHint: string | undefined;
   /** Fixed-vocabulary detail (source ids, field names) — never data values. */
   readonly detail: readonly string[];
@@ -40,7 +50,12 @@ export class AnalyticsError extends Error {
     super(message);
     this.code = code;
     this.ffCode = FF_CODE[code];
-    this.ffHint = code === "no_opponent" ? NO_OPPONENT_HINT : undefined;
+    this.ffHint =
+      code === "no_opponent"
+        ? NO_OPPONENT_HINT
+        : code === "incomplete_opponent"
+          ? INCOMPLETE_OPPONENT_HINT
+          : undefined;
     this.detail = Object.freeze(detail.slice(0, 10).map((d) => d.slice(0, 80)));
   }
 }
