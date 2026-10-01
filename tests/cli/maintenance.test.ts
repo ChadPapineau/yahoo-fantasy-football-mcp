@@ -2,10 +2,12 @@
 // debris and backups beyond two versions, never the recommendation log/settings/journal; backup =
 // a consistent copy, keep 4). Only exact-name debris older than the publish-lock window is removed.
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readdirSync,
+  rmSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -45,7 +47,7 @@ describe("ff prune", () => {
     const io = makeIo(s, { clock: fixedClock(NOW) });
     expect(await main(["prune"], io)).toBe(EXIT.OK); // creates + migrates the store
     const ds = datasetDir(s.cacheDir);
-    mkdirSync(ds, { recursive: true });
+    mkdirSync(ds, { recursive: true, mode: 0o700 });
     const debris = "nflverse__injuries.20260930T133626Z_2026.0123456789ab.tmp";
     const journal = "nflverse__injuries.v.abcdefabcdef.tmp-journal";
     const young = "nflverse__schedules.v.0123456789ab.tmp";
@@ -55,13 +57,14 @@ describe("ff prune", () => {
     const recent = new Date(NOW - 60 * 1000);
     utimesSync(path.join(ds, young), recent, recent);
     const tmp = path.join(s.cacheDir, "tmp");
+    mkdirSync(tmp, { mode: 0o700 }); // as the refresh runner creates it
     mkdirSync(path.join(tmp, "nflverse_injuries-AbC123", "inner"), { recursive: true });
     writeFileSync(path.join(tmp, "nflverse_injuries-AbC123", "inner", "f"), "x");
     touchOld(path.join(tmp, "nflverse_injuries-AbC123"));
     mkdirSync(path.join(tmp, "keep-me"));
     touchOld(path.join(tmp, "keep-me"));
     const bdir = backupDir(s.cacheDir);
-    mkdirSync(bdir, { recursive: true });
+    mkdirSync(bdir, { recursive: true, mode: 0o700 });
     for (const v of [1, 2, 3])
       writeFileSync(path.join(bdir, `store.sqlite.bak-v${String(v)}`), "x");
     const io2 = makeIo(s, { clock: fixedClock(NOW) });
@@ -78,7 +81,7 @@ describe("ff prune", () => {
     const s = sandbox({ create: true });
     sb = s;
     const ds = datasetDir(s.cacheDir);
-    mkdirSync(ds);
+    mkdirSync(ds, { mode: 0o700 });
     const victim = path.join(s.dir, "victim");
     writeFileSync(victim, "keep");
     const link = path.join(ds, "nflverse__injuries.v.0123456789ab.tmp");
@@ -91,6 +94,47 @@ describe("ff prune", () => {
       run_temp: [],
       premigration_backups: [],
     });
+  });
+
+  it("never follows a symlinked <cache>/tmp or <cache>/backups into someone else's files [QA-1-087]", async () => {
+    const s = sandbox();
+    sb = s;
+    expect(await main(["prune"], makeIo(s, { clock: fixedClock(NOW) }))).toBe(EXIT.OK);
+    // a user relocated tmp/ and backups/ elsewhere with symlinks; the targets hold their own data
+    const victim = path.join(s.dir, "victim");
+    for (const d of ["family_photos-2024ab", "tax_2025-return"]) {
+      mkdirSync(path.join(victim, d), { recursive: true });
+      writeFileSync(path.join(victim, d, "precious.txt"), "precious");
+      touchOld(path.join(victim, d));
+    }
+    const vb = path.join(s.dir, "victim-backups");
+    mkdirSync(vb);
+    for (const v of [1, 2, 3]) writeFileSync(path.join(vb, `store.sqlite.bak-v${String(v)}`), "x");
+    symlinkSync(victim, path.join(s.cacheDir, "tmp"));
+    const io = makeIo(s, { clock: fixedClock(NOW) });
+    expect(await main(["prune"], io)).toBe(EXIT.ERROR);
+    expect(io.err.text).toMatch(/symbolic link/);
+    expect(readdirSync(victim).sort()).toEqual(["family_photos-2024ab", "tax_2025-return"]);
+    rmSync(path.join(s.cacheDir, "tmp"));
+    rmSync(backupDir(s.cacheDir), { recursive: true, force: true });
+    symlinkSync(vb, backupDir(s.cacheDir));
+    const io2 = makeIo(s, { clock: fixedClock(NOW) });
+    expect(await main(["prune"], io2)).toBe(EXIT.ERROR);
+    expect(io2.err.text).toMatch(/symbolic link/);
+    expect(readdirSync(vb)).toHaveLength(3);
+    // pruneFiles itself refuses rather than reading through the link
+    expect(() => pruneFiles(s.cacheDir, NOW)).toThrow(/symbolic link/);
+  });
+
+  it("refuses a group/other-accessible tmp/ and leaves it alone [QA-1-087]", () => {
+    const s = sandbox({ create: true });
+    sb = s;
+    const tmp = path.join(s.cacheDir, "tmp");
+    mkdirSync(path.join(tmp, "nflverse_injuries-AbC123"), { recursive: true });
+    touchOld(path.join(tmp, "nflverse_injuries-AbC123"));
+    chmodSync(tmp, 0o755);
+    expect(() => pruneFiles(s.cacheDir, NOW)).toThrow(/permission bits/);
+    expect(readdirSync(tmp)).toEqual(["nflverse_injuries-AbC123"]);
   });
 
   it("never touches the recommendation log, league settings or write journal", async () => {
