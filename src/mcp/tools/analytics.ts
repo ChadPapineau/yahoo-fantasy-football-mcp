@@ -724,6 +724,13 @@ const e3Data = z.strictObject({
   inputs: inputsSchema,
 });
 
+/**
+ * E3's NOT_FOUND hint for a week without an opponent (QA-1-008, QA-1-028): the shared manual hint
+ * says "use objective mean", an argument only E2 has; this one names what E3's caller can do.
+ */
+export const MATCHUP_NO_OPPONENT_HINT =
+  "No opponent roster in league.yaml for this week: add an opponents: entry (with that team's players) for it, pass a week that has one, or use ff_analyze_lineup (objective mean) for start/sit.";
+
 export const analyzeMatchupTool = defineTool({
   name: "ff_analyze_matchup",
   family: "analytics",
@@ -754,10 +761,12 @@ export const analyzeMatchupTool = defineTool({
     const mine = await lineupPlayers(ctx, lc, args.team_key, w, settings, rng, inputs, warnings);
     const myKey = teamOf(lc, args.team_key).team_key;
     const opp = await opponentPlayers(ctx, lc, myKey, w, settings, rng, inputs, warnings);
+    if (opp === null || opp.players.length === 0)
+      throw new FfError("NOT_FOUND", { hint: MATCHUP_NO_OPPONENT_HINT });
     const r = analyzeMatchupPre({
       slots,
       players: mine.players,
-      opponent: opp?.players ?? null,
+      opponent: opp.players,
       method: args.method,
       ...(args.n_sims === undefined ? {} : { n_sims: args.n_sims }),
       clock: ctx.services.clock,

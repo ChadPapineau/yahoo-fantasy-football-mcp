@@ -16,6 +16,7 @@ import { outputSchemaOf } from "../../src/mcp/define.js";
 import { envelopeSchema, UNTRUSTED_TEXT_RULE } from "../../src/mcp/envelope.js";
 import { DATASET_NEVER_LOADED_HINT, ERROR_TABLE } from "../../src/mcp/errors.js";
 import { REGISTRY } from "../../src/mcp/registry.js";
+import { MATCHUP_NO_OPPONENT_HINT } from "../../src/mcp/tools/analytics.js";
 import { LEAGUE_KEY, TEAM_A, TEAM_B, body, connect, makeWorld, type World } from "./helpers/env.js";
 import { envelopeViolations } from "./helpers/walk.js";
 
@@ -329,7 +330,8 @@ describe("clean negatives of the manual league (critic C-14)", () => {
   });
   it("E3 / E2 pwin without an opponent roster: NOT_FOUND with the fixed hint", async () => {
     const e3 = await err("ff_analyze_matchup", { week: 4 });
-    expect(e3).toMatchObject({ code: "NOT_FOUND", hint: MANUAL_NO_OPPONENT_HINT });
+    // E3's own hint (QA-1-008): the shared one advises `objective`, which only E2 has
+    expect(e3).toMatchObject({ code: "NOT_FOUND", hint: MATCHUP_NO_OPPONENT_HINT });
     const e2 = await err("ff_analyze_lineup", { week: 4, objective: "pwin" });
     expect(e2).toMatchObject({ code: "NOT_FOUND", hint: MANUAL_NO_OPPONENT_HINT });
   });
