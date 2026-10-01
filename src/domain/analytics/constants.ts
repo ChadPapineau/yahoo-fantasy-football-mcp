@@ -246,7 +246,19 @@ export const INACTIVES_LEAD_MS = 90 * 60 * 1000;
  * scores at most 500 (`RETRO_SAMPLE_CAP`). Storing all n_sims made the never-pruned table grow by
  * megabytes per call and cost E1 a third of its A15 latency.
  */
-export const SIMS = Object.freeze({ min: 1000, max: 20000, default: 4000, stored: 1000 });
+export const SIMS = Object.freeze({
+  min: 1000,
+  max: 20000,
+  default: 4000,
+  stored: 1000,
+  /**
+   * The most lines one call simulates (QA-1-079): n_sims is shared down evenly over the call's
+   * player-weeks past this (never below `min`), so the worst in-bounds request — 50 players × 6 weeks
+   * × 20 000 — stays near A15's 128 000-line E1 case × 4 (≈ 2 s) instead of stalling the stdio loop
+   * for ~17 s past the 10 s shutdown ceiling.
+   */
+  maxTotalLines: 512_000,
+});
 
 /**
  * The deterministic expectation behind every Dist `mean` (QA-1-024): equal-probability quadrature
