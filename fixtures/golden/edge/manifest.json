@@ -4,6 +4,7 @@
     "cases/bonus-as-extra-stat-id.json": "92e9f664129e3bc6d677f5d8f7b4cf2a9e255136a026b7fbd787626f9cd49ec7",
     "cases/bye-week-final.json": "7b58b2c943d5e669ce9f04c41064745243323a682a794e8e48dc63bceada5d31",
     "cases/categories-order-differs.json": "ab000c9ba539fe4bda5e5b59bffbd826c0a0dfc1b57f2d90459f7f7a07949d57",
+    "cases/dst-fumble-return-td.json": "0d9fc7e7c4c468f31e940c8ab143677ca80eb8e57972de176f0f3186f0b39e52",
     "cases/dst-not-started-provisional.json": "de3da157818bdd4d77ccef479bbb0f425cc08bc957322b079870de13c97c7ecf",
     "cases/dst-points-allowed-scalar-boundaries.json": "dfee67db1aaf35496f32ccfa0c1287adf4ebf8dd1309d9024b698959e4878568",
     "cases/dst-return-td.json": "cd10c54dfff84afb3fdcdf7c9a03114c794df817bb0d1e53516c61875ece996e",

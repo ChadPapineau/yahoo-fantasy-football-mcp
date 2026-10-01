@@ -38,6 +38,8 @@ let raw: Row[];
 let lines: PlayerWeekLine[];
 let defense: TeamDefenseWeekLine[];
 const finalByTeamWeek = new Map<string, boolean>();
+/** `week|team` → the points that team allowed (the opponent's final score, from ds_games). */
+const allowedByTeamWeek = new Map<string, number>();
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const keyOf = (week: number, id: string) => `${String(week)}|${id}`;
@@ -63,6 +65,10 @@ beforeAll(async () => {
   for (const g of world.store.datasets.schedules.games(SEASON, [...WEEKS]).rows) {
     finalByTeamWeek.set(`${String(g.week)}|${g.away}`, g.is_final);
     finalByTeamWeek.set(`${String(g.week)}|${g.home}`, g.is_final);
+    if (g.score !== null) {
+      allowedByTeamWeek.set(`${String(g.week)}|${g.away}`, g.score.home);
+      allowedByTeamWeek.set(`${String(g.week)}|${g.home}`, g.score.away);
+    }
   }
 }, 60_000);
 afterAll(() => {
@@ -227,22 +233,56 @@ describe("independent oracles (hand-written scoring rules)", () => {
     expect(n).toBeGreaterThan(80);
   });
 
-  it("team defences: sack 1, INT 2, fumble rec 2, TD 6, safety 2, block 2, return TD 6 + the PA bin", () => {
+  it("team defences, from the RAW player rows: sack 1, INT 2, fumble rec 2, every defensive TD 6, safety 2, block 2, return TD 6 + the PA bin", () => {
+    // Independent of the line's own values (an oracle over `d.line.values` cannot see a wrong column
+    // map — QA-1-017). Summed here straight from the parquet rows (team-level rows included): a
+    // defensive TD is an interception return (`def_tds`) OR a fumble return — nflverse books the
+    // latter as `fumble_recovery_tds` on a player who recovered the OPPONENT's fumble.
     const paBin = (pa: number): number =>
       pa === 0 ? 10 : pa <= 6 ? 7 : pa <= 13 ? 4 : pa <= 20 ? 1 : pa <= 27 ? 0 : pa <= 34 ? -1 : -4;
+    const byTeamWeek = new Map<string, number>();
+    for (const r of raw) {
+      const k = `${String(Number(r.week))}|${String(r.team)}`;
+      const fumbleReturnTds =
+        num(r.fumble_recovery_opp) > 0
+          ? Math.min(num(r.fumble_recovery_tds), num(r.fumble_recovery_opp))
+          : 0;
+      const p =
+        num(r.def_sacks) +
+        2 * num(r.def_interceptions) +
+        2 * num(r.fumble_recovery_opp) +
+        6 * (num(r.def_tds) + fumbleReturnTds) +
+        2 * num(r.def_safeties) +
+        2 * (num(r.def_fg_blocks) + num(r.def_punt_blocks)) +
+        6 * num(r.special_teams_tds);
+      byTeamWeek.set(k, (byTeamWeek.get(k) ?? 0) + p);
+    }
+    expect(defense).toHaveLength(NFL_TEAMS.length * WEEKS.length);
     for (const d of defense) {
-      const v = d.line.values;
-      const oracle =
-        num(v.dst_sack) +
-        2 * num(v.dst_int) +
-        2 * num(v.dst_fum_rec) +
-        6 * num(v.dst_td) +
-        2 * num(v.dst_safety) +
-        2 * num(v.dst_blk) +
-        6 * num(v.dst_ret_td) +
-        paBin(num(v.dst_pa));
+      const k = `${String(d.week)}|${d.nfl_team}`;
+      const allowed = allowedByTeamWeek.get(k);
+      expect(allowed, k).toBeTypeOf("number");
+      const oracle = (byTeamWeek.get(k) ?? 0) + paBin(num(allowed));
       expect(pts(d.line), `${d.nfl_team} w${String(d.week)}`).toBeCloseTo(oracle, 9);
     }
+  });
+
+  it("[A-1] nflverse keeps fumble-return TDs out of def_tds, and the excerpt has some (QA-1-017)", () => {
+    // The dst_td = def_tds + fumble-return-TD sum double-counts if nflverse ever books a fumble
+    // return in def_tds too: every fixture row with a fumble-recovery TD must have def_tds = 0, and
+    // every def_tds row an interception. The excerpt must keep exercising the case.
+    const fumbleTdRows = raw.filter((r) => num(r.fumble_recovery_tds) > 0);
+    expect(fumbleTdRows.length).toBeGreaterThanOrEqual(2);
+    for (const r of fumbleTdRows) {
+      expect(num(r.def_tds), String(r.player_id)).toBe(0);
+      expect(num(r.fumble_recovery_opp), String(r.player_id)).toBeGreaterThan(0);
+    }
+    for (const r of raw.filter((x) => num(x.def_tds) > 0))
+      expect(num(r.def_interceptions), String(r.player_id)).toBeGreaterThanOrEqual(num(r.def_tds));
+    const cin = defense.find((d) => d.week === 1 && d.nfl_team === "CIN");
+    const ne = defense.find((d) => d.week === 2 && d.nfl_team === "NE");
+    expect(cin?.line.values.dst_td).toBe(1);
+    expect(ne?.line.values.dst_td).toBe(1);
   });
 
   it("the hand-reviewed sample matches the frozen file (numbers worked by hand)", () => {
@@ -254,6 +294,11 @@ describe("independent oracles (hand-written scoring rules)", () => {
     //    = 3; one miss costs nothing                                                       → 17
     //  BUF defence w2: 4 sacks = 4; the team safety (a player_id-less nflverse row) = 2; DET
     //    scored 31 → the 28–34 bin = −1                                                    → 5
+    //  CIN defence w1 (QA-1-017): 4 sacks = 4; 4 opponent fumble recoveries × 2 = 8; one returned
+    //    27 yds for a TD (Demetrius Knight Jr.; nflverse fumble_recovery_tds 1, def_tds 0) = 6;
+    //    27 points allowed → the 21–27 bin = 0                                             → 18
+    //  NE defence w2 (QA-1-017): 4 sacks = 4; 1 INT × 2 = 2; 1 fumble recovery × 2 = 2, returned
+    //    19 yds for a TD (Elijah Ponder) = 6; 3 points allowed → the 1–6 bin = 7          → 21
     const golden = JSON.parse(readFileSync(GOLDEN, "utf8")) as {
       players: Record<string, number>;
       defences: Record<string, number>;
@@ -262,6 +307,8 @@ describe("independent oracles (hand-written scoring rules)", () => {
     expect(golden.players["1|00-0036900"]).toBe(2.2);
     expect(golden.players["2|00-0033303"]).toBe(17);
     expect(golden.defences["2|BUF"]).toBe(5);
+    expect(golden.defences["1|CIN"]).toBe(18);
+    expect(golden.defences["2|NE"]).toBe(21);
   });
 });
 

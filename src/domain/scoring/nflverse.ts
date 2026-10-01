@@ -78,6 +78,23 @@ export function positionTypeForNflPosition(
   return null;
 }
 
+/**
+ * A LEAGUE roster position (the platform's / league.yaml's `position`) → the league position type
+ * (plan 08 §2: `StatLine.position_type` is "the player's type in this league"; §3.3). DEF / DST /
+ * D/ST → `DT`; Yahoo's generic IDP `D` → `D`; everything else as {@link positionTypeForNflPosition}
+ * (note `DT` here is the IDP defensive tackle, not the team defence). Null when unrecognised. The
+ * league's position — not nflverse's row position — types a player-week line: nflverse lists a
+ * two-way player the league rosters as a WR (e.g. a CB/WR) under his defensive position.
+ */
+export function positionTypeForLeaguePosition(
+  position: string | null | undefined,
+): PositionType | null {
+  const p = (position ?? "").trim().toUpperCase();
+  if (p === "DEF" || p === "DST" || p === "D/ST") return "DT";
+  if (p === "D") return "D";
+  return positionTypeForNflPosition(p);
+}
+
 /** A row as a reader returns it: column → SQLite/parquet value (number, bigint, string, null). */
 export type NflverseRow = Readonly<Record<string, unknown>>;
 
@@ -137,6 +154,18 @@ export function makeStatLine(
 }
 
 /**
+ * The same line re-typed to `positionType` (plan 08 §2/§3.3): values, provisional flag and source
+ * are kept. For a reader line typed from nflverse's row position when the league types the player
+ * differently (its values carry every mapped column whatever the type; the gate is in `score`).
+ */
+export function withPositionType(line: StatLine, positionType: PositionType): StatLine {
+  return makeStatLine(line.values, positionType, {
+    provisional: line.provisional,
+    source: line.source,
+  });
+}
+
+/**
  * `toStatLine(nflverse)` for a `ds_player_week` row (plan 08 §3.2). The position type comes from
  * `positionType`, else from the row's `position`; a row that maps to none throws `invalid_line`.
  * Every mapped column set with a non-null value becomes present (a present 0 stays 0).
@@ -154,6 +183,38 @@ export function statLineFromPlayerWeek(
   return makeStatLine(values, pt, opts);
 }
 
+/**
+ * The `ds_team_defense_week` column holding the team's defensive FUMBLE-RETURN touchdowns: derived at
+ * load as Σ {@link defensiveFumbleReturnTds} over the team's stats_player_week rows. nflverse's
+ * `def_tds` carries interception-return TDs only; a defender's fumble-return TD is in the player's
+ * `fumble_recovery_tds` (with `def_tds = 0`), so `def_tds` alone loses 6 points per such game.
+ */
+export const DST_FUMBLE_RETURN_TD_COLUMN = "fumble_recovery_tds_opp";
+
+/**
+ * `dst_td` (Yahoo 35 "Touchdown", DT — every defensive TD, fumble returns included; plan 08 §3.1,
+ * research 05 §15) ← the SUM of these `ds_team_defense_week` columns.
+ */
+export const DST_TD_COLUMNS: readonly string[] = Object.freeze([
+  "def_tds",
+  DST_FUMBLE_RETURN_TD_COLUMN,
+]);
+
+/**
+ * One stats_player_week row's defensive fumble-return touchdowns: its `fumble_recovery_tds`, counted
+ * only when the player recovered an OPPONENT's fumble (`fumble_recovery_opp > 0`) and capped at that
+ * many recoveries — an offence recovering its own fumble in the end zone is not a defensive TD.
+ * [A-1] nflverse keeps these out of `def_tds` (checked on the 2026 fixture rows by the golden test);
+ * a row with both own and opponent recoveries and a TD is credited to the defence (rare; a defender's
+ * own-team recovery on a return is a defensive TD too). Null / hostile values count 0.
+ */
+export function defensiveFumbleReturnTds(row: NflverseRow): number {
+  const opp = columnValue(row, "fumble_recovery_opp") ?? 0;
+  const tds = columnValue(row, "fumble_recovery_tds") ?? 0;
+  if (opp <= 0 || tds <= 0) return 0;
+  return Math.min(tds, opp);
+}
+
 /** Options for the team-defence line. */
 export interface DefenseLineOptions extends LineOptions {
   /**
@@ -167,7 +228,8 @@ export interface DefenseLineOptions extends LineOptions {
 
 /**
  * The DT line of a `ds_team_defense_week` row (READER_QUERIES mapping): dst_sack ← def_sacks,
- * dst_int ← def_interceptions, dst_fum_rec ← fumble_recovery_opp, dst_td ← def_tds, dst_ret_td ←
+ * dst_int ← def_interceptions, dst_fum_rec ← fumble_recovery_opp, dst_td ← def_tds +
+ * fumble_recovery_tds_opp (interception- AND fumble-return TDs, {@link DST_TD_COLUMNS}), dst_ret_td ←
  * special_teams_tds, dst_safety ← def_safeties, dst_blk ← def_fg_blocks + def_punt_blocks
  * (+ def_pat_blocks), dst_pa ← pointsAllowed, dst_ya ← opp_passing_yards − opp_sack_yards_lost +
  * opp_rushing_yards (present only when both yardage columns are; [U] the platform's definition).
@@ -182,7 +244,7 @@ export function statLineFromTeamDefense(row: NflverseRow, opts: DefenseLineOptio
     dst_sack: columnValue(row, "def_sacks"),
     dst_int: columnValue(row, "def_interceptions"),
     dst_fum_rec: columnValue(row, "fumble_recovery_opp"),
-    dst_td: columnValue(row, "def_tds"),
+    dst_td: sumColumns(row, DST_TD_COLUMNS),
     dst_ret_td: columnValue(row, "special_teams_tds"),
     dst_safety: columnValue(row, "def_safeties"),
     dst_blk: sumColumns(row, blocks),

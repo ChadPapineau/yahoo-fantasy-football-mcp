@@ -52,15 +52,20 @@ export {
 } from "./engine.js";
 export {
   type DefenseLineOptions,
+  defensiveFumbleReturnTds,
+  DST_FUMBLE_RETURN_TD_COLUMN,
+  DST_TD_COLUMNS,
   type LineOptions,
   makeStatLine,
   NFLVERSE_PLAYER_COLUMNS,
   type NflverseRow,
   parseKickList,
+  positionTypeForLeaguePosition,
   positionTypeForNflPosition,
   rebinKickLine,
   statLineFromPlayerWeek,
   statLineFromTeamDefense,
+  withPositionType,
 } from "./nflverse.js";
 export {
   isLeagueWideMismatch,

@@ -4,13 +4,18 @@ import { describe, expect, it } from "vitest";
 import { score } from "../../../src/domain/scoring/engine.js";
 import { ScoringError } from "../../../src/domain/scoring/errors.js";
 import {
+  defensiveFumbleReturnTds,
+  DST_FUMBLE_RETURN_TD_COLUMN,
+  DST_TD_COLUMNS,
   makeStatLine,
   NFLVERSE_PLAYER_COLUMNS,
   parseKickList,
+  positionTypeForLeaguePosition,
   positionTypeForNflPosition,
   rebinKickLine,
   statLineFromPlayerWeek,
   statLineFromTeamDefense,
+  withPositionType,
 } from "../../../src/domain/scoring/nflverse.js";
 import { normalizeSettings } from "../../../src/domain/scoring/settings.js";
 import {
@@ -45,6 +50,7 @@ describe("column map (A-1)", () => {
       "opp_passing_yards",
       "opp_sack_yards_lost",
       "opp_rushing_yards",
+      ...DST_TD_COLUMNS, // QA-1-017: the fumble-return TD column must exist, or dst_td loses it
     ]) {
       expect({ c, ok: cols.has(c) }).toEqual({ c, ok: true });
     }
@@ -71,6 +77,71 @@ describe("positionTypeForNflPosition", () => {
     [undefined, null],
   ])("%s → %s", (pos, pt) => {
     expect(positionTypeForNflPosition(pos)).toBe(pt);
+  });
+});
+
+describe("positionTypeForLeaguePosition (QA-1-018: the league's position types the line)", () => {
+  it.each([
+    ["QB", "O"],
+    [" wr ", "O"],
+    ["RB", "O"],
+    ["TE", "O"],
+    ["K", "K"],
+    ["DEF", "DT"],
+    ["def", "DT"],
+    ["DST", "DT"],
+    ["D/ST", "DT"],
+    ["D", "D"],
+    ["DT", "D"], // the IDP defensive tackle, not the team defence
+    ["CB", "D"],
+    ["LB", "D"],
+    ["W/R/T", null], // a slot, not a position
+    ["BN", null],
+    ["", null],
+    [null, null],
+    [undefined, null],
+  ])("%s → %s", (pos, pt) => {
+    expect(positionTypeForLeaguePosition(pos)).toBe(pt);
+  });
+});
+
+describe("QA-1-018: a two-way player the league lists as a WR scores his offence", () => {
+  // Travis Hunter, 2026 week 1 as nflverse ships it: position CB (group DB), 1 rec for 8 yds and
+  // 1 carry for 3 yds. Typed from nflverse's position the line is D and every stat is ignored.
+  const hunter = {
+    player_id: "00-0040718",
+    position: "CB",
+    position_group: "DB",
+    receptions: 1,
+    targets: 2,
+    receiving_yards: 8,
+    carries: 1,
+    rushing_yards: 3,
+    receiving_tds: 0,
+  };
+
+  it("typed by the league position (WR → O) it scores 0.5 + 0.8 + 0.3 = 1.6, not 0", () => {
+    const pt = positionTypeForLeaguePosition("WR");
+    expect(pt).toBe("O");
+    if (pt === null) return;
+    const asNflverse = statLineFromPlayerWeek(hunter);
+    expect(asNflverse.position_type).toBe("D");
+    expect(score(asNflverse, S).points).toBe(0);
+    expect(score(asNflverse, S).ignored).toEqual(expect.arrayContaining(["rec", "rec_yd"]));
+    const retyped = withPositionType(asNflverse, pt);
+    expect(score(retyped, S).points).toBe(1.6);
+    expect(score(statLineFromPlayerWeek(hunter, { positionType: pt }), S).points).toBe(1.6);
+  });
+
+  it("withPositionType keeps values, labels and frozenness; only the type changes", () => {
+    const base = statLineFromPlayerWeek(hunter, { provisional: true, source: "nflverse:x" });
+    const l = withPositionType(base, "O");
+    expect(l.values).toEqual(base.values);
+    expect(l.present).toEqual(base.present);
+    expect(l).toMatchObject({ position_type: "O", provisional: true, source: "nflverse:x" });
+    expect(Object.isFrozen(l) && Object.isFrozen(l.values)).toBe(true);
+    expect(base.position_type).toBe("D"); // the input is not mutated
+    expect(() => withPositionType(base, "QB" as "O")).toThrow(ScoringError);
   });
 });
 
@@ -206,6 +277,39 @@ describe("statLineFromTeamDefense", () => {
     expect(score(l, S).points).toBe(26.5);
   });
 
+  it("QA-1-017: a fumble-return TD is a defensive TD (dst_td = def_tds + fumble-return TDs)", () => {
+    // CIN 2026 week 1: 4 sacks, 4 opponent fumble recoveries, one returned 27 yds for a TD
+    // (nflverse: fumble_recovery_tds = 1, def_tds = 0), 27 points allowed.
+    const cin = {
+      def_sacks: 4,
+      def_interceptions: 0,
+      fumble_recovery_opp: 4,
+      def_tds: 0,
+      [DST_FUMBLE_RETURN_TD_COLUMN]: 1,
+      special_teams_tds: 0,
+      def_safeties: 0,
+      def_fg_blocks: 0,
+      def_punt_blocks: 0,
+    };
+    const l = statLineFromTeamDefense(cin, { pointsAllowed: 27 });
+    expect(l.values.dst_td).toBe(1);
+    // 4 sacks + 4 × 2 fumble recoveries + 6 TD + PA 27 → 0 = 18 (was 12 without the TD)
+    expect(score(l, S).points).toBe(18);
+    // an interception-return TD and a fumble-return TD in one game are two TDs
+    expect(
+      statLineFromTeamDefense({ ...cin, def_tds: 1 }, { pointsAllowed: 27 }).values.dst_td,
+    ).toBe(2);
+    // a row without the column (an older publish) still reads def_tds; neither → absent
+    expect(statLineFromTeamDefense({ def_tds: 1 }, { pointsAllowed: 7 }).values.dst_td).toBe(1);
+    expect(
+      statLineFromTeamDefense({ [DST_FUMBLE_RETURN_TD_COLUMN]: 1 }, { pointsAllowed: 7 }).values
+        .dst_td,
+    ).toBe(1);
+    expect(
+      statLineFromTeamDefense({ def_sacks: 1 }, { pointsAllowed: 7 }).values,
+    ).not.toHaveProperty("dst_td");
+  });
+
   it("a game without a final score has no dst_pa; missing yardage leaves dst_ya absent", () => {
     const l = statLineFromTeamDefense(
       { ...row, opp_rushing_yards: null },
@@ -218,6 +322,46 @@ describe("statLineFromTeamDefense", () => {
       statLineFromTeamDefense({ ...row, opp_passing_yards: null }, { pointsAllowed: 0 }).values,
     ).not.toHaveProperty("dst_ya");
     expect(statLineFromTeamDefense({}, { pointsAllowed: NaN }).values).toEqual({});
+  });
+});
+
+describe("defensiveFumbleReturnTds (QA-1-017: one player row's defensive fumble-return TDs)", () => {
+  it.each<[string, Record<string, unknown>, number]>([
+    [
+      "a defender's opponent-fumble return TD (nflverse: def_tds 0)",
+      { fumble_recovery_opp: 1, fumble_recovery_tds: 1, def_tds: 0 },
+      1,
+    ],
+    [
+      "an offence recovering its own fumble in the end zone",
+      { fumble_recovery_own: 1, fumble_recovery_opp: 0, fumble_recovery_tds: 1 },
+      0,
+    ],
+    ["a recovery without a TD", { fumble_recovery_opp: 2, fumble_recovery_tds: 0 }, 0],
+    ["TDs capped at opponent recoveries", { fumble_recovery_opp: 1, fumble_recovery_tds: 2 }, 1],
+    ["two returned recoveries", { fumble_recovery_opp: 2, fumble_recovery_tds: 2 }, 2],
+    [
+      "own and opponent recoveries with a TD (credited to the defence)",
+      { fumble_recovery_own: 1, fumble_recovery_opp: 1, fumble_recovery_tds: 1 },
+      1,
+    ],
+    ["bigint columns", { fumble_recovery_opp: 1n, fumble_recovery_tds: 1n }, 1],
+    ["nulls", { fumble_recovery_opp: null, fumble_recovery_tds: null }, 0],
+    ["absent columns", {}, 0],
+    ["NaN", { fumble_recovery_opp: NaN, fumble_recovery_tds: 1 }, 0],
+    ["Infinity", { fumble_recovery_opp: 1, fumble_recovery_tds: Infinity }, 0],
+    ["negative", { fumble_recovery_opp: -1, fumble_recovery_tds: 1 }, 0],
+    ["negative TDs", { fumble_recovery_opp: 1, fumble_recovery_tds: -1 }, 0],
+    ["garbage strings", { fumble_recovery_opp: "x", fumble_recovery_tds: {} }, 0],
+  ])("%s", (_, row, n) => {
+    expect(defensiveFumbleReturnTds(row)).toBe(n);
+  });
+
+  it("an inherited (prototype) column is not read", () => {
+    const row = JSON.parse(
+      '{"__proto__":{"fumble_recovery_opp":1,"fumble_recovery_tds":1}}',
+    ) as Record<string, unknown>;
+    expect(defensiveFumbleReturnTds(row)).toBe(0);
   });
 });
 
