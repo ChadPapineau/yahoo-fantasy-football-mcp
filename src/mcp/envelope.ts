@@ -213,9 +213,13 @@ function stripTags(s: string): string {
 
 /**
  * Characters removed outright: controls, format (zero-width, bidi, soft hyphen), private use,
- * U+FFFD, and the whole Tags block U+E0000–E007F (assigned or not — "ASCII smuggling").
+ * U+FFFD, the whole Tags block U+E0000–E007F (assigned or not — "ASCII smuggling"), and every
+ * other Default_Ignorable_Code_Point (QA-1-074): variation selectors U+FE00–FE0F / U+E0100–E01EF
+ * carry one hidden byte each after any visible character, and the Hangul fillers (U+115F, U+1160,
+ * U+3164, U+FFA0), U+034F and the Mongolian selectors U+180B–180F render as nothing. An emoji
+ * loses only its presentation selector.
  */
-const REMOVE_RE = /[\p{Cc}\p{Cf}\p{Co}\uFFFD\u{E0000}-\u{E007F}]/gu;
+const REMOVE_RE = /[\p{Cc}\p{Cf}\p{Co}\p{Default_Ignorable_Code_Point}\uFFFD\u{E0000}-\u{E007F}]/gu;
 /** Whitespace-like controls that become a space before removal. */
 const SPACE_LIKE_RE = /[\t\n\v\f\r\u0085\u2028\u2029]/g;
 /** An unpaired UTF-16 surrogate (invalid text; would break JSON consumers). */
@@ -841,8 +845,11 @@ export const RESOURCE_TTL_MS = Object.freeze({
 // Every tool's outputSchema and E12's input compose these, so tools/list, the Dist invariants and
 // the "no bare string at a UT position" rule cannot drift between tools.
 
-/** Printable text: no C0/C1 controls and no format characters (zero-width, bidi, tags). */
-export const PRINTABLE_RE = /^[^\p{Cc}\p{Cf}\p{Cs}\p{Co}]*$/u;
+/**
+ * Printable text: no C0/C1 controls, no format characters (zero-width, bidi, tags) and no other
+ * default-ignorable code point (variation selectors, Hangul fillers — invisible carriers, QA-1-074).
+ */
+export const PRINTABLE_RE = /^[^\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Default_Ignorable_Code_Point}]*$/u;
 
 /** Model-supplied free text with a cap (trade notes, record notes, claims): printable, capped. */
 export function boundedTextSchema(maxChars: number) {
