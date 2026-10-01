@@ -87,10 +87,13 @@ export async function rosterTargets(
   week: Week,
   inputs: InputStamp[],
   warnings: string[],
+  rosterKeys?: Set<string>,
 ): Promise<Target[]> {
   const team = teamOf(lc, teamKey);
   const got = await ctx.services.platform.getRoster(team, week);
   inputs.push(platformInput(got.stamp, ctx.nowMs, lc.allowStale));
+  // every rostered key, matched or not (E2 tells "not on this roster" from "not projectable")
+  for (const e of got.value.entries) rosterKeys?.add(e.player.ref.id);
   const { byKey } = crosswalkRun(
     ctx,
     lc.league.season,

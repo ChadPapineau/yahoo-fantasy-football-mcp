@@ -342,7 +342,12 @@ describe("clean negatives of the manual league (critic C-14)", () => {
       compare: [{ out: CHASE, in: "manual.p.00-0030279" }],
     });
     expect(e.data.dist_basis).toBe("position_cv");
-    for (const s of e.data.swaps as { delta_pwin: unknown }[])
+    const rows = [
+      ...(e.data.swaps as { delta_pwin: unknown }[]),
+      ...((e.data.comparisons ?? []) as { delta_pwin: unknown }[]),
+    ];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const s of rows)
       expect(Object.keys(s.delta_pwin as object).sort()).toEqual(["band", "sign"]);
     expect((e.data.rec as { log_id: unknown }).log_id).toBeNull();
   });

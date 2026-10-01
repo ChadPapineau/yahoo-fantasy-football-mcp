@@ -19,7 +19,7 @@ import {
 import type { Projection, Rec } from "../../domain/analytics/types.js";
 import { seededRng, type Rng } from "../../domain/clock.js";
 import { lockAtFor } from "../../domain/league/schedule.js";
-import { MAX_ROSTER_SIZE, slotByName } from "../../domain/league/slots.js";
+import { MAX_ROSTER_SIZE, canOccupy, slotByName } from "../../domain/league/slots.js";
 import { manualPlayerKeyFor, type RosterSlots, type Week } from "../../domain/league/types.js";
 import type { ScoringSettings } from "../../domain/scoring/types.js";
 import { MANUAL_FA_POOL_WARNING } from "../../providers/platform.js";
@@ -313,8 +313,16 @@ async function lineupPlayers(
   rng: Rng,
   inputs: InputStamp[],
   warnings: string[],
-): Promise<{ players: LineupPlayer[]; targets: Target[]; out: ProjectionOutcome }> {
-  const targets = (await rosterTargets(ctx, lc, teamKey, w, inputs, warnings)).filter(projectable);
+): Promise<{
+  players: LineupPlayer[];
+  targets: Target[];
+  out: ProjectionOutcome;
+  rosterKeys: ReadonlySet<string>;
+}> {
+  const rosterKeys = new Set<string>();
+  const targets = (await rosterTargets(ctx, lc, teamKey, w, inputs, warnings, rosterKeys)).filter(
+    projectable,
+  );
   if (targets.length === 0) throw new FfError("NOT_FOUND");
   const out = projectPlayers({
     targets: projectionTargets(targets),
@@ -346,7 +354,7 @@ async function lineupPlayers(
       role_games: p.role_games,
     };
   });
-  return { players, targets, out };
+  return { players, targets, out, rosterKeys };
 }
 
 /** The opponent's team key for `w`, or null when the platform lists no matchup for my team. */
@@ -412,6 +420,23 @@ const currentSeat = z.strictObject({
   lock_at: iso.nullable().optional(),
 });
 
+const swapRow = z.strictObject({
+  out: playerKey,
+  in: playerKey,
+  slot: slotName,
+  delta_e: z.number(),
+  delta_pwin: z.union([z.number(), coarse]),
+  interval,
+  coin_flip: z.boolean(),
+  option_value: z
+    .strictObject({
+      kind: z.enum(["thursday", "monday", "late_game"]),
+      value: z.number(),
+      verdict: serverText,
+    })
+    .nullable(),
+});
+
 const e2Data = z.strictObject({
   objective_used: z.enum(["mean", "pwin", "blend"]),
   dist_basis: z.enum(["position_cv", "player_sim"]),
@@ -428,26 +453,9 @@ const e2Data = z.strictObject({
   p_win_before: prob.nullable(),
   p_win_after: prob.nullable(),
   p_win_interval: interval.nullable(),
-  swaps: z
-    .array(
-      z.strictObject({
-        out: playerKey,
-        in: playerKey,
-        slot: slotName,
-        delta_e: z.number(),
-        delta_pwin: z.union([z.number(), coarse]),
-        interval,
-        coin_flip: z.boolean(),
-        option_value: z
-          .strictObject({
-            kind: z.enum(["thursday", "monday", "late_game"]),
-            value: z.number(),
-            verdict: serverText,
-          })
-          .nullable(),
-      }),
-    )
-    .max(30),
+  swaps: z.array(swapRow).max(30),
+  /** The caller's `compare` pairs that are not recommended swaps (QA-1-010), apart from `swaps`. */
+  comparisons: z.array(swapRow).max(BOUNDS.compareSwaps.max).optional(),
   conditionals: z
     .array(
       z.strictObject({
@@ -490,6 +498,87 @@ const recRow = (r: Rec): z.infer<typeof recSchema> =>
 
 type E2Data = z.infer<typeof e2Data>;
 
+/** The hint every refused E2 constraint carries (QA-1-010). */
+export const LINEUP_CONSTRAINT_HINT =
+  "Use player keys from ff_get_roster for the team analysed; never force_start and exclude the same player; compare a current starter (out) with a player eligible for his slot (in).";
+
+/**
+ * Refuses, visibly, any E2 constraint the engine could not honour (QA-1-010; plan 02 §5): a key not
+ * on the target roster (or on it but not projectable), a player both forced and excluded, and a
+ * `compare` whose `out` is not a current starter or whose `in` cannot play that slot.
+ */
+function checkConstraints(
+  args: {
+    readonly force_start?: readonly string[] | undefined;
+    readonly exclude?: readonly string[] | undefined;
+    readonly compare?: readonly { readonly out: string; readonly in: string }[] | undefined;
+  },
+  pool: readonly LineupPlayer[],
+  rosterKeys: ReadonlySet<string>,
+  slots: RosterSlots,
+): void {
+  const byKey = new Map(pool.map((p) => [p.player_key, p]));
+  const refuse = (field: string, reason: string): never => {
+    throw new FfError("VALIDATION", { field, reason, hint: LINEUP_CONSTRAINT_HINT });
+  };
+  const known = (field: string, key: string): LineupPlayer => {
+    const p = byKey.get(key);
+    if (p !== undefined) return p;
+    return refuse(field, rosterKeys.has(key) ? "not_projectable" : "not_on_target_roster");
+  };
+  (args.force_start ?? []).forEach((k, i) => known(`force_start[${String(i)}]`, k));
+  (args.exclude ?? []).forEach((k, i) => known(`exclude[${String(i)}]`, k));
+  const excluded = new Set(args.exclude ?? []);
+  (args.force_start ?? []).forEach((k, i) => {
+    if (excluded.has(k)) refuse(`force_start[${String(i)}]`, "also_excluded");
+  });
+  (args.compare ?? []).forEach((c, i) => {
+    const at = `compare[${String(i)}]`;
+    const o = known(`${at}.out`, c.out);
+    const n = known(`${at}.in`, c.in);
+    if (c.out === c.in) refuse(`${at}.in`, "same_player");
+    if (!isStartingSlot(slots, o.slot)) refuse(`${at}.out`, "not_a_starter");
+    if (isStartingSlot(slots, n.slot)) refuse(`${at}.in`, "already_starting");
+    // the engine evaluates "start `in` instead of `out`" as a lineup: it must be a legal one
+    const after = [...pool.filter((p) => isStartingSlot(slots, p.slot) && p !== o), n];
+    if (!seatsAll(slots, after)) refuse(`${at}.in`, "ineligible_for_slot");
+  });
+}
+
+/**
+ * Whether every player in `players` can hold a distinct starting seat of `slots` (bipartite
+ * matching by augmenting paths — a roster is ≤ 60 players, a lineup ≤ 20 × 20 seats).
+ */
+function seatsAll(slots: RosterSlots, players: readonly LineupPlayer[]): boolean {
+  const seats = slots.slots
+    .filter((x) => x.class === "starter" || x.class === "flex")
+    .flatMap((x) => Array.from({ length: x.count }, () => x));
+  if (players.length > seats.length) return false;
+  const holder = new Array<number>(seats.length).fill(-1);
+  const fits = (pi: number, si: number): boolean => {
+    const p = players[pi];
+    const seat = seats[si];
+    return (
+      p !== undefined &&
+      seat !== undefined &&
+      canOccupy(seat, { positions: p.positions, status: p.status })
+    );
+  };
+  const place = (pi: number, seen: boolean[]): boolean => {
+    for (let si = 0; si < seats.length; si++) {
+      if (seen[si] === true || !fits(pi, si)) continue;
+      seen[si] = true;
+      const h = holder[si] ?? -1;
+      if (h < 0 || place(h, seen)) {
+        holder[si] = pi;
+        return true;
+      }
+    }
+    return false;
+  };
+  return players.every((_, pi) => place(pi, new Array<boolean>(seats.length).fill(false)));
+}
+
 /** Whether `slot` is a starting (starter or flex) slot of this league. */
 function isStartingSlot(slots: RosterSlots, slot: string): boolean {
   const c = slotByName(slots, slot)?.class;
@@ -507,6 +596,7 @@ function involvedKeys(d: E2Data, withOut: boolean): Set<string> {
     if (withOut) out.add(s.out);
   }
   for (const c of d.conditionals) out.add(c.if.player_key).add(c.then.in);
+  for (const c of d.comparisons ?? []) out.add(c.in);
   return out;
 }
 
@@ -639,6 +729,7 @@ export const analyzeLineupTool = defineTool({
     const slots = await slotsOf(ctx, lc, inputs);
     const rng = rngFor(ctx, undefined);
     const mine = await lineupPlayers(ctx, lc, args.team_key, w, settings, rng, inputs, warnings);
+    checkConstraints(args, mine.players, mine.rosterKeys, slots);
     const myKey = teamOf(lc, args.team_key).team_key;
     const opp = await opponentPlayers(ctx, lc, myKey, w, settings, rng, inputs, warnings);
     const rec = analyzeLineup({
@@ -654,6 +745,10 @@ export const analyzeLineupTool = defineTool({
       clock: ctx.services.clock,
       inputs: mine.out.result.inputs,
     });
+    const swapRows = rec.swaps.map((s) => ({
+      ...s,
+      interval: [s.interval[0], s.interval[1]] as [number, number],
+    }));
     const data = {
       ...rec,
       // the seats only: every starter's Dist is in recommended_lineup (and E1), so repeating
@@ -668,10 +763,12 @@ export const analyzeLineupTool = defineTool({
             }))
           : rec.current_lineup.map((a) => ({ slot: a.slot, player_key: a.player_key })),
       recommended_lineup: rec.recommended_lineup.map(assignmentRow),
-      swaps: rec.swaps.map((s) => ({
-        ...s,
-        interval: [s.interval[0], s.interval[1]] as [number, number],
-      })),
+      // the engine lists the recommended pairs first (rec.drivers counts them), then the caller's
+      // compare pairs: those go to comparisons[], apart from the advice (QA-1-010)
+      swaps: swapRows.slice(0, rec.rec.drivers.length),
+      ...(args.compare === undefined
+        ? {}
+        : { comparisons: swapRows.slice(rec.rec.drivers.length) }),
       p_win_interval:
         rec.p_win_interval === null
           ? null
