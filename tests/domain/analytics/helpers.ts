@@ -1,6 +1,6 @@
 // helpers.ts — synthetic league pieces for the analytics unit/property tests: the fixture league's
 // slot table, Dists of a given mean/width, and LineupPlayers.
-import type { LineupPlayer } from "../../../src/domain/analytics/lineup.js";
+import { emptyStartSeats, type LineupPlayer } from "../../../src/domain/analytics/lineup.js";
 import { buildRosterSlots, defineSlot } from "../../../src/domain/league/slots.js";
 import type { RosterSlot, RosterSlots } from "../../../src/domain/league/types.js";
 import type { Dist, DistBasis } from "../../../src/domain/scoring/types.js";
@@ -73,4 +73,36 @@ export function player(
     role_games: 3,
     ...over,
   };
+}
+
+const FILLER_POSITION: Readonly<Record<string, string>> = { "W/R/T": "WR" };
+
+/**
+ * An opponent whose every starting seat is filled (QA-1-043: P(win) is withheld or refused against
+ * empty seats): each seat his listed players leave empty gets a filler scoring exactly 0 with no
+ * spread and no team — the matchup moments are those of the listed players alone.
+ */
+export function complete(
+  opponent: readonly LineupPlayer[],
+  slots: RosterSlots = LEAGUE_SLOTS,
+): LineupPlayer[] {
+  const zero: Dist = {
+    mean: 0,
+    p10: 0,
+    p25: 0,
+    p50: 0,
+    p75: 0,
+    p90: 0,
+    p_zero: 1,
+    basis: "position_cv",
+  };
+  const fillers = emptyStartSeats(slots, opponent, NOW).map((seat) =>
+    player(FILLER_POSITION[seat] ?? seat, 0, {
+      points: zero,
+      nfl_team: null,
+      lock_at: null,
+      role_games: 0,
+    }),
+  );
+  return [...opponent, ...fillers];
 }

@@ -16,6 +16,7 @@ import { fixedClock } from "../../../src/domain/clock.js";
 import { canOccupy, slotByName } from "../../../src/domain/league/slots.js";
 import type { NflTeam } from "../../../src/config/schema.js";
 import {
+  complete,
   dist,
   LEAGUE_SLOTS,
   MON,
@@ -88,7 +89,10 @@ function build(specs: readonly Spec[], prefix = "1"): LineupPlayer[] {
 }
 
 const arbRoster = fc.array(arbSpec, { minLength: 4, maxLength: 18 }).map((s) => build(s));
-const arbOpp = fc.array(arbSpec, { minLength: 4, maxLength: 16 }).map((s) => build(s, "2"));
+// every seat filled (fillers scoring 0): P(win) is withheld against empty seats (QA-1-043)
+const arbOpp = fc
+  .array(arbSpec, { minLength: 4, maxLength: 16 })
+  .map((s) => complete(build(s, "2")));
 
 const isLockedNow = (p: LineupPlayer): boolean => p.lock_at === PAST;
 
@@ -236,9 +240,8 @@ describe("analyzeLineup — objectives", () => {
     player("WR", 10, { slot: "W/R/T", points: dist(10, 1) }), // steady
     player("WR", 9.8, { slot: "BN", points: dist(9.8, 14) }), // boom/bust
   ];
-  const opponentOf = (mean: number): LineupPlayer[] => [
-    player("QB", mean, { slot: "QB", nfl_team: "KC", points: dist(mean, 1) }),
-  ];
+  const opponentOf = (mean: number): LineupPlayer[] =>
+    complete([player("QB", mean, { slot: "QB", nfl_team: "KC", points: dist(mean, 1) })]);
 
   it("pwin prefers variance when chasing and the mean lineup when protecting", () => {
     const mine = [...core(), ...flexOptions()];
@@ -518,7 +521,7 @@ describe("analyzeLineup — swaps, conditionals, option value, stacks", () => {
     expect(neutral.stack_flags).toEqual([
       { players: [qb.player_key, rb.player_key, wr.player_key].sort(), effect: "ceiling+" },
     ]);
-    const weak = [player("QB", 5, { slot: "QB", nfl_team: "KC" })];
+    const weak = complete([player("QB", 5, { slot: "QB", nfl_team: "KC" })]);
     const prot = analyzeLineup({
       slots: LEAGUE_SLOTS,
       players: [qb, wr, rb, k],

@@ -3,7 +3,12 @@
 export type * from "./types.js";
 export { COARSE_BAND_CUTOFFS, COIN_FLIP_DPWIN, isCoinFlip, toCoarseDelta } from "./types.js";
 export * from "./constants.js";
-export { AnalyticsError, NO_OPPONENT_HINT, type AnalyticsErrorCode } from "./errors.js";
+export {
+  AnalyticsError,
+  INCOMPLETE_OPPONENT_HINT,
+  NO_OPPONENT_HINT,
+  type AnalyticsErrorCode,
+} from "./errors.js";
 export { collectInputs, mergeInputs, newestAsOf, type AnyStamp } from "./inputs.js";
 export { pActive, type Availability as PActive, type AvailabilityInput } from "./availability.js";
 export {
@@ -27,7 +32,14 @@ export {
   type PairMoments,
   type TotalMember,
 } from "./totals.js";
-export { analyzeLineup, bestLineup, type LineupPlayer, type LineupRequest } from "./lineup.js";
+export {
+  analyzeLineup,
+  bestLineup,
+  emptyStartSeats,
+  opponentLineup,
+  type LineupPlayer,
+  type LineupRequest,
+} from "./lineup.js";
 export { analyzeMatchupPre, distQuantile, cholesky, type MatchupRequest } from "./matchup.js";
 export {
   analyzeKdef,

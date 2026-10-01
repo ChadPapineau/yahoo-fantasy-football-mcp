@@ -28,7 +28,7 @@ import {
   loadFixtureData,
 } from "../../backtest/helpers/fixture.js";
 import { beforeWeek, fixtureLeague, kdefUniverse } from "../../backtest/helpers/league.js";
-import { dist, LEAGUE_SLOTS, NOW, PAST, player, SUN_1PM, SUN_425 } from "./helpers.js";
+import { complete, dist, LEAGUE_SLOTS, NOW, PAST, player, SUN_1PM, SUN_425 } from "./helpers.js";
 
 let data: FixtureData;
 let settings: ScoringSettings;
@@ -269,7 +269,7 @@ describe("E2 / E3 edges", () => {
 
   it("blend with a single possible lineup, compare pairs that repeat a swap or name a starter", () => {
     const q = player("QB", 10, { slot: "BN" });
-    const opp = [player("QB", 10, { slot: "QB", nfl_team: "KC" })];
+    const opp = complete([player("QB", 10, { slot: "QB", nfl_team: "KC" })]);
     const blend = analyzeLineup({
       slots: LEAGUE_SLOTS,
       players: [q],
@@ -346,7 +346,7 @@ describe("E2 / E3 edges", () => {
       player("WR", 0, { slot: "WR", points: zero }),
       player("WR", 0, { slot: "WR", points: zero }),
     ];
-    const them = [player("QB", 0, { slot: "QB", points: zero })];
+    const them = complete([player("QB", 0, { slot: "QB", points: zero })]);
     const r = analyzeMatchupPre({
       slots: LEAGUE_SLOTS,
       players: me,
