@@ -1,6 +1,6 @@
 ## The league file — questions, shape, and how to save it
 
-Contents: [Questions](#questions) · [Scoring presets](#scoring-presets) · [The shape](#the-shape) · [Saving it](#saving-it) · [Keeping it current](#keeping-it-current)
+Contents: [Questions](#questions) · [Scoring presets](#scoring-presets) · [The shape](#the-shape) · [Saving it](#saving-it) · [Keeping it current](#keeping-it-current) · [The verification log entry](#the-verification-log-entry)
 
 ### Questions
 
@@ -108,3 +108,68 @@ The server's own location check is narrower than this rule, so do not rely on it
 ### Keeping it current
 
 The server knows only what the file says. Edit it after every add, drop, trade or lineup change, and add each week's line to `opponents` (with that team's roster under `other_teams`) if you want a win probability. `ff doctor` re-checks it after any edit.
+
+### The verification log entry
+
+The verify flow calls no analytics tool, so there is no result `rec` to copy. Log this exact entry with `ff_record_recommendation` (step 5 of verify), replacing only the values in angle brackets: `week` and `as_of` from the `ff_get_league` result, and one `source_calls` item per call made with that call's `meta.request_id`. Every other field stays as written — the server rejects a `rec` with any field missing.
+
+```json
+{
+  "kind": "onboarding",
+  "week": "<league.current_week from ff_get_league>",
+  "rec": {
+    "action": "League file verified; engine self-check shown for three players over the last two final weeks",
+    "subjects": [],
+    "lineup": null,
+    "point_estimate": 0,
+    "distribution": {
+      "mean": 0,
+      "p10": 0,
+      "p25": 0,
+      "p50": 0,
+      "p75": 0,
+      "p90": 0,
+      "p_zero": 1,
+      "basis": "position_cv"
+    },
+    "delta_vs_next": {
+      "value": 0,
+      "p10": 0,
+      "p90": 0
+    },
+    "decision_metric": "settings_check",
+    "drivers": [],
+    "assumptions": [
+      {
+        "text": "The league file matches the league's settings and roster pages",
+        "revisit_trigger": "a roster move or a settings change by the commissioner"
+      }
+    ],
+    "confidence": {
+      "role_games": 0,
+      "inputs": []
+    },
+    "as_of": "<meta.as_of of the ff_get_league result>",
+    "latest_execution_time": null,
+    "no_move": true,
+    "log_id": null
+  },
+  "alternatives": [],
+  "source_calls": [
+    {
+      "tool": "ff_get_league",
+      "request_id": "<its meta.request_id>"
+    },
+    {
+      "tool": "ff_get_roster",
+      "request_id": "<its meta.request_id>"
+    },
+    {
+      "tool": "ff_get_player_stats",
+      "request_id": "<its meta.request_id, one entry per call>"
+    }
+  ],
+  "followed_hint": "unknown",
+  "client_ref": "onboard-verify"
+}
+```
