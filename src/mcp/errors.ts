@@ -317,9 +317,29 @@ function classifyUnsafe(e: unknown): { code: ErrorCode; details: FfErrorDetails 
 }
 
 /**
+ * What a tool call answers with on an error, on the wire (QA-1-007): the coded body in the one text
+ * block and NO `structuredContent` — a tool's outputSchema describes its success envelope, and the
+ * MCP spec requires structured results to conform to it, so a structured `{error}` would be rejected
+ * by any client that validates unconditionally (the TypeScript SDK only skips it for isError).
+ */
+export interface ToolWireErrorResult {
+  readonly isError: true;
+  /** The serialised `ToolErrorBody` (a mutable tuple: the SDK's CallToolResult type requires it). */
+  readonly content: [{ type: "text"; text: string }];
+  readonly [key: string]: unknown;
+}
+
+/** The wire form of an error result: the same text block, no structuredContent (QA-1-007). */
+export function toWireError(e: unknown, requestId: string): ToolWireErrorResult {
+  const { content } = toToolError(e, requestId);
+  return { isError: true, content };
+}
+
+/**
  * Maps ANY thrown value to a tool error result (plan 01 §4.3). The message and hint come from the
  * table; the only caller-derived content is FfError's value-free `details`, each re-validated here.
- * Log the original with `describeForLog` under the same `requestId`.
+ * Log the original with `describeForLog` under the same `requestId`. The `structuredContent` copy is
+ * for in-process callers only — a tool call answers with `toWireError` (QA-1-007).
  */
 export function toToolError(e: unknown, requestId: string): ToolErrorResult {
   const { code, details } = classifyError(e);
@@ -423,12 +443,12 @@ export function wrapHandler<S extends z.ZodType>(
   schema: S,
   fn: (args: z.output<S>, ctx: HandlerContext) => Promise<ToolSuccessResult> | ToolSuccessResult,
   opts: WrapOptions = {},
-): (raw: unknown) => Promise<ToolSuccessResult | ToolErrorResult> {
+): (raw: unknown) => Promise<ToolSuccessResult | ToolWireErrorResult> {
   return async (raw: unknown) => {
     const requestId = (opts.newId ?? newRequestId)();
     try {
       const parsed = schema.safeParse(raw ?? {});
-      if (!parsed.success) return toToolError(parsed.error, requestId);
+      if (!parsed.success) return toWireError(parsed.error, requestId);
       return await fn(parsed.data, { requestId });
     } catch (e) {
       try {
@@ -436,7 +456,7 @@ export function wrapHandler<S extends z.ZodType>(
       } catch {
         // a failing logger must not change the result
       }
-      return toToolError(e, requestId);
+      return toWireError(e, requestId);
     }
   };
 }

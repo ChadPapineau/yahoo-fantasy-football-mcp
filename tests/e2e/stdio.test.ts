@@ -304,6 +304,8 @@ describe("hostile arguments: coded errors, never an echo, the server stays up", 
           );
           if (!r.ok) continue;
           expect(r.x.isError, `${name} / ${h.label}`).toBe(true);
+          // QA-1-007: an error never carries structuredContent its outputSchema would reject
+          expect(r.x.structuredContent, `${name} / ${h.label}`).toBeUndefined();
           const text = (r.x.content as { text: string }[])[0]?.text ?? "";
           const body = JSON.parse(text) as { error: { code: string } };
           expect(ERROR_CODES).toContain(body.error.code);
