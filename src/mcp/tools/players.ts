@@ -25,7 +25,12 @@ import {
   weekSchema,
 } from "../bounds.js";
 import { defineTool, type ToolContext } from "../define.js";
-import { bareUntrusted, wrapUntrustedOrNull, type InputStamp } from "../envelope.js";
+import {
+  TRUNCATION_HINTS,
+  bareUntrusted,
+  wrapUntrustedOrNull,
+  type InputStamp,
+} from "../envelope.js";
 import { FfError } from "../errors.js";
 import {
   bare,
@@ -146,6 +151,7 @@ export const searchPlayers = defineTool({
   }),
   data: c1Data,
   budget: "list",
+  hint: TRUNCATION_HINTS.limit,
   run: async (args, ctx) => {
     const lc = await leagueContext(ctx, args);
     const inputs: InputStamp[] = [lc.input];

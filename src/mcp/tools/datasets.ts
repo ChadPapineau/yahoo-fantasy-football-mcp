@@ -22,7 +22,10 @@ import {
 } from "../bounds.js";
 import { defineTool, type ToolContext } from "../define.js";
 import {
+  RESULT_BUDGET_CHARS,
+  TRUNCATION_HINTS,
   bareUntrusted,
+  type BudgetTrim,
   wrapUntrustedOrNull,
   type InputStamp,
   type UntrustedField,
@@ -355,11 +358,32 @@ async function scheduleSeason(
   }
 }
 
+/**
+ * D3's budget step (QA-1-006, QA-1-034): over budget, the LAST requested week's games go whole —
+ * never part of a week — and the warning names every dropped week. The first week is always kept
+ * (a single over-budget week falls back to halving, with the fewer-weeks hint). Byes stay for every
+ * requested week.
+ */
+function scheduleTrim(weeks: readonly Week[]): BudgetTrim {
+  return (raw) => {
+    const d = raw as { games: readonly { week: number }[] };
+    const present = weeks.filter((w) => d.games.some((g) => g.week === w));
+    const last = present.at(-1);
+    if (last === undefined || present.length < 2) return null;
+    const kept = present.slice(0, -1);
+    const dropped = weeks.filter((w) => !kept.includes(w));
+    return {
+      data: { ...d, games: d.games.filter((g) => g.week !== last) },
+      warning: `games for week(s) ${dropped.join(", ")} cut to fit the ${String(RESULT_BUDGET_CHARS)}-character budget (byes are kept for every week); request fewer weeks (e.g. weeks [${dropped.slice(0, 2).join(", ")}]) or filter by nfl_team`,
+    };
+  };
+}
+
 export const getSchedule = defineTool({
   name: "ff_get_schedule",
   family: "external",
   description:
-    "NFL games for up to 6 weeks: kickoffs (ET, venue), byes, lines and implied totals (+spread = home favoured), roof, weather.",
+    "NFL games for 1-6 weeks (about 2 fit; later weeks are cut whole, with a warning): kickoffs (ET, venue), byes, lines and implied totals (+spread = home favoured), roof, weather.",
   input: z.strictObject({
     ...leagueShape,
     weeks: z
@@ -375,6 +399,7 @@ export const getSchedule = defineTool({
   }),
   data: d3Data,
   budget: "list",
+  hint: TRUNCATION_HINTS.schedule,
   run: async (args, ctx) => {
     const allowStale = args.allow_stale === true;
     const { lc, season } = await scheduleSeason(ctx, args);
@@ -462,6 +487,12 @@ export const getSchedule = defineTool({
       );
       byes[String(w)] = teams;
     }
-    return { data: { games: out, byes }, inputs, warnings, listKey: "games" };
+    return {
+      data: { games: out, byes },
+      inputs,
+      warnings,
+      trims: [scheduleTrim(weeks)],
+      listKey: "games",
+    };
   },
 });
