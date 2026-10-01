@@ -14,6 +14,7 @@ import {
   mkdirSync,
   openSync,
   readSync,
+  readdirSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -231,13 +232,30 @@ export function assertOutsideRepo(p: string, repoRoot: string, what = "path"): v
   }
 }
 
-/** The cloud-synced folders under a macOS home (iCloud "Desktop & Documents", iCloud Drive, CloudStorage). */
+/**
+ * The cloud-synced folders under a macOS home: iCloud "Desktop & Documents", iCloud Drive,
+ * CloudStorage, and the Dropbox, Google Drive and OneDrive clients' own folders.
+ */
 export function syncedFolders(home: string): readonly string[] {
+  // the desktop sync clients' own folders (QA-1-044/067), including a business OneDrive, which is
+  // named "OneDrive - <organisation>"
+  let oneDrives: string[] = [];
+  try {
+    oneDrives = readdirSync(home)
+      .filter((n) => n.startsWith("OneDrive") && n !== "OneDrive")
+      .map((n) => path.join(home, n));
+  } catch {
+    // no readable home: the fixed names still apply
+  }
   return [
     path.join(home, "Documents"),
     path.join(home, "Desktop"),
     path.join(home, "Library", "Mobile Documents"),
     path.join(home, "Library", "CloudStorage"),
+    path.join(home, "Dropbox"),
+    path.join(home, "Google Drive"),
+    path.join(home, "OneDrive"),
+    ...oneDrives.sort(),
   ];
 }
 

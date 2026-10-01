@@ -200,19 +200,38 @@ describe("isInside / assertOutsideRepo", () => {
 });
 
 describe("assertNotSynced (iCloud Desktop & Documents, iCloud Drive, CloudStorage)", () => {
-  it("lists the four synced roots", () => {
+  it("lists the synced roots: iCloud, CloudStorage, and the Dropbox / Google Drive / OneDrive folders", () => {
     expect(syncedFolders("/Users/x")).toEqual([
       "/Users/x/Documents",
       "/Users/x/Desktop",
       "/Users/x/Library/Mobile Documents",
       "/Users/x/Library/CloudStorage",
+      "/Users/x/Dropbox",
+      "/Users/x/Google Drive",
+      "/Users/x/OneDrive",
     ]);
+  });
+  it("adds every ~/OneDrive* folder (a business OneDrive is 'OneDrive - <org>') [QA-1-044]", () => {
+    mkdirSync(path.join(tmp.dir, "OneDrive - Example Org"));
+    mkdirSync(path.join(tmp.dir, "OneDriveLookalike"));
+    mkdirSync(path.join(tmp.dir, "MyOneDrive"));
+    const roots = syncedFolders(tmp.dir);
+    expect(roots).toContain(path.join(tmp.dir, "OneDrive - Example Org"));
+    expect(roots).not.toContain(path.join(tmp.dir, "MyOneDrive"));
+    expect(
+      refusal(() => {
+        assertNotSynced(path.join(tmp.dir, "OneDrive - Example Org", "ff"), tmp.dir);
+      }),
+    ).toBe("synced_folder");
   });
   it.each([
     "Documents/ff",
     "Desktop",
     "Library/Mobile Documents/com~apple~CloudDocs/ff",
     "Library/CloudStorage/GoogleDrive/ff",
+    "Dropbox/ff",
+    "Google Drive/ff",
+    "OneDrive/ff",
   ])("refuses %s", (rel) => {
     expect(
       refusal(() => {
