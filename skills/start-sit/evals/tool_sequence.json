@@ -69,7 +69,7 @@
             "alternatives": [],
             "source_calls": { "$source_calls": ["roster", "injuries", "projections", "lineup"] },
             "followed_hint": "unknown",
-            "client_ref": "start-sit-w4-flex"
+            "client_ref": "start-sit-2026-w4-flex"
           }
         }
       ]
@@ -114,7 +114,7 @@
             "alternatives": [],
             "source_calls": { "$source_calls": ["roster", "projections", "lineup"] },
             "followed_hint": "unknown",
-            "client_ref": "start-sit-w4-gameday"
+            "client_ref": "start-sit-2026-w4-gameday"
           }
         }
       ]

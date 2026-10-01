@@ -29,7 +29,7 @@
             "alternatives": [],
             "source_calls": { "$source_calls": ["roster", "schedule", "rank"] },
             "followed_hint": "unknown",
-            "client_ref": "stream-kdef-w4-k"
+            "client_ref": "stream-kdef-2026-w4-k"
           }
         }
       ]
@@ -62,7 +62,7 @@
             "alternatives": [],
             "source_calls": { "$source_calls": ["roster", "schedule", "rank"] },
             "followed_hint": "unknown",
-            "client_ref": "stream-kdef-w4-def"
+            "client_ref": "stream-kdef-2026-w4-def"
           }
         }
       ]

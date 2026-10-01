@@ -38,7 +38,7 @@ Opponent pressure and turnover profiles are not a separate input in this version
 `fantasy-football-mcp-server:ff_analyze_waivers` with `positions: ["K"]` or `positions: ["DEF"]` and `look_ahead: 2`. When the user asked about both, make two calls, kicker first. One position per call, because a result carries one `hold_vs_stream` and one `rec`: a call over both positions gives a verdict for only one of them. The ranking is always for the league's current week (the tool takes no week); for a later week, say so and use the look-ahead (`kdef.next_week`).
 
 ### 6. Log, then answer
-`fantasy-football-mcp-server:ff_record_recommendation` with `kind: "stream"` and each ranking's `rec` — one entry per position, with its own `client_ref` (`stream-kdef-w4-k`, `stream-kdef-w4-def`) — then render with the output contract and these additions.
+`fantasy-football-mcp-server:ff_record_recommendation` with `kind: "stream"` and each ranking's `rec` — one entry per position, with its own `client_ref` (`stream-kdef-2026-w4-k`, `stream-kdef-2026-w4-def`) — then render with the output contract and these additions.
 
 ## Output additions
 - The top 3 per position, from that position's call. For each candidate:

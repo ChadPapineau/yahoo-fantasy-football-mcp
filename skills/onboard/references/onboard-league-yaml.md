@@ -76,13 +76,21 @@ my_team:
 other_teams:                   # optional; needed only for this week's opponent
   - id: 2
     name: Team B
-    players:
+    players:                   # his full starting lineup: an empty starting slot means no win probability
       - { name: Jordan Love, team: GB, position: QB, slot: QB }
+      - { name: Amon-Ra St. Brown, team: DET, position: WR, slot: WR }
+      - { name: Keenan Allen, team: IND, position: WR, slot: WR }
+      - { name: Derrick Henry, team: BAL, position: RB, slot: RB }
+      - { name: Jahmyr Gibbs, team: DET, position: RB, slot: RB }
+      - { name: Trey McBride, team: ARI, position: TE, slot: TE }
+      - { name: Jaxon Smith-Njigba, team: SEA, position: WR, slot: W/R/T }
+      - { name: Jake Bates, team: DET, position: K, slot: K }
+      - { defense: HOU, slot: DEF }
 opponents:                     # optional; which team the user plays each week
   - { week: 4, team: 2 }
 ```
 
-Players are `{ name, team, position, slot }` with the nflverse team abbreviation (`LA` for the Rams, `LV`, `JAX`) and a position of QB, RB, WR, TE or K; a team defense is `{ defense: TEAM, slot }`. Add `status: O` (or `Q`, `D`, `IR`) when the app shows one. A player the server cannot match to NFL data is listed by the assistant's status check (`ff_get_status`, under `crosswalk.unmatched_rostered`) with the reason and the number of close NFL candidates. The usual cause is an old NFL team: check the player's current team in the fantasy app and correct `team:`. If he is still unmatched, the assistant lists that NFL team's players with `ff_project_players` and `players: { nfl_team: "<TEAM>" }`, which shows each player's NFL id (`gsis_id`); adding that id to his line (`gsis_id: "00-0034857"`, quoted) settles it. Free agents, waiver-wire players and transactions may be pasted too (`free_agents`, `waivers`, `transactions`), but nothing requires them.
+Players are `{ name, team, position, slot }` with the nflverse team abbreviation (`LA` for the Rams, `LV`, `JAX`) and a position of QB, RB, WR, TE or K; a team defense is `{ defense: TEAM, slot }`. Add `status: O` (or `Q`, `D`, `IR`) when the app shows one. A player the server cannot match to NFL data is listed by the assistant's status check (`ff_get_status`, under `crosswalk.unmatched_rostered`) with the reason and the number of close NFL candidates. The usual cause is an old NFL team: check the player's current team in the fantasy app and correct `team:`. If he is still unmatched, the assistant lists that NFL team's players with `ff_project_players` and `players: { nfl_team: "<TEAM>" }`, which shows each player's NFL id (`gsis_id`); adding that id to his line (`gsis_id: "00-0034857"`, quoted) settles it. An id whose NFL name differs from the line is accepted only when his team and position match; otherwise the status check shows him as ambiguous — fix the id (a typo names someone else) or the team. Slot names are the app's: a flex is `W/R/T` (or `W/R`, `W/T`, `Q/W/R/T`) and the team defense slot is `DEF` (not D/ST), filled by `{ defense: TEAM }`. Rules left out are listed under `rules.unverified_fields` by their output names (such as `playoffs_reseeding`, `playoffs_multiweek_championship`, `playoffs_consolation_teams`); `ff doctor` names them too. Free agents, waiver-wire players and transactions may be pasted too (`free_agents`, `waivers`, `transactions`), but nothing requires them.
 
 ### Saving it
 
