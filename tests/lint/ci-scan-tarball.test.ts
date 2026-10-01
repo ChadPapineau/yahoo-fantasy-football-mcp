@@ -1,9 +1,11 @@
 // ci-scan-tarball.test.ts — scripts/ci/scan-tarball.mjs must FAIL when the package would ship a
 // fixture, a test, an env file, a database, a yaml outside skills/, or a league key outside the
 // placeholder range (docs/plan/04 §4.1 `pack`, R8).
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { classify, packedPaths } from "../../scripts/ci/scan-tarball.mjs";
-import { runCheck, tempDir, writeTree } from "./helpers.js";
+import { SHIPPED_DATA, classify, packedPaths } from "../../scripts/ci/scan-tarball.mjs";
+import { ROOT, runCheck, tempDir, writeTree } from "./helpers.js";
 
 const FILES = ["dist", "skills", "README.md", "LICENSE", "CHANGELOG.md"];
 
@@ -112,6 +114,52 @@ describe("scan-tarball CLI on a fake package", () => {
     writeTree(tmp.dir, {
       "package.json": pkg,
       "dist/index.js": `export const k = "${["461", "l", "1000"].join(".")}";\n`,
+    });
+    const r = runCheck("scan-tarball.mjs", ["--root", tmp.dir]);
+    expect(r.stderr).toBe("");
+    expect(r.status).toBe(0);
+  });
+});
+
+// QA-1-093: the runtime reads <packageRoot>/data/crosswalk/overrides.yaml (src/cli/serve.ts
+// loadOverrides, src/providers/crosswalk-overrides.ts). The gate must let exactly that data file ship
+// — and still refuse every other YAML outside skills/ (a league.yaml must never ship).
+describe("shipped runtime data (QA-1-093)", () => {
+  let tmp: ReturnType<typeof tempDir> | undefined;
+  afterEach(() => tmp?.cleanup());
+  const OVERRIDES = "data/crosswalk/overrides.yaml";
+
+  it("lists the overrides file, and the runtime really reads it from the package root", () => {
+    expect(SHIPPED_DATA).toEqual([OVERRIDES]);
+    const serve = readFileSync(path.join(ROOT, "src/cli/serve.ts"), "utf8");
+    expect(serve).toContain('path.join(root, "data", "crosswalk", "overrides.yaml")');
+    expect(existsSync(path.join(ROOT, OVERRIDES))).toBe(true);
+  });
+
+  it("allows the overrides file when `files` covers it (by path or by its directory)", () => {
+    expect(classify(OVERRIDES, [...FILES, OVERRIDES])).toBeNull();
+    expect(classify(OVERRIDES, [...FILES, "data"])).toBeNull();
+  });
+
+  it.each([
+    ["data/league.yaml"],
+    ["data/crosswalk/league.yaml"],
+    ["data/crosswalk/overrides.yml"],
+    ["dist/data/crosswalk/overrides.yaml"],
+  ])("still refuses any other yaml: %s", (f) => {
+    expect(classify(f, [...FILES, "data"]) ?? "").toContain("yaml");
+  });
+
+  it("refuses the overrides file when `files` does not cover it", () => {
+    expect(classify(OVERRIDES, FILES) ?? "").toContain("not covered");
+  });
+
+  it("exits 0 on a package that ships the overrides file", () => {
+    tmp = tempDir();
+    writeTree(tmp.dir, {
+      "package.json": { name: "fake-pack", version: "1.0.0", files: ["dist", OVERRIDES] },
+      "dist/index.js": "export {};\n",
+      [OVERRIDES]: "version: 1\noverrides: []\n",
     });
     const r = runCheck("scan-tarball.mjs", ["--root", tmp.dir]);
     expect(r.stderr).toBe("");

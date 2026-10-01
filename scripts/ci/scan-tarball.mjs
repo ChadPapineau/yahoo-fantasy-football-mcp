@@ -1,7 +1,8 @@
 // @ts-check
 // scan-tarball.mjs — what `npm pack` would ship must be exactly the package.json `files` globs and
 // nothing sensitive (docs/plan/04 §4.1 `pack`, §4.4, R8): no fixtures/, tests/, .env*, .npmrc,
-// *.sqlite/*.db, key/token files, and no *.yaml/*.yml outside skills/; then every packed text file
+// *.sqlite/*.db, key/token files, and no *.yaml/*.yml outside skills/ except the runtime data files
+// in SHIPPED_DATA (QA-1-093); then every packed text file
 // goes through scripts/dev/scan-secrets.mjs (secrets + Yahoo league/team keys outside the
 // placeholder range + the local identifier deny-list when present). Node built-ins only.
 //
@@ -29,6 +30,14 @@ export const FORBIDDEN = Object.freeze([
 ]);
 
 /**
+ * Data files the runtime reads from the package root, so they must ship: the crosswalk overrides
+ * (src/cli/serve.ts loadOverrides → src/providers/crosswalk-overrides.ts). The only YAML allowed
+ * outside skills/, by exact path — a league.yaml or any other YAML still fails (QA-1-093).
+ * @type {readonly string[]}
+ */
+export const SHIPPED_DATA = Object.freeze(["data/crosswalk/overrides.yaml"]);
+
+/**
  * @param {string} file packed path, POSIX, relative to the package root
  * @param {readonly string[]} filesGlobs package.json `files`
  * @returns {string | null} why it is not allowed, or null
@@ -36,7 +45,8 @@ export const FORBIDDEN = Object.freeze([
 export function classify(file, filesGlobs) {
   if (file.startsWith("/") || file.split("/").includes("..")) return "path escapes the package";
   for (const f of FORBIDDEN) if (f.re.test(file)) return f.why;
-  if (/\.ya?ml$/i.test(file) && !file.startsWith("skills/")) return "*.yaml outside skills/";
+  if (/\.ya?ml$/i.test(file) && !file.startsWith("skills/") && !SHIPPED_DATA.includes(file))
+    return "*.yaml outside skills/ (only the runtime data files in SHIPPED_DATA ship)";
   if (ALWAYS.has(file)) return null;
   const inFiles = filesGlobs.some((g) => {
     const clean = g.replace(/^\.\//, "").replace(/\/+$/, "");
