@@ -21,6 +21,7 @@ import { round, sigmaOf, zeroDist } from "./math.js";
 import { at } from "../scoring/numeric.js";
 import { cmpStr } from "./lineup.js";
 import {
+  LINES_OMITTED,
   type ProjectedPlayer,
   type ProjectionReaders,
   type ProjectionTarget,
@@ -238,6 +239,7 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
       "never — they are not predictable week to week",
     ),
   ];
+  if (out.lines_omitted || first.lines_omitted) assumptions.push(LINES_OMITTED);
   if (!req.availability_known) {
     assumptions.push(
       A(
