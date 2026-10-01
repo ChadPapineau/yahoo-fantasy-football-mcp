@@ -71,6 +71,41 @@ describe("latency (A15, analytics share)", () => {
     expect(ms).toBeLessThan(3000);
   }, 60_000);
 
+  it("QA-1-079: the worst in-bounds E1 call (50 players × 6 weeks × 20 000) in < 3 s", () => {
+    const seen = new Set<string>();
+    const pool: ProjectionTarget[] = [];
+    for (const l of data.lines) {
+      if (seen.has(l.gsis_id) || pool.length >= 50) continue;
+      if (!["QB", "RB", "WR", "TE", "K"].includes(l.position)) continue;
+      seen.add(l.gsis_id);
+      pool.push({
+        player_key: null,
+        subject: { kind: "player", gsis_id: l.gsis_id },
+        name: l.gsis_id,
+        position: l.position,
+        nfl_team: l.nfl_team,
+      });
+    }
+    const run = (): number => {
+      const t0 = performance.now();
+      projectPlayers({
+        targets: pool,
+        season: 2026,
+        weeks: [4, 5, 6, 7, 8, 9],
+        settings,
+        readers: fixtureReaders(data),
+        clock: fixedClock(beforeWeek(data, 4)),
+        rng: seededRng(1),
+        n_sims: 20000,
+      });
+      return performance.now() - t0;
+    };
+    run();
+    const ms = Math.min(run(), run());
+    console.info(`[perf] ff_project_players 50 × 6 weeks × 20000: ${ms.toFixed(0)} ms`);
+    expect(ms).toBeLessThan(3000);
+  }, 120_000);
+
   it("E5 K/DEF over the 64-subject universe, look-ahead 2, warm", () => {
     const universe = kdefUniverse(data);
     const run = (): number => {

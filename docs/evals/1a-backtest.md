@@ -124,7 +124,8 @@ Measured by `tests/domain/analytics/perf.test.ts` on the fixture data (warm, thi
 | call | size | measured | budget |
 |---|---|---|---|
 | `projectPlayers` (E1) | 32 subjects (28 players + 4 DEF) × 1 week × `n_sims` 4000 = 128,000 scored lines | ≈ 0.5 s (≈ 1.1 s before the Stage B round 2 fix) | < 3 s (asserted) |
-| `analyzeKdef` (E5) | 64 subjects, look-ahead 2: pass 1 at 150 samples, pass 2 (12 per position + mine) at 400 + 2 × 150 | ≈ 0.14 s | < 0.5 s (A15 P0) |
+| `projectPlayers` (E1), worst in-bounds call (QA-1-079) | 50 pool players × 6-week horizon × `n_sims` 20 000 — capped at `SIMS.maxTotalLines` = 512,000 simulated lines (≈ 1,700 per player-week, said in an assumption) | ≈ 2.0 s (≈ 25 s uncapped) | < 3 s (asserted) |
+| `analyzeKdef` (E5) | 64 subjects, look-ahead 2: pass 1 at 150 samples, pass 2 (12 per position + mine) at 400 + 2 × 150, plus the 128-node expectation per subject-week (QA-1-024) | ≈ 0.24 s (≈ 0.14 s before the expectation quadrature) | < 0.5 s (A15 P0) |
 
 Over real stdio on the built server (`tests/process/latency.test.ts`, this Mac, 2026-09-30),
 `ff_project_players` for Team A's whole roster (16 players) at `n_sims` 4000 answers in a ≈ 0.29 s

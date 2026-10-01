@@ -724,6 +724,8 @@ interface Ctx {
   readonly written: { count: number; busy: number };
   /** Samples for weeks after the first (E5 look-ahead); equals `n` for E1. */
   readonly nLater: number;
+  /** The requested n_sims when the line budget reduced it (QA-1-079), else null. */
+  readonly reducedFrom: number | null;
 }
 
 function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
@@ -746,6 +748,14 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
       : (t.nfl_team ?? windowGames[0]?.team ?? null);
   const roleGames = windowGames.filter((g) => g.season === req.season && g.team === team).length;
   if (loaded.linesOmitted) assumptions.push(LINES_OMITTED);
+  if (ctx.reducedFrom !== null) {
+    assumptions.push(
+      A(
+        `n_sims reduced to ${String(n)} per player-week (from ${String(ctx.reducedFrom)}) to bound one call's simulation work`,
+        "ask for fewer players or weeks",
+      ),
+    );
+  }
   if (windowGames.length === 0) {
     assumptions.push(
       A(
@@ -1080,7 +1090,7 @@ function validate(
  * `dataset_never_loaded` (schedules / current-season stats never loaded → STALE_ONLY).
  */
 export function projectPlayers(req: ProjectionRequest): ProjectionOutcome {
-  return run(req, validate(req, SIMS.min), null);
+  return run(req, validate(req, SIMS.min), null, SIMS.min);
 }
 
 /**
@@ -1094,21 +1104,38 @@ export function projectForRanking(req: ProjectionRequest, nLater: number): Proje
   if (!Number.isInteger(nLater) || nLater < KDEF.minSims || nLater > n) {
     throw new AnalyticsError("invalid_request", "look-ahead n_sims out of range", ["n_sims"]);
   }
-  return run(req, n, nLater);
+  return run(req, n, nLater, KDEF.minSims);
 }
 
-function run(req: ProjectionRequest, n: number, nLater: number | null): ProjectionOutcome {
+/**
+ * The per-player-week sample size under the call's line budget (QA-1-079): the requested `n` when
+ * all player-weeks fit SIMS.maxTotalLines, else an even share of it, never below `floor`.
+ */
+function budgeted(n: number, playerWeeks: number, floor: number): number {
+  if (playerWeeks === 0 || n * playerWeeks <= SIMS.maxTotalLines) return n;
+  return Math.max(floor, Math.min(n, Math.floor(SIMS.maxTotalLines / playerWeeks)));
+}
+
+function run(
+  req: ProjectionRequest,
+  requested: number,
+  nLaterReq: number | null,
+  floor: number,
+): ProjectionOutcome {
   const weeks = [...req.weeks].sort((a, b) => a - b);
   const sorted: ProjectionRequest = { ...req, weeks };
   const needDefense = req.targets.some((t) => t.subject.kind === "defense");
   const loaded = load(sorted, needDefense);
   const written = { count: 0, busy: 0 };
+  const n = budgeted(requested, req.targets.length * weeks.length, floor);
+  const nLater = Math.min(nLaterReq ?? n, n);
   const ctx: Ctx = {
     req: sorted,
     loaded,
     engine: req.engine ?? scoringEngine,
     n,
-    nLater: nLater ?? n,
+    nLater,
+    reducedFrom: n < requested ? requested : null,
     inputsAsOf: newestAsOf(
       loaded.stamps.flatMap((st) => (st === null ? [] : [{ as_of: st.as_of }])),
       req.clock.nowIso(),
