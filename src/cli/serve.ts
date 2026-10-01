@@ -22,7 +22,6 @@ import {
   backupDir,
   datasetDir,
   ensureSecureDir,
-  isInside,
   packageRoot,
   PathSecurityError,
   readSecureFile,
@@ -36,9 +35,10 @@ import type { McpServerOptions, McpServices, ServerTexts } from "../mcp/services
 import { loadCrosswalkOverrides } from "../providers/crosswalk-overrides.js";
 import { ManualLeagueProvider } from "../providers/manual/index.js";
 import { storeFactory } from "../store/index.js";
-import type { Store, StoreFactory } from "../store/types.js";
+import { StoreVersionError, type Store, type StoreFactory } from "../store/types.js";
 import { VERSION } from "../version.js";
 import { createLogger, type Logger } from "./log.js";
+import { storeOpenReason } from "./store-access.js";
 
 // --- malformed requests (QA-1-085) ----------------------------------------------------------------------
 
@@ -134,6 +134,16 @@ export interface ServeInternals {
   readonly signals?: boolean;
   /** The package root the Skills texts and the overrides file are read from. */
   readonly packageRoot?: string;
+  /**
+   * Holds the close sequence this long before it starts (process tests only: makes a second SIGINT
+   * arrive while closing, so the forced-exit path is reachable — QA-1-058).
+   */
+  readonly closeDelayMs?: number;
+}
+
+/** Plan 03 §7's message for a store written by a newer binary (exit 1). */
+export function newerStoreMessage(storeVersion: number, binaryVersion: number): string {
+  return `store.sqlite was written by a newer version (v${String(storeVersion)}); this binary supports v${String(binaryVersion)}. Upgrade the package or restore the backup.`;
 }
 
 /** Process exit codes (plan 03 §1.3). */
@@ -205,8 +215,9 @@ export function buildServices(args: {
   readonly overrides: readonly CrosswalkOverride[];
 }): Wiring {
   const { config, store, clock, logger } = args;
-  const fixtureLeague =
-    config.fixtureDir !== null && isInside(config.leagueFile, config.fixtureDir);
+  // only the package's own placeholder league skips the 0600 check — never any file under an
+  // arbitrary FF_FIXTURE_DIR (QA-1-094); loadConfig decides it once, with the location guard
+  const fixtureLeague = config.fixtureLeague;
   const platform = new ManualLeagueProvider({
     file: config.leagueFile,
     clock,
@@ -333,6 +344,8 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
     }, internals.closeDeadlineMs ?? 10_000);
     deadline.unref();
     closing = (async () => {
+      if (internals.closeDelayMs !== undefined && internals.closeDelayMs > 0)
+        await new Promise((r) => setTimeout(r, internals.closeDelayMs));
       try {
         await handle?.close();
       } catch {
@@ -423,10 +436,26 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
     const exitCode = (e as { exitCode?: unknown }).exitCode;
     const code =
       e instanceof PathSecurityError ? EXIT.config : exitCode === 2 ? EXIT.config : EXIT.error;
-    logger.error("store.open_failed", {
-      error: e instanceof Error ? e.name : "unknown",
-      reason: e instanceof PathSecurityError ? e.detail : undefined,
-    });
+    // the one stderr line the client shows must say what happened and what to do (QA-1-051,
+    // QA-1-099): plan 03 §7's text for a newer store, a fixed reason + `ff doctor` otherwise —
+    // never a path or an id. JSON like every other stderr line (serve logs JSON lines only).
+    if (e instanceof StoreVersionError) {
+      logger.error("store.open_failed", {
+        error: e.name,
+        reason: "newer_version",
+        store_version: e.storeVersion,
+        binary_version: e.binaryVersion,
+        message: newerStoreMessage(e.storeVersion, e.binaryVersion),
+      });
+    } else if (e instanceof PathSecurityError) {
+      logger.error("store.open_failed", { error: e.name, reason: e.detail });
+    } else {
+      logger.error("store.open_failed", {
+        error: e instanceof Error ? e.name : "unknown",
+        reason: storeOpenReason(e),
+        hint: "run `ff doctor`",
+      });
+    }
     finish(code);
     return exited;
   }
@@ -452,6 +481,16 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
         logger.warn("transport.error", { error: e.name });
       },
     });
+    // the transport closes itself on a frame over its read cap (10 MiB) and pauses stdin, so no
+    // stdin event ever fires again: run the single-flight close sequence (WAL checkpoint, store
+    // close, serve.shutdown) instead of idling deaf until Node exits 13 (QA-1-077, QA-1-090).
+    // serveStdio installs its own onclose (no chaining), so wrap it after the call; on every other
+    // path shutdown() is already in flight and this is a no-op.
+    const sdkOnClose = transport.onclose;
+    transport.onclose = () => {
+      sdkOnClose?.();
+      void shutdown("transport_closed", EXIT.error);
+    };
     cleanups.push(
       watchInvalidRequests(
         opts.stdin,
