@@ -25,7 +25,11 @@ interface Swap {
   slot: string;
 }
 interface Ok {
-  data: { swaps: Swap[]; comparisons?: Swap[]; rec: { action: string } };
+  data: {
+    swaps: Swap[];
+    comparisons?: Swap[];
+    rec: { action: string; drivers: { name: string }[] };
+  };
 }
 
 let world: World;
@@ -113,8 +117,8 @@ describe("honoured (QA-1-010)", () => {
     const d = (r.b as Ok).data;
     expect(d.comparisons).toEqual([expect.objectContaining({ out: CHASE, in: K_ALLEN })]);
     expect(d.swaps.some((s) => s.out === CHASE && s.in === K_ALLEN)).toBe(false);
-    const m = /make (\d+) lineup change/.exec(d.rec.action);
-    expect(d.swaps.length).toBe(m === null ? 0 : Number(m[1]));
+    // the swaps are exactly the engine's recommended pairs (one rec driver each)
+    expect(d.swaps.map((s) => `swap:${s.slot}:${s.in}`)).toEqual(d.rec.drivers.map((x) => x.name));
   });
   it("a comparison that IS the recommended swap stays a swap (not duplicated)", async () => {
     const base = (await call({})).b as Ok;
