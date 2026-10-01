@@ -10,6 +10,7 @@ import {
   SOURCE_REGISTRY,
   freshnessClass,
   stampState,
+  isDatasetSourceId,
   type DatasetSourceId,
 } from "../../config/freshness.js";
 import type { UnmatchedPlayer } from "../../domain/crosswalk/types.js";
@@ -207,6 +208,7 @@ const g1Data = z.strictObject({
     .nullable(),
 });
 export type StatusData = z.infer<typeof g1Data>;
+type StatusCheck = NonNullable<StatusData["checks"]>[number];
 
 function unmatched(list: readonly UnmatchedPlayer[]): z.infer<typeof unmatchedRow>[] {
   return list.slice(0, 60).map((u) => ({
@@ -215,6 +217,38 @@ function unmatched(list: readonly UnmatchedPlayer[]): z.infer<typeof unmatchedRo
     reason: u.reason,
     candidates: u.candidates.length,
   }));
+}
+
+/** A source id as a check `detail` (`nflverse:schedules` → `nflverse_schedules`). */
+function checkDetail(id: string): string {
+  return id.replace(/[^a-z_]/g, "_").slice(0, 40);
+}
+
+/** Whether a source's class is required (STALE_ONLY past its hard limit) rather than an omittable driver. */
+function isRequiredSource(id: string): boolean {
+  return (
+    !isDatasetSourceId(id) || freshnessClass(SOURCE_REGISTRY[id].freshness).beyondHard !== "omit"
+  );
+}
+
+/**
+ * The dataset rows of G1 checks[] (QA-1-015): `datasets_loaded` / `datasets_fresh` judge only the
+ * REQUIRED sources (STALE_ONLY classes — what the tools refuse without), `optional_drivers` the
+ * omittable ones (weather: plan 01 §5.4 "omitted driver, not an error"); each failing check names
+ * its first failing source in `detail`.
+ */
+function datasetChecks(sources: readonly SourceRow[]): StatusCheck[] {
+  const required = sources.filter((x) => isRequiredSource(x.id));
+  const optional = sources.filter((x) => !isRequiredSource(x.id));
+  const row = (id: string, rows: readonly SourceRow[], good: (x: SourceRow) => boolean) => {
+    const bad = rows.find((x) => !good(x));
+    return { id, ok: bad === undefined, detail: bad === undefined ? "ok" : checkDetail(bad.id) };
+  };
+  return [
+    row("datasets_loaded", required, (x) => x.freshness !== "never_loaded"),
+    row("datasets_fresh", required, (x) => x.freshness === "fresh"),
+    row("optional_drivers", optional, (x) => x.freshness === "fresh"),
+  ];
 }
 
 /** The G1 snapshot (also `ff://status`). A missing/invalid league file is a warning, not an error. */
@@ -317,16 +351,7 @@ export async function statusSnapshot(
     checks: includeChecks
       ? [
           { id: "league_file", ok: leagueCheck === "ok", detail: leagueCheck },
-          {
-            id: "datasets_loaded",
-            ok: sources.every((x) => x.freshness !== "never_loaded"),
-            detail: sources.every((x) => x.freshness !== "never_loaded") ? "ok" : "never_loaded",
-          },
-          {
-            id: "datasets_fresh",
-            ok: sources.every((x) => x.freshness === "fresh"),
-            detail: sources.every((x) => x.freshness === "fresh") ? "ok" : "stale_or_missing",
-          },
+          ...datasetChecks(sources),
           {
             id: "writes",
             ok: true,
