@@ -52,8 +52,11 @@ export const RECORD_BOUNDS = Object.freeze({
   asOfSkewMs: 5 * 60 * 1000,
 });
 
-/** Mirror of src/mcp/envelope.ts PRINTABLE_RE: no controls, format chars, surrogates or private use. */
-export const PRINTABLE_TEXT_RE = /^[^\p{Cc}\p{Cf}\p{Cs}\p{Co}]*$/u;
+/**
+ * Mirror of src/mcp/envelope.ts PRINTABLE_RE: no controls, format chars, surrogates, private use or
+ * default-ignorable code points (QA-1-074).
+ */
+export const PRINTABLE_TEXT_RE = /^[^\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Default_Ignorable_Code_Point}]*$/u;
 /** Mirror of src/mcp/envelope.ts REQUEST_ID_RE. */
 export const REQUEST_ID_GRAMMAR = /^r-[0-9a-f]{12}$/;
 /** Mirror of src/mcp/envelope.ts INPUT_SOURCE_RE. */

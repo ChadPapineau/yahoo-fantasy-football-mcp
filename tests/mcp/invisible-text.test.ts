@@ -81,7 +81,9 @@ describe("the sanitiser removes default-ignorable code points (QA-1-074)", () =>
 });
 
 describe("end to end: a league.yaml team name and an E12 record (QA-1-074)", () => {
-  it("ff_list_leagues serves the visible name only; E12 refuses hidden text", async () => {
+  // league.yaml now refuses default-ignorable code points at the door (QA-1-074, hand-off to the
+  // manual provider): the smuggled name never loads, and the refusal itself carries nothing hidden
+  it("a league.yaml name hiding text is refused at load, with nothing hidden in the error; E12 refuses hidden text", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "ff-vs-"));
     chmodSync(dir, 0o700);
     const file = path.join(dir, "league.yaml");
@@ -99,10 +101,18 @@ describe("end to end: a league.yaml team name and an E12 record (QA-1-074)", () 
       const { client, close } = await connect(world);
       const r = await client.callTool({ name: "ff_list_leagues", arguments: {} });
       const text = (r.content as { text: string }[])[0]?.text ?? "";
-      expect(r.isError, text.slice(0, 200)).not.toBe(true);
+      expect(r.isError, text.slice(0, 200)).toBe(true);
       expect(recovered(text)).toEqual([]);
       expect(DI.test(text)).toBe(false);
-      expect(text).toContain('"value":"Team A"');
+      expect(text).not.toContain("SYSTEM");
+      await close();
+    } finally {
+      world.cleanup();
+      rmSync(dir, { recursive: true, force: true });
+    }
+    const clean = await makeWorld();
+    try {
+      const { client, close } = await connect(clean);
       const lineup = JSON.parse(
         (
           (await client.callTool({ name: "ff_analyze_lineup", arguments: { week: 3 } }))
@@ -121,8 +131,7 @@ describe("end to end: a league.yaml team name and an E12 record (QA-1-074)", () 
       expect(err.error.code).toBe("VALIDATION");
       await close();
     } finally {
-      world.cleanup();
-      rmSync(dir, { recursive: true, force: true });
+      clean.cleanup();
     }
   });
 });
