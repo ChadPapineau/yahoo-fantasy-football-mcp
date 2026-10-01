@@ -1,0 +1,66 @@
+{
+  "name": "dst-fumble-return-td",
+  "case": "A defensive fumble-return TD counts as a DT Touchdown (nflverse books it in fumble_recovery_tds, not def_tds)",
+  "source": "plan 08 §3.1 (dst_td = Yahoo 35 'Touchdown', every defensive TD); §3.2 A-1; QA-1-017 (CIN 2026 week 1)",
+  "settings": "sample-league",
+  "checks": [
+    {
+      "nflverse_defense": {
+        "row": {
+          "def_sacks": 4,
+          "def_interceptions": 0,
+          "fumble_recovery_opp": 4,
+          "def_tds": 0,
+          "fumble_recovery_tds_opp": 1,
+          "special_teams_tds": 0,
+          "def_safeties": 0,
+          "def_fg_blocks": 0,
+          "def_punt_blocks": 0,
+          "def_pat_blocks": 0
+        },
+        "points_allowed": 27
+      },
+      "expected": {
+        "points": 18,
+        "points_exact": 18,
+        "complete": true,
+        "unmapped": [],
+        "ignored": [],
+        "contribution_points": {
+          "dst_sack": 4,
+          "dst_int": 0,
+          "dst_fum_rec": 8,
+          "dst_td": 6,
+          "dst_ret_td": 0,
+          "dst_safety": 0,
+          "dst_blk": 0,
+          "dst_pa_21_27": 0
+        }
+      }
+    },
+    {
+      "nflverse_defense": {
+        "row": {
+          "def_sacks": 0,
+          "def_interceptions": 1,
+          "fumble_recovery_opp": 1,
+          "def_tds": 1,
+          "fumble_recovery_tds_opp": 1,
+          "special_teams_tds": 0,
+          "def_safeties": 0,
+          "def_fg_blocks": 0,
+          "def_punt_blocks": 0,
+          "def_pat_blocks": 0
+        },
+        "points_allowed": 3
+      },
+      "expected": {
+        "points": 23,
+        "points_exact": 23,
+        "complete": true,
+        "unmapped": [],
+        "ignored": []
+      }
+    }
+  ]
+}
