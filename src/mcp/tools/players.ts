@@ -40,6 +40,7 @@ import {
   nflTeamOf,
   optionalDataset,
   readOpts,
+  rosterRows,
   slotsOf,
   take,
   textSource,
@@ -89,6 +90,42 @@ function baseRow(p: PlatformPlayer, r: ResolvedEntry | undefined, ownerSource: s
     percent_owned_delta: p.percent_owned_delta,
     bye_week: p.bye_week,
   };
+}
+
+/** The provenance tag of a dataset-universe player's name (roster_weekly `full_name`). */
+const DATASET_NAME_SOURCE = "nflverse.roster_weekly.name";
+
+/**
+ * Where a served player's name came from (QA-1-075). Under the manual league the status-A/FA
+ * universe adds the nflverse kicker universe (and the 32 defences), served with ownership
+ * `unknown` — every league.yaml player has team/freeagents/waivers ownership — so a non-defence
+ * `unknown` player's name is roster_weekly text, not the operator's file. Every other name is the
+ * platform's own.
+ */
+function nameSourceOf(p: PlatformPlayer, platform: LeagueContext["ref"]["platform"]): string {
+  return platform === "manual" && p.ownership?.type === "unknown" && p.position !== "DEF"
+    ? DATASET_NAME_SOURCE
+    : textSource(platform, "player.name");
+}
+
+/**
+ * The name path-listings of a page (one per distinct source) and, when a dataset name is served,
+ * the roster_weekly input so meta.source and attribution name nflverse (plan 01 §4.2).
+ */
+function nameProvenance(
+  ctx: ToolContext,
+  lc: LeagueContext,
+  items: readonly PlatformPlayer[],
+  inputs: InputStamp[],
+): ReturnType<typeof bare>[] {
+  const sources = [...new Set(items.map((p) => nameSourceOf(p, lc.ref.platform)))];
+  if (sources.includes(DATASET_NAME_SOURCE)) {
+    const rIn = optionalDataset(rosterRows(ctx, lc.league.season), ctx.nowMs, lc.allowStale);
+    if (rIn !== null) inputs.push(rIn);
+  }
+  return (sources.length === 0 ? [textSource(lc.ref.platform, "player.name")] : sources).map((s) =>
+    bare("data.players[].name", s),
+  );
 }
 
 async function checkPosition(
@@ -192,7 +229,7 @@ export const searchPlayers = defineTool({
     return {
       data: { players },
       inputs,
-      bareFields: [bare("data.players[].name", textSource(lc.ref.platform, "player.name"))],
+      bareFields: nameProvenance(ctx, lc, got.items, inputs),
       listKey: "players",
     };
   },
@@ -293,7 +330,7 @@ export const listPlayers = defineTool({
       data: { players },
       inputs,
       warnings,
-      bareFields: [bare("data.players[].name", textSource(lc.ref.platform, "player.name"))],
+      bareFields: nameProvenance(ctx, lc, got.items, inputs),
       page: {
         limit: args.limit,
         offset: args.offset,
