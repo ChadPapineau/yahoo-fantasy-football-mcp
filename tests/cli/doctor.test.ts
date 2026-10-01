@@ -352,6 +352,21 @@ describe("row 4 — config dir and league file", () => {
     expect(byId(r.rows, "league_file").status).toBe("ok");
   });
 
+  it("an arbitrary FF_FIXTURE_DIR does not waive 0600 on a real league file [QA-1-094]", () => {
+    const s = fresh({ create: true });
+    const league = path.join(s.home, "league.yaml");
+    copyFileSync(FIXTURE_LEAGUE, league);
+    chmodSync(league, 0o644);
+    for (const fx of ["/", s.home]) {
+      const c = cfg(s, { FF_FIXTURE_DIR: fx, FF_LEAGUE_FILE: league });
+      const r = checkConfigDir(c);
+      expect(r.status, fx).toBe("fail");
+      expect(r.message, fx).toContain("group/other-accessible");
+      const lf = checkLeagueFile(makeIo(s), c, log(s));
+      expect(lf.row.status, fx).toBe("fail");
+    }
+  });
+
   it("league file: missing → fail with the onboard hint; invalid → value-free issues; valid → ok, no names", () => {
     const s = fresh({ create: true });
     const io = makeIo(s);
@@ -794,10 +809,20 @@ describe("runDoctor / ff doctor", () => {
 
   it("a healthy fixture install passes every non-launchd row", async () => {
     const s = refreshed();
+    // an installed package (no .git, no src/): rows 12/21 are n/a, independent of this checkout's
+    // dist/; its fixture tree is this checkout's (the fixture waiver covers only the running
+    // package's own <package>/fixtures — QA-1-094)
+    const pkg = path.join(s.dir, "pkg");
+    mkdirSync(pkg);
+    symlinkSync(FIXTURES, path.join(pkg, "fixtures"));
     const io = makeIo(s, {
-      env: { ...fixtureEnv(), FF_WEATHER_SOURCE: "off" },
+      env: {
+        FF_FIXTURE_DIR: path.join(pkg, "fixtures"),
+        FF_LEAGUE_FILE: path.join(pkg, "fixtures", "manual", "league.yaml"),
+        FF_WEATHER_SOURCE: "off",
+      },
       clock: fixedClock("2026-09-30T18:10:00.000Z"),
-      packageRoot: s.home, // an installed package: rows 12/21 are n/a, independent of this checkout's dist/
+      packageRoot: pkg,
     });
     const r = await runDoctor(io, { json: true, online: false, fix: false, yes: false });
     const bad = r.rows.filter((x) => x.status === "fail" || x.status === "config");

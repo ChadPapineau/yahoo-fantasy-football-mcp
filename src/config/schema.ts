@@ -4,6 +4,7 @@
 // here because config is the leaf layer every other layer may import (src/mcp/bounds.ts re-exports
 // them; domain/sources/providers import them directly). Secrets never come from config.json and are
 // never enumerable. config.json is additive: unknown keys warn, never fail (plan 03 §7).
+import path from "node:path";
 import { z } from "zod/v4";
 import {
   assertNotSynced,
@@ -11,8 +12,10 @@ import {
   configFilePath,
   defaultLeagueFilePath,
   isInside,
+  isInsideOnFs,
   PathSecurityError,
   readSecureFile,
+  realpathOfExistingPrefix,
   resolveAbsolute,
   resolveCacheDir,
   resolveConfigDir,
@@ -290,6 +293,13 @@ export interface Config {
   readonly weatherSource: WeatherSource;
   /** Absolute fixture dir, or null outside fixture mode. */
   readonly fixtureDir: string | null;
+  /**
+   * The league file is the package's own placeholder fixture league: it lies (really, after
+   * symlinks) inside FF_FIXTURE_DIR AND inside `<package>/fixtures`. Only then are the league-file
+   * location guards and the 0600 rule waived — an arbitrary FF_FIXTURE_DIR (`/`, `~`) waives
+   * nothing (QA-1-094). Serve and doctor read this; they never re-derive it.
+   */
+  readonly fixtureLeague: boolean;
   /** League-key allow-list from FF_LEAGUE_KEYS (empty = no extra restriction). */
   readonly leagueKeys: readonly string[];
   /** Always false in this build: no write-capable provider exists (plan 02 §3.4, Phase W). */
@@ -346,6 +356,28 @@ export const UNKNOWN_FILE_KEYS_WARNING = "unknown key(s) in config.json are igno
 
 /** A syntactically plausible secret-looking key name, for the "secrets never in config.json" rule. */
 const SECRETISH = /secret|token|password|passwd|api[_-]?key|credential/i;
+
+/** The package's own fixture tree: `<package root>/fixtures`. */
+export const PACKAGE_FIXTURES_DIR_NAME = "fixtures";
+
+/**
+ * Whether `leagueFile` is a fixture league of this package: inside `fixtureDir` and inside
+ * `<repoRoot>/fixtures`, both compared on resolved real paths (a symlink inside the fixture tree
+ * pointing at a real league elsewhere is not a fixture) under the filesystem's name rules.
+ */
+export function isPackageFixture(
+  leagueFile: string,
+  fixtureDir: string,
+  repoRoot: string,
+): boolean {
+  const real = realpathOfExistingPrefix(leagueFile);
+  const fixtures = realpathOfExistingPrefix(path.join(repoRoot, PACKAGE_FIXTURES_DIR_NAME));
+  return (
+    isInside(leagueFile, fixtureDir) &&
+    isInsideOnFs(real, realpathOfExistingPrefix(fixtureDir)) &&
+    isInsideOnFs(real, fixtures)
+  );
+}
 
 /** A value-free reason for a path failure (never echoes the path or an unexpected error text). */
 function pathReason(e: unknown): string {
@@ -495,12 +527,16 @@ export function loadConfig(input: ConfigInput): Config {
 
   const leagueRaw = pick("FF_LEAGUE_FILE");
   let leagueFile: string | null = configDir ? defaultLeagueFilePath(configDir) : null;
+  let fixtureLeague = false;
   if (leagueRaw !== undefined) {
     leagueFile = absPath("FF_LEAGUE_FILE", leagueRaw);
-    // A fixture league inside the fixture dir is the one allowed in-repo league file (fixture mode).
-    if (leagueFile !== null && !(fixtureDir !== null && isInside(leagueFile, fixtureDir))) {
-      guardLocation("FF_LEAGUE_FILE", leagueFile);
-    }
+    // The package's placeholder fixture league is the one allowed in-repo league file (fixture
+    // mode); any other league file is guarded wherever FF_FIXTURE_DIR points.
+    fixtureLeague =
+      leagueFile !== null &&
+      fixtureDir !== null &&
+      isPackageFixture(leagueFile, fixtureDir, repoRoot);
+    if (leagueFile !== null && !fixtureLeague) guardLocation("FF_LEAGUE_FILE", leagueFile);
   }
 
   const logLevel = oneOf("FF_LOG_LEVEL", LOG_LEVELS, "info");
@@ -595,6 +631,7 @@ export function loadConfig(input: ConfigInput): Config {
     toolset,
     weatherSource,
     fixtureDir,
+    fixtureLeague,
     leagueKeys: Object.freeze(leagueKeys),
     writeEnabled: false as const,
     writeRequested,
