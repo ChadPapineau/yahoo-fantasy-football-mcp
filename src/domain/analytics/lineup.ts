@@ -88,6 +88,12 @@ export interface LineupRequest {
   readonly compare?: readonly { readonly out: PlayerKey; readonly in: PlayerKey }[];
   readonly clock: Clock;
   readonly inputs?: readonly InputFreshness[];
+  /**
+   * List a fill of an empty starting seat in `swaps` as `{ out: null, … }` (QA-1-020). Off by default
+   * until the tool's output schema accepts a null `out`; a fill is a move (no_move, action, subjects,
+   * deadline) either way.
+   */
+  readonly fills_in_swaps?: boolean;
 }
 
 // --- the solve ---------------------------------------------------------------------------------------
@@ -308,6 +314,118 @@ function basisOf(players: readonly LineupPlayer[]): DistBasis {
     : "position_cv";
 }
 
+// --- the slot flow (QA-1-020, QA-1-040) ----------------------------------------------------------------
+
+/** One reported swap: `out` null when the entrant fills a seat that is empty now. */
+interface FlowPair {
+  readonly out: LineupPlayer | null;
+  readonly in: LineupPlayer;
+  readonly slot: string;
+}
+
+interface Flow {
+  /** One pair per bench → start entrant, paired by the actual slot flow. */
+  readonly pairs: FlowPair[];
+  readonly entrants: LineupPlayer[];
+  /** Current starters who leave the starting lineup. */
+  readonly leavers: LineupPlayer[];
+  /** Leavers no entrant's chain reaches (their seat is left empty, e.g. an excluded starter). */
+  readonly unpairedLeavers: LineupPlayer[];
+  /** Starters who stay in the lineup but change slots. */
+  readonly slotMovers: LineupPlayer[];
+  /** Lineup changes the user makes (entrants + unpaired leavers; slot moves alone count each). */
+  readonly changes: number;
+}
+
+/**
+ * How the recommended lineup is reached from the current one, seat by seat. Per slot name, each
+ * player entering it takes the seat of a player leaving it, else a seat that is empty now (a starter
+ * on IR, dropped, or unmatched). A bench entrant's pair follows that chain through starters who only
+ * change slots until it reaches the starter who leaves the lineup — or an empty seat (`out: null`).
+ */
+function slotFlow(
+  cur: Assignment,
+  rec: Assignment,
+  curStarters: readonly LineupPlayer[],
+  recStarters: readonly LineupPlayer[],
+  slots: RosterSlots,
+): Flow {
+  const order = (a: LineupPlayer, b: LineupPlayer): number => cmpStr(a.player_key, b.player_key);
+  const curKeys = new Set(curStarters.map((p) => p.player_key));
+  const recKeys = new Set(recStarters.map((p) => p.player_key));
+  /** In each slot name: who left it (displaced) and who entered it. */
+  const displacedBy = new Map<LineupPlayer, LineupPlayer | null>();
+  const names = new Set<string>([
+    ...curStarters.map((p) => slotIn(cur, p.player_key)),
+    ...recStarters.map((p) => slotIn(rec, p.player_key)),
+  ]);
+  for (const name of names) {
+    const was = curStarters
+      .filter((p) => slotIn(cur, p.player_key) === name && slotIn(rec, p.player_key) !== name)
+      .sort(order);
+    const now = recStarters
+      .filter((p) => slotIn(rec, p.player_key) === name && slotIn(cur, p.player_key) !== name)
+      .sort(order);
+    now.forEach((e, i) => displacedBy.set(e, was[i] ?? null));
+  }
+  const entrants = recStarters
+    .filter((p) => !curKeys.has(p.player_key))
+    .sort(
+      (x, y) =>
+        slotOrder(slots, slotIn(rec, x.player_key)) - slotOrder(slots, slotIn(rec, y.player_key)) ||
+        order(x, y),
+    );
+  const leavers = curStarters.filter((p) => !recKeys.has(p.player_key));
+  const slotMovers = recStarters.filter(
+    (p) => curKeys.has(p.player_key) && slotIn(cur, p.player_key) !== slotIn(rec, p.player_key),
+  );
+  const reached = new Set<LineupPlayer>();
+  const pairs: FlowPair[] = entrants.map((e) => {
+    let d = displacedBy.get(e) ?? null;
+    const seen = new Set<LineupPlayer>([e]);
+    // follow starters who only moved: the seat they left was taken by … until someone left the lineup
+    while (d !== null && recKeys.has(d.player_key) && !seen.has(d)) {
+      seen.add(d);
+      d = displacedBy.get(d) ?? null;
+    }
+    const out = d !== null && !recKeys.has(d.player_key) ? d : null;
+    if (out !== null) reached.add(out);
+    return { out, in: e, slot: slotIn(rec, e.player_key) };
+  });
+  const unpairedLeavers = leavers.filter((l) => !reached.has(l)).sort(order);
+  const core = entrants.length + unpairedLeavers.length;
+  return {
+    pairs,
+    entrants,
+    leavers,
+    unpairedLeavers,
+    slotMovers,
+    changes: core > 0 ? core : slotMovers.length,
+  };
+}
+
+const plural = (n: number, one: string, many: string): string =>
+  `${String(n)} ${n === 1 ? one : many}`;
+
+/**
+ * The action in words: "make N lineup changes" counts exactly the swaps listed (QA-1-080's contract);
+ * fills not listed as swaps, starters benched with no replacement, and slot-only moves are named.
+ */
+function actionText(flow: Flow, fillsListed: boolean): string {
+  const fills = flow.pairs.filter((p) => p.out === null).length;
+  const listed = fillsListed ? flow.pairs.length : flow.pairs.length - fills;
+  const unlistedFills = fillsListed ? 0 : fills;
+  const parts: string[] = [];
+  if (listed > 0) parts.push(`make ${plural(listed, "lineup change", "lineup changes")}`);
+  if (unlistedFills > 0)
+    parts.push(`fill ${plural(unlistedFills, "empty starting slot", "empty starting slots")}`);
+  if (flow.unpairedLeavers.length > 0)
+    parts.push(`bench ${plural(flow.unpairedLeavers.length, "starter", "starters")}`);
+  if (parts.length === 0 && flow.slotMovers.length > 0)
+    parts.push(`move ${plural(flow.slotMovers.length, "starter", "starters")} between slots`);
+  return parts.join(" and ");
+}
+
 // --- the engine ------------------------------------------------------------------------------------------
 
 interface Evaluated {
@@ -463,27 +581,9 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   const curEval = evaluate(curA);
   const curStarters = curEval.starters;
   const recStarters = chosen.starters;
-  const curKeys = new Set(curStarters.map((p) => p.player_key));
   const recKeys = new Set(recStarters.map((p) => p.player_key));
-  const leaving = curStarters.filter((p) => !recKeys.has(p.player_key));
-  const entering = recStarters
-    .filter((p) => !curKeys.has(p.player_key))
-    .sort(
-      (x, y) =>
-        slotOrder(slots, slotIn(chosen.a, x.player_key)) -
-          slotOrder(slots, slotIn(chosen.a, y.player_key)) || cmpStr(x.player_key, y.player_key),
-    );
-  const pairs: { out: LineupPlayer; in: LineupPlayer; slot: string }[] = [];
-  const left = [...leaving];
-  for (const e of entering) {
-    const slot = slotIn(chosen.a, e.player_key);
-    let i = left.findIndex((l) => l.slot === slot);
-    if (i < 0) i = 0;
-    const o = left[i];
-    if (o === undefined) continue;
-    left.splice(i, 1);
-    pairs.push({ out: o, in: e, slot });
-  }
+  const flow = slotFlow(curA, chosen.a, curStarters, recStarters, slots);
+  const pairs = flow.pairs;
   const byKey = new Map(req.players.map((p) => [p.player_key, p]));
   const comparePairs: { out: LineupPlayer; in: LineupPlayer; slot: string }[] = [];
   for (const c of (req.compare ?? []).slice(0, 5)) {
@@ -495,26 +595,45 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   }
 
   const recMembers = recStarters.map(member);
-  const swapRaw = [...pairs, ...comparePairs].map((pr) => {
-    const after = curStarters.filter((p) => p !== pr.out);
+  const reported = req.fills_in_swaps === true ? pairs : pairs.filter((pr) => pr.out !== null);
+  const swapRaw = [...reported, ...comparePairs].map((pr) => {
+    const out = pr.out;
+    const after = curStarters.filter((p) => p !== out);
     if (!after.includes(pr.in)) after.push(pr.in);
     const dp = pWinNormal(moments(after)) - curEval.pwin;
-    const de = pr.in.points.mean - pr.out.points.mean;
-    const si = sigmaOf(pr.in.points);
-    const so2 = sigmaOf(pr.out.points);
-    const sd = Math.sqrt(
-      Math.max(0, si * si + so2 * so2 - 2 * rho(member(pr.in), member(pr.out)) * si * so2),
-    );
-    const interval: readonly [number, number] = [round(de - Z90 * sd), round(de + Z90 * sd)];
+    let de: number;
+    let interval: readonly [number, number];
+    if (out === null) {
+      // a fill: Δ is the entrant's own points (the seat scores 0 now) — his quantiles, exactly
+      de = pr.in.points.mean;
+      interval = [round(pr.in.points.p10), round(pr.in.points.p90)];
+    } else {
+      de = pr.in.points.mean - out.points.mean;
+      const si = sigmaOf(pr.in.points);
+      const so2 = sigmaOf(out.points);
+      const sd = Math.sqrt(
+        Math.max(0, si * si + so2 * so2 - 2 * rho(member(pr.in), member(out)) * si * so2),
+      );
+      interval = [round(de - Z90 * sd), round(de + Z90 * sd)];
+    }
     return {
-      out: pr.out.player_key,
+      out: out === null ? null : out.player_key,
       in: pr.in.player_key,
       slot: pr.slot,
       delta_e: round(de),
       dp,
       interval,
       coin_flip: isCoinFlip(basis, dp, interval),
-      option_value: optionValue(pr, recStarters, req.players, slots, chosen.a),
+      option_value:
+        out === null
+          ? null
+          : optionValue(
+              { out, in: pr.in, slot: pr.slot },
+              recStarters,
+              req.players,
+              slots,
+              chosen.a,
+            ),
     };
   });
 
@@ -575,9 +694,10 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
 
   const schedule = lockGroups(req.players);
   const latest = latestExecutionTime(schedule, nowMs);
-  const swapPlayers = req.players.filter((p) => pairs.some((s) => s.in === p || s.out === p));
-  const recLatest = latestExecutionTime(lockGroups(swapPlayers), nowMs);
-  const noMove = pairs.length === 0;
+  const movers = new Set<LineupPlayer>([...flow.entrants, ...flow.leavers, ...flow.slotMovers]);
+  const recLatest = latestExecutionTime(lockGroups([...movers]), nowMs);
+  const changes = flow.changes;
+  const noMove = changes === 0;
   const inputs = [...(req.inputs ?? [])];
 
   // the Rec
@@ -587,8 +707,17 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   const covRC = lineupCov(recMembers, curMembers);
   const sdDelta = Math.sqrt(Math.max(0, recM.v + curM.v - 2 * covRC));
   const dMu = recM.mu - curM.mu;
+  // subjects: the paired entrants first, in pair order, then the fills and the other starters; the
+  // sits in the same pair order — so the retrospective's k-th start ↔ k-th sit pairing holds
   const subjects: RecSubject[] = [];
-  for (const p of recStarters) {
+  const paired = pairs.filter(
+    (pr): pr is { out: LineupPlayer; in: LineupPlayer; slot: string } => pr.out !== null,
+  );
+  const startOrder = [
+    ...paired.map((pr) => pr.in),
+    ...recStarters.filter((p) => !paired.some((pr) => pr.in === p)),
+  ];
+  for (const p of startOrder) {
     subjects.push({
       player_key: p.player_key,
       gsis_id: p.gsis_id ?? null,
@@ -597,20 +726,19 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
       slot: slotIn(chosen.a, p.player_key),
     });
   }
-  for (const pr of pairs) {
+  const sitOrder = [...paired.map((pr) => pr.out), ...flow.unpairedLeavers];
+  for (const o of sitOrder) {
     subjects.push({
-      player_key: pr.out.player_key,
-      gsis_id: pr.out.gsis_id ?? null,
-      nfl_team: pr.out.positions.includes("DEF") ? pr.out.nfl_team : null,
+      player_key: o.player_key,
+      gsis_id: o.gsis_id ?? null,
+      nfl_team: o.positions.includes("DEF") ? o.nfl_team : null,
       role: "sit",
-      slot: pr.slot,
+      slot: slotIn(curA, o.player_key),
     });
   }
   const roleGames = recStarters.map((p) => p.role_games ?? 0);
   const rec: Rec = {
-    action: noMove
-      ? "keep the current lineup"
-      : `make ${String(pairs.length)} lineup change${pairs.length === 1 ? "" : "s"}`,
+    action: noMove ? "keep the current lineup" : actionText(flow, req.fills_in_swaps === true),
     subjects,
     lineup: assignments(chosen.a, recStarters, slots).map((s) => ({
       slot: s.slot,
@@ -626,7 +754,7 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
     decision_metric:
       objective === "mean" ? "expected_points" : objective === "pwin" ? "p_win" : "blend",
     drivers: swapRaw
-      .slice(0, pairs.length)
+      .slice(0, reported.length)
       .map((s) => ({ name: `swap:${s.slot}:${s.in}`, contribution: s.delta_e })),
     assumptions,
     confidence: {
