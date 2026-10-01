@@ -158,7 +158,7 @@ describe("projectPlayers — fixture week 3", () => {
     const out = projectPlayers(req({ targets: two, weeks: [3, 4], repository: repo }));
     expect(puts).toHaveLength(4);
     expect(out.stored).toEqual({ written: 2, busy: 2 });
-    expect(puts[0]?.samples).toHaveLength(1000);
+    expect(puts[0]?.samples).toHaveLength(SIMS.stored); // the stored prefix, not n_sims
     expect(puts[0]?.model_version).toBe("v1-trailing");
     expect(puts[0]?.inputs_as_of).toBe("2026-09-30T15:58:07.000Z");
     expect(out.result.projections[0]?.ros_total).not.toBeNull();
@@ -182,10 +182,13 @@ describe("projectPlayers — fixture week 3", () => {
     const one = targets.slice(0, 1);
     projectPlayers(req({ targets: one, n_sims: 4000, repository: repo }));
     projectPlayers(req({ targets: one, n_sims: SIMS.min, repository: repo }));
-    expect(puts.map((p) => p.samples.length)).toEqual([SIMS.stored, SIMS.min]);
-    expect(SIMS.stored).toBeGreaterThanOrEqual(SIMS.min);
-    // the only reader scores at most RETRO_SAMPLE_CAP of them
-    expect(RETRO_SAMPLE_CAP).toBeLessThanOrEqual(SIMS.stored);
+    // the prefix is the retrospective's cap at any n_sims, never more (QA-1-031/081: SIMS.stored was
+    // 1000 while the only reader scores RETRO_SAMPLE_CAP = 500 — half of every row was dead weight)
+    expect(puts.map((p) => p.samples.length)).toEqual([
+      SIMS.stored,
+      Math.min(SIMS.min, SIMS.stored),
+    ]);
+    expect(SIMS.stored).toBe(RETRO_SAMPLE_CAP);
   });
 
   it("a defence projects from the opponent's implied total; a kicker loses long FGs in wind", () => {

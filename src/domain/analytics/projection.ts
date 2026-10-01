@@ -117,6 +117,12 @@ export interface ProjectionRequest {
   readonly repository?: ProjectionRepository;
   /** Platform stamps to cite in `inputs[]` (the league file, the roster read). */
   readonly extra_stamps?: readonly AnyStamp[];
+  /**
+   * The as-of of the input that set the targets' platform status (the league file's mtime, a Yahoo
+   * response time): it changes p_active, so a stored projection's `inputs_as_of` must move with it
+   * or the store collapses a status edit into the earlier run (QA-1-031).
+   */
+  readonly status_as_of?: string;
 }
 
 /** What the other engines need from one projected week (beyond the public Dist). */
@@ -1136,8 +1142,14 @@ function run(
     n,
     nLater,
     reducedFrom: n < requested ? requested : null,
+    // every input that changes the distribution: datasets (weather included), extra stamps, and the
+    // platform status source — so the store's repeat-collapse is exact (QA-1-031)
     inputsAsOf: newestAsOf(
-      loaded.stamps.flatMap((st) => (st === null ? [] : [{ as_of: st.as_of }])),
+      [
+        ...loaded.stamps.flatMap((st) => (st === null ? [] : [{ as_of: st.as_of }])),
+        ...(req.extra_stamps ?? []).map((st) => ({ as_of: st.as_of })),
+        ...(req.status_as_of === undefined ? [] : [{ as_of: req.status_as_of }]),
+      ],
       req.clock.nowIso(),
     ),
     written,

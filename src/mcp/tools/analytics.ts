@@ -16,12 +16,12 @@ import {
   type ProjectionOutcome,
   type ProjectionReaders,
 } from "../../domain/analytics/index.js";
-import type { Projection, Rec } from "../../domain/analytics/types.js";
+import type { Projection, ProjectionRepository, Rec } from "../../domain/analytics/types.js";
 import { seedFrom, seededRng, type Rng } from "../../domain/clock.js";
 import { lockAtFor } from "../../domain/league/schedule.js";
 import { MAX_ROSTER_SIZE, canOccupy, slotByName } from "../../domain/league/slots.js";
 import { manualPlayerKeyFor, type RosterSlots, type Week } from "../../domain/league/types.js";
-import type { ScoringSettings } from "../../domain/scoring/types.js";
+import type { ScoringSettings, StoredProjection } from "../../domain/scoring/types.js";
 import { MANUAL_FA_POOL_WARNING } from "../../providers/platform.js";
 import {
   BOUNDS,
@@ -299,6 +299,18 @@ export const projectPlayersTool = defineTool({
         `${String(all.length - targets.length)} players at non-projectable positions omitted`,
       );
     const settings = await scoringOf(ctx, lc, inputs);
+    // persisted only for the projections the caller actually receives (QA-1-031): the engine's puts
+    // are held here and committed by onEmit, after the result is cut to its budget
+    const held: StoredProjection[] = [];
+    const store = ctx.services.projections;
+    const holding: ProjectionRepository = {
+      put: (p) => {
+        held.push(p);
+        return { written: true };
+      },
+      latest: (...a) => store.latest(...a),
+      getAsOf: (...a) => store.getAsOf(...a),
+    };
     const out = projectPlayers({
       targets: projectionTargets(targets),
       season: lc.league.season,
@@ -309,10 +321,12 @@ export const projectPlayersTool = defineTool({
       rng: rngFor(ctx, args.seed),
       n_sims: args.n_sims,
       include_stat_line: args.include_stat_line || args.detail === "full",
-      repository: ctx.services.projections,
+      repository: holding,
+      status_as_of: lc.input.as_of,
     });
-    if (out.stored.busy > 0)
-      warnings.push(`${String(out.stored.busy)} projections were not stored (store busy)`);
+    const subjectOfKey = new Map(
+      targets.map((t) => [t.player_key ?? manualPlayerKeyFor(t.subject), subjectId(t.subject)]),
+    );
     const full = args.detail === "full";
     const hoisted = new Map<string, { text: string; revisit_trigger: string }>();
     if (!full)
@@ -332,6 +346,19 @@ export const projectPlayersTool = defineTool({
       estimate: true,
       listKey: "projections",
       week: w,
+      onEmit: (emitted: {
+        projections: readonly { player_key: string | null; gsis_id: string | null }[];
+      }) => {
+        const shown = new Set(
+          emitted.projections.map(
+            (p) => p.gsis_id ?? (p.player_key === null ? null : subjectOfKey.get(p.player_key)),
+          ),
+        );
+        let busy = 0;
+        for (const p of held)
+          if (shown.has(subjectId(p.subject)) && !store.put(p).written) busy += 1;
+        return busy > 0 ? [`${String(busy)} projections were not stored (store busy)`] : [];
+      },
     };
   },
 });
