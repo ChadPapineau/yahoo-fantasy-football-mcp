@@ -17,6 +17,7 @@ import {
   envelopeSchema,
   fitToBudget,
   toToolResult,
+  type BudgetTrim,
   type InputStamp,
   type PageInfo,
   type ToolSuccessResult,
@@ -58,6 +59,8 @@ export interface ToolOutput<D> {
   readonly warnings?: readonly string[];
   /** The array under `data` the budget may halve (list tools, analytics candidate lists). */
   readonly listKey?: string;
+  /** Tool-specific budget steps tried before `listKey` is halved (see `BudgetTrim`). */
+  readonly trims?: readonly BudgetTrim[];
   /**
    * The week this result is about (the analytics tools' target week). Remembered against the
    * call's request_id so E12 can refuse a rec logged under a different week than its source call.
@@ -297,6 +300,24 @@ export function roundDeep(v: unknown, decimals: number = ANALYTICS_DECIMALS): un
   return v;
 }
 
+/**
+ * The truncation warning's fixed advice for one call (QA-1-001, QA-1-006): it names only what the
+ * tool accepts — a tool's own `hint`, else "use detail compact" only for a call that asked for
+ * full, "page with offset" only for a pageable tool, and plain narrowing otherwise.
+ */
+export function truncationHint(
+  def: Pick<AnyToolDefinition, "hint" | "budget" | "pageable">,
+  args: unknown,
+): string {
+  if (def.hint !== undefined) return def.hint;
+  if (def.budget === "analytics") {
+    const full =
+      typeof args === "object" && args !== null && (args as { detail?: unknown }).detail === "full";
+    return full ? TRUNCATION_HINTS.analytics : TRUNCATION_HINTS.analyticsCompact;
+  }
+  return def.pageable === true ? TRUNCATION_HINTS.list : TRUNCATION_HINTS.narrow;
+}
+
 /** Runs a tool body and turns its output into the tool result (budget, validation, structure). */
 export async function runTool(
   def: AnyToolDefinition,
@@ -330,9 +351,11 @@ export async function runTool(
     ...(out.warnings === undefined ? {} : { warnings: out.warnings }),
   });
   const budget = def.budget === "analytics" ? ANALYTICS_BUDGET_CHARS : RESULT_BUDGET_CHARS;
-  const hint =
-    def.hint ?? (def.budget === "analytics" ? TRUNCATION_HINTS.analytics : TRUNCATION_HINTS.list);
-  const fit = fitToBudget(env, budget, out.listKey, { pageable: def.pageable === true, hint });
+  const fit = fitToBudget(env, budget, out.listKey, {
+    pageable: def.pageable === true,
+    hint: truncationHint(def, args),
+    ...(out.trims === undefined ? {} : { trims: out.trims }),
+  });
   if (!fit.ok) {
     log.error("tool.over_budget", { request_id: ctx.requestId, tool: def.name, size: fit.size });
     throw new FfError("INTERNAL");

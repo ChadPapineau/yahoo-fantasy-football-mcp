@@ -1003,8 +1003,75 @@ describe("fitToBudget: non-pageable results (critic C-10; plan 07 A5 has_more al
       list: "request a smaller limit, page with offset, or filter",
       transactions: "request a smaller count or use since",
       analytics: "narrow the request (fewer players, weeks or candidates) or use detail compact",
+      analyticsCompact: "narrow the request (fewer players, weeks or candidates)",
+      narrow: "narrow the request or filter",
+      limit: "request a smaller limit or a more specific query",
+      schedule: "request fewer weeks or filter by nfl_team",
     });
     expect(Object.isFrozen(TRUNCATION_HINTS)).toBe(true);
+  });
+});
+
+describe("fitToBudget: tool-specific trims before halving (QA-1-001, QA-1-006)", () => {
+  interface D {
+    rows: { k: number; t: string }[];
+    extra: string[];
+  }
+  const env = (rows: number, extra: number) =>
+    buildEnvelope<D>({
+      requestId: RID,
+      data: {
+        rows: Array.from({ length: rows }, (_, k) => ({ k, t: "r".repeat(90) })),
+        extra: Array.from({ length: extra }, () => "e".repeat(90)),
+      },
+      nowMs: NOW,
+      inputs: [],
+      bareFields: [
+        { path: "data.extra[]", source: "manual.player.name" },
+        { path: "data.rows[].t", source: "manual.player.name" },
+      ],
+    });
+  const dropExtra = (d: unknown) => {
+    const x = d as D;
+    if (x.extra.length === 0) return null;
+    return {
+      data: { ...x, extra: x.extra.slice(0, -1) },
+      warning: `extra cut to ${String(x.extra.length - 1)}`,
+      key: "extra",
+      dropPaths: x.extra.length === 1 ? ["data.extra[]"] : [],
+    };
+  };
+  const opts = { pageable: false, hint: TRUNCATION_HINTS.narrow, trims: [dropExtra] };
+
+  it("a fitting result is untouched (no trim runs)", () => {
+    const e = env(2, 2);
+    expect(fitToBudget(e, ANALYTICS_BUDGET_CHARS, "rows", opts)).toEqual({ ok: true, envelope: e });
+  });
+  it("trims only as far as needed, keeps the list whole, one warning per key", () => {
+    const r = fitToBudget(env(60, 100), ANALYTICS_BUDGET_CHARS, "rows", opts);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(serializeEnvelope(r.envelope).length).toBeLessThanOrEqual(ANALYTICS_BUDGET_CHARS);
+    expect(r.envelope.data.rows).toHaveLength(60);
+    expect(r.envelope.data.extra.length).toBeGreaterThan(0);
+    expect(r.envelope.truncated).toBe(true);
+    expect(r.envelope.warnings).toEqual([`extra cut to ${String(r.envelope.data.extra.length)}`]);
+    // one more extra row would not have fitted: the trim stopped at the first fit
+    const plus = {
+      ...r.envelope,
+      data: { ...r.envelope.data, extra: [...r.envelope.data.extra, "e".repeat(90)] },
+    };
+    expect(serializeEnvelope(plus).length).toBeGreaterThan(ANALYTICS_BUDGET_CHARS - 200);
+  });
+  it("exhausted trims fall back to halving the list, and drop the paths they removed", () => {
+    const r = fitToBudget(env(200, 3), ANALYTICS_BUDGET_CHARS, "rows", opts);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.envelope.data.extra).toEqual([]);
+    expect(r.envelope.data.rows.length).toBeLessThan(200);
+    expect(r.envelope.meta.untrusted_fields.map((f) => f.path)).toEqual(["data.rows[].t"]);
+    expect(r.envelope.warnings[0]).toBe("extra cut to 0");
+    expect(r.envelope.warnings.at(-1)).toMatch(/^result truncated to \d+ of 200 rows/);
   });
 });
 

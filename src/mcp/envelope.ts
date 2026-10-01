@@ -659,7 +659,28 @@ export const TRUNCATION_HINTS = Object.freeze({
   list: "request a smaller limit, page with offset, or filter",
   transactions: "request a smaller count or use since",
   analytics: "narrow the request (fewer players, weeks or candidates) or use detail compact",
+  /** An analytics call that was already compact (never told to "use detail compact"). */
+  analyticsCompact: "narrow the request (fewer players, weeks or candidates)",
+  /** A list tool with neither limit nor offset (it can only be narrowed). */
+  narrow: "narrow the request or filter",
+  /** A list tool with a limit but no offset. */
+  limit: "request a smaller limit or a more specific query",
+  schedule: "request fewer weeks or filter by nfl_team",
 });
+
+/**
+ * One tool-specific budget step (QA-1-001/080, QA-1-006): given the current `data`, a smaller one
+ * plus the warning that names what was cut — cumulatively, against the tool's original result — or
+ * null when this step has nothing left to cut. `dropPaths` are `meta.untrusted_fields` paths whose
+ * field the step removed.
+ */
+export type BudgetTrim = (data: unknown) => {
+  readonly data: unknown;
+  readonly warning: string;
+  /** Steps sharing a key share one warning (the later step's replaces the earlier one's). */
+  readonly key?: string;
+  readonly dropPaths?: readonly string[];
+} | null;
 
 /** How `fitToBudget` treats paging. */
 export interface FitOptions {
@@ -667,6 +688,11 @@ export interface FitOptions {
   readonly pageable: boolean;
   /** The warning's fixed advice (one of TRUNCATION_HINTS). */
   readonly hint: string;
+  /**
+   * Tool-specific steps tried in order BEFORE the list is halved: each is applied repeatedly while
+   * the result is over budget (its latest warning replaces its earlier one), then the next.
+   */
+  readonly trims?: readonly BudgetTrim[];
 }
 
 /**
@@ -685,6 +711,13 @@ export function fitToBudget<D>(
 ): FitResult<D> {
   const size = serializeEnvelope(env).length;
   if (size <= budget) return { ok: true, envelope: env };
+  if (opts.trims !== undefined && opts.trims.length > 0) {
+    const trimmed = applyTrims(env, budget, opts.trims);
+    if (trimmed !== env) {
+      if (serializeEnvelope(trimmed).length <= budget) return { ok: true, envelope: trimmed };
+      return fitToBudget(trimmed, budget, listKey, { pageable: opts.pageable, hint: opts.hint });
+    }
+  }
   const data = env.data as unknown;
   if (listKey === undefined || typeof data !== "object" || data === null)
     return { ok: false, size };
@@ -699,6 +732,43 @@ export function fitToBudget<D>(
     if (s <= budget) return { ok: true, envelope: candidate };
   }
   return { ok: false, size };
+}
+
+/** Upper bound on applications of one trim (a roster is ≤ 60 rows; rows are dropped one at a time). */
+const MAX_TRIM_STEPS = 128;
+
+/** Applies `trims` in order while `env` is over `budget` (the same envelope when none applied). */
+function applyTrims<D>(
+  env: Envelope<D>,
+  budget: number,
+  trims: readonly BudgetTrim[],
+): Envelope<D> {
+  let data: unknown = env.data;
+  const notes = new Map<string, string>();
+  const dropped = new Set<string>();
+  const build = (): Envelope<D> => ({
+    ...env,
+    data: data as D,
+    meta: {
+      ...env.meta,
+      untrusted_fields: env.meta.untrusted_fields.filter((f) => !dropped.has(f.path)),
+    },
+    truncated: true,
+    warnings: [...env.warnings, ...notes.values()],
+  });
+  let applied = false;
+  for (const [index, trim] of trims.entries()) {
+    for (let i = 0; i < MAX_TRIM_STEPS; i++) {
+      if (applied && serializeEnvelope(build()).length <= budget) return build();
+      const r = trim(data);
+      if (r === null) break;
+      applied = true;
+      data = r.data;
+      notes.set(r.key ?? `#${String(index)}`, r.warning);
+      for (const p of r.dropPaths ?? []) dropped.add(p);
+    }
+  }
+  return applied ? build() : env;
 }
 
 function withList<D>(
