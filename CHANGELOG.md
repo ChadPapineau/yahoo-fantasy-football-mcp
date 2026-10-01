@@ -37,6 +37,7 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
 
 ### Fixed
 
+- **QA + penetration-test round 1** (`docs/qa/2026-09-30-phase1a-qa-pentest.md`): 80 confirmed defects fixed, each with a failing-first, mutation-checked regression test — among them lineup advice that missed an empty starting slot, players listed Out or on injured reserve projected active, a fresh random seed per call (identical requests gave different answers), `ff prune` following a symlinked cache directory, a >10 MiB frame crashing `serve`, the secret scanner missing non-ASCII and type-changed files, and machine-derived commit emails (commits now use the GitHub no-reply address). Dataset files are now `ds_schema` 2 (a fumble-return touchdown column): run `ff refresh all` after upgrading.
 - `ManualLeagueProvider` scoring goes through the engine's `normalizeSettings`, so
   `negative_points: false` floors the player-week total (plan 08 §4.4 / P9) and `settings_hash`
   has one definition.

@@ -13,9 +13,9 @@
   <img alt="ci.yml: not yet (Phase 0)" src="https://img.shields.io/badge/ci.yml-not%20yet%20(Phase%200)-lightgrey">
 </p>
 
-> **This is a plan, not a release.** Every feature on this page is **📋 planned**. No server code exists yet; the build starts **after the owner has reviewed and approved the plan** in [`docs/plan/`](docs/plan/00-index.md) (owner decision, 2026-09-30, recorded in [`docs/HANDOFF.md`](docs/HANDOFF.md)). The only things that run today are the repository's documentation and secret-scanning CI. Read the [Status](#status) section before anything else.
+> **Phase 1a is built and tested (2026-09-30).** The server runs today on **your own league file** (`league.yaml`, kept outside the repo) plus free nflverse and weather data: 19 tools, 7 resources, 3 prompts, 4 Skills and the `ff` CLI — 3,867 unit and 127 process tests, a QA + penetration-test round whose 80 confirmed findings are all fixed ([register](docs/qa/2026-09-30-phase1a-qa-pentest.md)). **Yahoo is not connected:** Yahoo's Fantasy API is application-gated and read-only, and this build has no API access, so nothing here logs in to Yahoo or changes your roster — every recommendation ends with the exact moves to make yourself. Start with [Getting started](#getting-started-phase-1a--your-league-via-leagueyaml).
 
-**Status legend used throughout:** ✅ implemented · 🚧 in progress · 📋 planned
+**Status legend used throughout:** ✅ implemented (Phase 1a, on the manual league + nflverse — where a row mentions Yahoo, that Yahoo-backed path is not built) · 🚧 in progress · 📋 planned
 
 ---
 
@@ -30,7 +30,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io/) server, writt
 - [Architecture](#architecture)
 - [Tool reference](#tool-reference)
 - [Skills reference](#skills-reference)
-- [Quickstart and installation (planned)](#quickstart-and-installation-planned)
+- [Getting started (Phase 1a)](#getting-started-phase-1a--your-league-via-leagueyaml)
 - [The `ff` CLI as built (Phase 1a)](#the-ff-cli-as-built-phase-1a)
 - [Configuration](#configuration)
 - [Launch configuration for Claude Desktop and Claude Code](#launch-configuration-for-claude-desktop-and-claude-code)
@@ -46,7 +46,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io/) server, writt
 
 ## Status
 
-**Planning.** The research (`docs/research/00-*` … `06-*`), the refined plan (`docs/plan/01-*` … `10-*`), a three-round adversarial review ([`adversarial-log.md`](docs/plan/adversarial-log.md): 30 objections, 29 conceded and landed, 1 withdrawn on evidence, 0 pressed) and the [`changelog.md`](docs/plan/changelog.md) of what the review changed are complete. **Development is gated on the owner's approval of that package.** Nothing below the CI rows in the table exists as code.
+**Phase 1a built.** Research, the adversarially reviewed plan ([`adversarial-log.md`](docs/plan/adversarial-log.md), [`changelog.md`](docs/plan/changelog.md)), and the Phase 1a build are complete: foundation, eight modules, the MCP surface and CLI, end-to-end tests over real stdio, and a QA + penetration-test round ([register](docs/qa/2026-09-30-phase1a-qa-pentest.md)). Phase 1b (Yahoo) is not built — there is no API access — and the league comes from your `league.yaml`.
 
 Four facts shape everything on this page, and the plan carries them openly:
 
@@ -62,8 +62,8 @@ Four facts shape everything on this page, and the plan carries them openly:
 | Docs CI — every Mermaid block renders, every internal link resolves | ✅ live on every push | [`docs.yml`](.github/workflows/docs.yml) |
 | Secrets CI — gitleaks with Yahoo-specific rules, weekly full-history scan | ✅ live on every push | [`secrets.yml`](.github/workflows/secrets.yml), [`.gitleaks.toml`](.gitleaks.toml) |
 | Dependabot (actions + npm version updates), PR template | ✅ | [`.github/`](.github/) |
-| Yahoo API access application | 📋 owner's step — precedes Phase 0 | [`docs/HANDOFF.md` ▶ NEXT STEP](docs/HANDOFF.md#-next-step) |
-| Package skeleton, `ci.yml`, server, CLI, Skills, tests | 📋 after plan approval | [Roadmap](#roadmap) |
+| Yahoo API access | not available — no application (owner decision, 2026-09-30); Phase 1b deferred | [`docs/HANDOFF.md`](docs/HANDOFF.md) |
+| Package, `ci.yml`, server (19 tools, 7 resources, 3 prompts), `ff` CLI, 4 Skills, 3,867 unit + 127 process tests | ✅ Phase 1a, on the manual league | [Getting started](#getting-started-phase-1a--your-league-via-leagueyaml), [QA register](docs/qa/2026-09-30-phase1a-qa-pentest.md) |
 
 ---
 
@@ -75,34 +75,34 @@ Every row is traceable to the tool catalog ([`docs/plan/07-tool-catalog.md`](doc
 
 | Tool | What it does | Source | Priority | Status |
 |---|---|---|---|---|
-| `ff_list_leagues` | Your leagues and your team key per league for the logged-in user | Yahoo `users;use_login=1/games/leagues` | P0 | 📋 |
-| `ff_get_league` | The normalised settings digest: scoring rules mapped to canonical stat names, bracket families, roster slots by class, waiver/FAAB/trade/playoff rules, weeks, `settings_hash`; clean negatives carried as fields (`faab_budget: null`, `unverified_fields[]`) | Yahoo `league/settings` + metadata + `game_weeks`, `stat_categories` | P0 | 📋 |
-| `ff_get_standings` | Standings plus the per-team scalars rivals' decisions depend on (waiver priority, FAAB balance, moves, adds this week) | Yahoo standings + team fields | P0 | 📋 |
-| `ff_get_scoreboard` | Matchups for a week with Yahoo's own projection and win probability as **cross-checks**, never inputs; `meta.provisional` before the week is final | Yahoo scoreboard | P0 | 📋 |
-| `ff_list_transactions` | League transactions — Yahoo's most-recent-N merged with the server's persisted history (`history_coverage.gap_suspected` when incomplete) | Yahoo transactions + `transactions_seen` | P0 | 📋 |
+| `ff_list_leagues` | Your leagues and your team key per league for the logged-in user | Yahoo `users;use_login=1/games/leagues` | P0 | ✅ |
+| `ff_get_league` | The normalised settings digest: scoring rules mapped to canonical stat names, bracket families, roster slots by class, waiver/FAAB/trade/playoff rules, weeks, `settings_hash`; clean negatives carried as fields (`faab_budget: null`, `unverified_fields[]`) | Yahoo `league/settings` + metadata + `game_weeks`, `stat_categories` | P0 | ✅ |
+| `ff_get_standings` | Standings plus the per-team scalars rivals' decisions depend on (waiver priority, FAAB balance, moves, adds this week) | Yahoo standings + team fields | P0 | ✅ |
+| `ff_get_scoreboard` | Matchups for a week with Yahoo's own projection and win probability as **cross-checks**, never inputs; `meta.provisional` before the week is final | Yahoo scoreboard | P0 | ✅ |
+| `ff_list_transactions` | League transactions — Yahoo's most-recent-N merged with the server's persisted history (`history_coverage.gap_suspected` when incomplete) | Yahoo transactions + `transactions_seen` | P0 | ✅ |
 | `ff_get_draft_results` | Draft picks, rounds, costs | Yahoo `draftresults` | later | 📋 |
 
 ### Roster and lineup
 
 | Tool | What it does | Source | Priority | Status |
 |---|---|---|---|---|
-| `ff_get_roster` | A roster with slots, eligibility, statuses, byes, `percent_owned`, and the **lock schedule computed once** (kickoff → `lock_at` per player, `latest_execution_time`, empty starting slots, IR-ineligible players, over-limit flag) | Yahoo roster with `out=stats,ownership,percent_owned` + nflverse schedule + crosswalk | P0 | 📋 |
-| `ff_get_player_stats` | League-context stat lines with the **scoring engine's recomputation and a `match` flag** against Yahoo's `player_points` — the product's integrity check, one call away | Yahoo `players/stats;type=week` + engine | P0 | 📋 |
+| `ff_get_roster` | A roster with slots, eligibility, statuses, byes, `percent_owned`, and the **lock schedule computed once** (kickoff → `lock_at` per player, `latest_execution_time`, empty starting slots, IR-ineligible players, over-limit flag) | Yahoo roster with `out=stats,ownership,percent_owned` + nflverse schedule + crosswalk | P0 | ✅ |
+| `ff_get_player_stats` | League-context stat lines with the **scoring engine's recomputation and a `match` flag** against Yahoo's `player_points` — the product's integrity check, one call away | Yahoo `players/stats;type=week` + engine | P0 | ✅ |
 
 ### Players and market
 
 | Tool | What it does | Source | Priority | Status |
 |---|---|---|---|---|
-| `ff_search_players` | Resolve a name to a `player_key` — the **only** path from a name to an id on any write path — with ownership and crosswalk status (`method`, `confidence`) | Yahoo `players;search` + ownership + crosswalk | P0 | 📋 |
-| `ff_list_players` | Browse a pool (free agents, waivers, taken, all) with ownership, `percent_owned_delta` (labelled a **competition** signal, never a detection signal), optional stats, next opponent and kickoff; paginated 25/page behind the scenes | Yahoo players collection | P0 | 📋 |
+| `ff_search_players` | Resolve a name to a `player_key` — the **only** path from a name to an id on any write path — with ownership and crosswalk status (`method`, `confidence`) | Yahoo `players;search` + ownership + crosswalk | P0 | ✅ |
+| `ff_list_players` | Browse a pool (free agents, waivers, taken, all) with ownership, `percent_owned_delta` (labelled a **competition** signal, never a detection signal), optional stats, next opponent and kickoff; paginated 25/page behind the scenes | Yahoo players collection | P0 | ✅ |
 | `ff_list_trending_players` | Sleeper trending adds/drops mapped into *this* league's availability; carries `license: "non-commercial"` | Sleeper `trending/add\|drop` + Yahoo ownership | P1 | 📋 |
 
 ### Stats and usage
 
 | Tool | What it does | Source | Priority | Status |
 |---|---|---|---|---|
-| `ff_get_injuries` | Official designations, practice trend, Yahoo and Sleeper status side by side with `sources_agree`, a first-cut `p_active` with its basis; **on game day availability comes from Yahoo status only** (`p_active_basis: "yahoo_gameday_status"`) because inactives exist in no other free source | nflverse `injuries` (Wed–Sat) · Yahoo status · Sleeper | P0 | 📋 |
-| `ff_get_schedule` | Kickoffs, byes, betting lines → implied team totals, roof, surface, rest days, weather where evidenced — the market anchor, one row per game | nflverse `schedules` · The Odds API (optional) · Open-Meteo / NWS | P0 | 📋 |
+| `ff_get_injuries` | Official designations, practice trend, Yahoo and Sleeper status side by side with `sources_agree`, a first-cut `p_active` with its basis; **on game day availability comes from Yahoo status only** (`p_active_basis: "yahoo_gameday_status"`) because inactives exist in no other free source | nflverse `injuries` (Wed–Sat) · Yahoo status · Sleeper | P0 | ✅ |
+| `ff_get_schedule` | Kickoffs, byes, betting lines → implied team totals, roof, surface, rest days, weather where evidenced — the market anchor, one row per game | nflverse `schedules` · The Odds API (optional) · Open-Meteo / NWS | P0 | ✅ |
 | `ff_get_player_usage` | Per-game opportunity and efficiency inputs, trailing-window summaries with change points, `xFP − actual` gap; `routes_proxy` named honestly (no free in-season route data exists) | nflverse `stats_player_week`, `snap_counts`, pbp subset · ffopportunity | P1 | 📋 |
 | `ff_get_depth_chart` | A team's depth chart with the snap-share cross-check beside it | nflverse `depth_charts` · Sleeper | P1 | 📋 |
 | `ff_get_defense_profile` | Regressed opponent adjustments (shrunk, ramping with weeks), pace, pass rate, pressure — never a raw points-allowed table | nflverse `stats_team_week`, pbp · FTN charting | P1 | 📋 |
@@ -114,10 +114,10 @@ Each engine implements a named method from the analytics research; every result 
 
 | Tool | What it decides | Method implemented | Priority | Status |
 |---|---|---|---|---|
-| `ff_project_players` | Floor / median / ceiling per player-week by simulation, stored format-agnostically and **scored per league** through the engine; v1 `v1-trailing` uses nflverse stat lines with position-level spreads (`basis: position_cv`), v2 `v2-opportunity` simulates stat lines (`basis: player_sim`) | 05 §1 (projection construction: market anchor, usage shares, shrinkage, `P(active)` mixture, simulated distributions), §19.1 | P0 → P2 | 📋 |
-| `ff_analyze_lineup` | Start/sit as **assignment under the head-to-head objective** — protect when favoured, chase when behind — with Thursday/Monday option value, conditional lineups for Questionable players, `coin_flip` flags; `objective: mean` is the v1 default, `pwin` opt-in until the retrospective shows it wins | 05 §3 (start/sit), §11.1, §14.2, §14.4, §14.5 | P0 | 📋 |
-| `ff_analyze_matchup` | H2H win probability (`pre`), live conditioning split final/live/pending (`live`), and the season simulation behind `P(playoffs)` (`season`) | 05 §11 (win probability; season simulation ≥ 10 000 paths) | P0 / P1 | 📋 |
-| `ff_analyze_waivers` | Usage-first opportunity detection **before points**, weeks of usable value on *your* roster, competition, FAAB bid curve with shading or claim/wait, the drop with re-add risk; the P0 slice is **K/DEF streaming** (`positions: [K, DEF]`, two-week look-ahead) | 05 §4 (waivers and FAAB), §8 (K and DEF streaming), §14.3 | P0 (K/DEF) / P1 (all) | 📋 |
+| `ff_project_players` | Floor / median / ceiling per player-week by simulation, stored format-agnostically and **scored per league** through the engine; v1 `v1-trailing` uses nflverse stat lines with position-level spreads (`basis: position_cv`), v2 `v2-opportunity` simulates stat lines (`basis: player_sim`) | 05 §1 (projection construction: market anchor, usage shares, shrinkage, `P(active)` mixture, simulated distributions), §19.1 | P0 → P2 | ✅ |
+| `ff_analyze_lineup` | Start/sit as **assignment under the head-to-head objective** — protect when favoured, chase when behind — with Thursday/Monday option value, conditional lineups for Questionable players, `coin_flip` flags; `objective: mean` is the v1 default, `pwin` opt-in until the retrospective shows it wins | 05 §3 (start/sit), §11.1, §14.2, §14.4, §14.5 | P0 | ✅ |
+| `ff_analyze_matchup` | H2H win probability (`pre`), live conditioning split final/live/pending (`live`), and the season simulation behind `P(playoffs)` (`season`) | 05 §11 (win probability; season simulation ≥ 10 000 paths) | P0 / P1 | ✅ |
+| `ff_analyze_waivers` | Usage-first opportunity detection **before points**, weeks of usable value on *your* roster, competition, FAAB bid curve with shading or claim/wait, the drop with re-add risk; the P0 slice is **K/DEF streaming** (`positions: [K, DEF]`, two-week look-ahead) | 05 §4 (waivers and FAAB), §8 (K and DEF streaming), §14.3 | P0 (K/DEF) / P1 (all) | ✅ |
 | `ff_analyze_replacement` | Replacement level by roster allocation (flex-aware), VOR/xVBD, drop-off curves, tiers, streamability | 05 §2 (replacement level, VOR/VBD, scarcity) | P1 | 📋 |
 | `ff_analyze_trade` | Roster-contextual value change for **both** sides with intervals, weekly and playoff impact, implied drop, bye/injury adjustments, ratification risk, counters, partner search; `fair` when the interval spans zero | 05 §5 (trade evaluation), §14.6 | P1 | 📋 |
 | `ff_analyze_injury_cascade` | Beneficiaries by role affinity with `p_role_holds`, an honest evidence grade (`hypothesis_only` when nothing confirms), market reaction, returning-player ramp | 05 §6 (injury cascade) | P1 | 📋 |
@@ -125,9 +125,9 @@ Each engine implements a named method from the analytics research; every result 
 | `ff_analyze_roster` | Rest-of-season construction: bench roles, handcuff and stash values computed per case, consolidation, IR-slot moves, roster-limit compliance | 05 §9 (roster construction), §14.1, §14.3 | P1 | 📋 |
 | `ff_analyze_league_activity` | What rivals did, what it cost (price of a point from history), who needs what — the league activity digest | 05 §4.3, §5.7, §12 | P1 | 📋 |
 | `ff_analyze_evidence` | News-vs-stats disagreement flags with a calibrated source × claim reliability table; until the table has n ≥ 200 every result says `"priors are hand-set"` | 05 §10 (news-vs-stats disagreement) | P2 | 📋 |
-| `ff_record_recommendation` | Writes the recommendation **the model actually made** and the alternatives it offered to the local log (the calibration loop's enabling condition); its free text is untrusted on read-back | 05 §12 (what to log), §19.3 | P0 | 📋 |
-| `ff_analyze_retrospective` | Scores last week's calls by regret and proper scoring rules, **leading with the metrics that reach n ≥ 30 for one league** (per-player CRPS/pinball/coverage, swap regret, `P(active)` Brier) and naming the rest as "n too small" | 05 §12 (retrospective and calibration) | P0 | 📋 |
-| `ff_list_recommendations` | Browse the recommendation log (tool twin of `ff://rec/…`) | — | P0 | 📋 |
+| `ff_record_recommendation` | Writes the recommendation **the model actually made** and the alternatives it offered to the local log (the calibration loop's enabling condition); its free text is untrusted on read-back | 05 §12 (what to log), §19.3 | P0 | ✅ |
+| `ff_analyze_retrospective` | Scores last week's calls by regret and proper scoring rules, **leading with the metrics that reach n ≥ 30 for one league** (per-player CRPS/pinball/coverage, swap regret, `P(active)` Brier) and naming the rest as "n too small" | 05 §12 (retrospective and calibration) | P0 | ✅ |
+| `ff_list_recommendations` | Browse the recommendation log (tool twin of `ff://rec/…`) | — | P0 | ✅ |
 | `ff_analyze_scoring` | What-if scoring of stat lines under this league's settings and named variants | 05 §15 | later | 📋 |
 | `ff_analyze_draft` | Best available by xVBD, tiers, ADP gaps, run alerts | 05 §13 | later | 📋 |
 
@@ -146,7 +146,7 @@ Each engine implements a named method from the analytics research; every result 
 
 | Feature | What it does | Priority | Status |
 |---|---|---|---|
-| `ff_get_status` tool · `ff://status` resource | Server version and protocol eras, auth and provisioning state, capabilities, limiter state, per-source freshness and licence, crosswalk coverage, store size, pending journal rows, launchd job results, the offline doctor rows | P0 | 📋 |
+| `ff_get_status` tool · `ff://status` resource | Server version and protocol eras, auth and provisioning state, capabilities, limiter state, per-source freshness and licence, crosswalk coverage, store size, pending journal rows, launchd job results, the offline doctor rows | P0 | ✅ |
 | `ff auth` | One-time Yahoo login; `oob` by default (no port, no certificate, no callback to register), an https-localhost listener on a **fixed** port as opt-in | Phase 1b | 📋 |
 | `ff doctor` | Twenty-two checks, offline by default (Node ≥ 24.15, absolute launch paths, mode bits, token file, secret file, gate key, store health, dataset ages, pending journal, launchd jobs, `.npmrc`, the write flag's session warning, stale `dist/`, the client's own MCP log tail); `--online` adds token validity, provisioning, clock skew and source reachability; `--fix` repairs with consent; never rotates a token | Phase 1a/1b | 📋 |
 | `ff status` | The one-page dashboard the resource and tool also serve | Phase 1a | 📋 |
@@ -510,11 +510,11 @@ Every tool below comes from [`docs/plan/07-tool-catalog.md`](docs/plan/07-tool-c
 
 | Tool | Purpose | Key inputs | Output summary | Fam. | Prio. | Status |
 |---|---|---|---|---|---|---|
-| `ff_list_leagues` | Leagues and your team per league | `season?`, `include_finished?` | `leagues[]` with `league_key`, `num_teams`, `scoring_type`, `current_week`, `my_team`, `in_allow_list` | PF | P0 | 📋 |
-| `ff_get_league` | Normalised settings digest | `include?` (league · scoring · roster · rules · weeks · stat_map) | `scoring.rules[]` with canonical names and bonuses, `bracket_families[]`, `unmapped_stat_ids[]`, `settings_hash`; `roster.slots[]` by class; `rules` (waivers, FAAB, trades, playoffs, limits — `null` where Yahoo does not expose a value); `weeks[]` | PF | P0 | 📋 |
-| `ff_get_standings` | Standings plus per-team scalars | — | `teams[]` with record, points, `waiver_priority`, `faab_balance`, `number_of_moves`, `roster_adds_week`, `clinched_playoffs`; `playoff_line` | PF | P0 | 📋 |
-| `ff_get_scoreboard` | Matchups with Yahoo's numbers as cross-checks | `week?`, `team_key?` | `matchups[]` with status, `points`, `projected_points_yahoo`, `win_probability_yahoo`; `meta.provisional` | PF | P0 | 📋 |
-| `ff_list_transactions` | Transactions merged with persisted history | `types?`, `team_key?`, `count?` 1–200, `since?` | `transactions[]` with players, bids, notes (wrapped); `history_coverage` | PF | P0 | 📋 |
+| `ff_list_leagues` | Leagues and your team per league | `season?`, `include_finished?` | `leagues[]` with `league_key`, `num_teams`, `scoring_type`, `current_week`, `my_team`, `in_allow_list` | PF | P0 | ✅ |
+| `ff_get_league` | Normalised settings digest | `include?` (league · scoring · roster · rules · weeks · stat_map) | `scoring.rules[]` with canonical names and bonuses, `bracket_families[]`, `unmapped_stat_ids[]`, `settings_hash`; `roster.slots[]` by class; `rules` (waivers, FAAB, trades, playoffs, limits — `null` where Yahoo does not expose a value); `weeks[]` | PF | P0 | ✅ |
+| `ff_get_standings` | Standings plus per-team scalars | — | `teams[]` with record, points, `waiver_priority`, `faab_balance`, `number_of_moves`, `roster_adds_week`, `clinched_playoffs`; `playoff_line` | PF | P0 | ✅ |
+| `ff_get_scoreboard` | Matchups with Yahoo's numbers as cross-checks | `week?`, `team_key?` | `matchups[]` with status, `points`, `projected_points_yahoo`, `win_probability_yahoo`; `meta.provisional` | PF | P0 | ✅ |
+| `ff_list_transactions` | Transactions merged with persisted history | `types?`, `team_key?`, `count?` 1–200, `since?` | `transactions[]` with players, bids, notes (wrapped); `history_coverage` | PF | P0 | ✅ |
 | `ff_get_draft_results` | Draft picks and costs | — | — | PF | later | 📋 |
 
 </details>
@@ -524,8 +524,8 @@ Every tool below comes from [`docs/plan/07-tool-catalog.md`](docs/plan/07-tool-c
 
 | Tool | Purpose | Key inputs | Output summary | Fam. | Prio. | Status |
 |---|---|---|---|---|---|---|
-| `ff_get_roster` | A roster with the lock schedule computed once | `team_key?`, `week?`, `detail?` | `players[]` (slot, eligibility, status, `injury_note`, bye, opponent, `kickoff`, `lock_at`, ownership, week points); `lock_schedule[]`; `empty_starting_slots[]`; `ir_ineligible_in_ir[]`; `over_limit`; `latest_execution_time` | PF | P0 | 📋 |
-| `ff_get_player_stats` | League-context stat lines with the engine's recomputation | `player_keys[1..25]`, `type: week \| season`, `week?` | `players[]` with `stats[]` (id, canonical, value), `yahoo_points`, `engine_points`, `engine_complete`, `match`, `unmapped_stat_ids[]`; `settings_hash` | PF | P0 | 📋 |
+| `ff_get_roster` | A roster with the lock schedule computed once | `team_key?`, `week?`, `detail?` | `players[]` (slot, eligibility, status, `injury_note`, bye, opponent, `kickoff`, `lock_at`, ownership, week points); `lock_schedule[]`; `empty_starting_slots[]`; `ir_ineligible_in_ir[]`; `over_limit`; `latest_execution_time` | PF | P0 | ✅ |
+| `ff_get_player_stats` | League-context stat lines with the engine's recomputation | `player_keys[1..25]`, `type: week \| season`, `week?` | `players[]` with `stats[]` (id, canonical, value), `yahoo_points`, `engine_points`, `engine_complete`, `match`, `unmapped_stat_ids[]`; `settings_hash` | PF | P0 | ✅ |
 
 </details>
 
@@ -534,8 +534,8 @@ Every tool below comes from [`docs/plan/07-tool-catalog.md`](docs/plan/07-tool-c
 
 | Tool | Purpose | Key inputs | Output summary | Fam. | Prio. | Status |
 |---|---|---|---|---|---|---|
-| `ff_search_players` | Name → `player_key`, with crosswalk status | `query` 1–64, `position?`, `limit?` 1–25 | `players[]` with `ownership`, `percent_owned(_delta)`, `crosswalk { method, confidence }`, `has_recent_notes` | PF | P0 | 📋 |
-| `ff_list_players` | Browse a pool | `status?` A · FA · W · T · K, `position?`, `sort?`, `with_stats?`, `limit?` 1–100, `offset?` | `players[]` with ownership, `competition_signal`, points, next opponent and kickoff; `page` | PF | P0 | 📋 |
+| `ff_search_players` | Name → `player_key`, with crosswalk status | `query` 1–64, `position?`, `limit?` 1–25 | `players[]` with `ownership`, `percent_owned(_delta)`, `crosswalk { method, confidence }`, `has_recent_notes` | PF | P0 | ✅ |
+| `ff_list_players` | Browse a pool | `status?` A · FA · W · T · K, `position?`, `sort?`, `with_stats?`, `limit?` 1–100, `offset?` | `players[]` with ownership, `competition_signal`, points, next opponent and kickoff; `page` | PF | P0 | ✅ |
 | `ff_list_trending_players` | Sleeper trending mapped to league availability | `kind: add \| drop`, `lookback_hours?`, `limit?` | `players[]` with `count`, `league_status`, `owner_team_key`; attribution `license: "non-commercial"` | EX | P1 | 📋 |
 
 </details>
@@ -546,8 +546,8 @@ Every tool below comes from [`docs/plan/07-tool-catalog.md`](docs/plan/07-tool-c
 | Tool | Purpose | Key inputs | Output summary | Fam. | Prio. | Status |
 |---|---|---|---|---|---|---|
 | `ff_get_player_usage` | Opportunity and efficiency inputs with trailing summaries | `players: PlayerSelector`, `window?` 1–17, `include_prior_season?` | per player: `trailing` (snap, target, carry, red-zone shares, WOPR, `xfp_gap_sum`, `change_point`), `games[]` (full only), `role_confidence_games`, `data_gaps[]`; `routes_proxy` named as a proxy | EX | P1 | 📋 |
-| `ff_get_injuries` | Designations, practice trend, `p_active` | `players?: PlayerSelector` (default: my roster), `only_flagged?` | per player: `official`, `yahoo`, `sleeper` blocks with `as_of`; `p_active` + `p_active_basis`; `trend`; `ir_eligible`; `sources_agree` (suppressed on game day); `game_day` | EX | P0 | 📋 |
-| `ff_get_schedule` | Kickoffs, byes, lines, weather | `weeks?` (≤ 6), `nfl_team?`, `include_weather?`, `include_lines?` | `games[]` with `kickoff_et`, `roof`, `rest_days`, `lines { spread_line, total_line, implied, moneyline, secondary }`, `weather`; `byes` | EX | P0 | 📋 |
+| `ff_get_injuries` | Designations, practice trend, `p_active` | `players?: PlayerSelector` (default: my roster), `only_flagged?` | per player: `official`, `yahoo`, `sleeper` blocks with `as_of`; `p_active` + `p_active_basis`; `trend`; `ir_eligible`; `sources_agree` (suppressed on game day); `game_day` | EX | P0 | ✅ |
+| `ff_get_schedule` | Kickoffs, byes, lines, weather | `weeks?` (≤ 6), `nfl_team?`, `include_weather?`, `include_lines?` | `games[]` with `kickoff_et`, `roof`, `rest_days`, `lines { spread_line, total_line, implied, moneyline, secondary }`, `weather`; `byes` | EX | P0 | ✅ |
 | `ff_get_depth_chart` | Depth chart with the snap cross-check | `nfl_team?` or `player`, `positions?` | `teams[].groups[].slots[]` with `rank`, `snap_pct_last3`; `sleeper_cross_check` | EX | P1 | 📋 |
 | `ff_get_defense_profile` | Regressed opponent adjustments | `nfl_team?` or `all`, `position?`, `window_weeks?` 4–17 | `defenses[]` with `afpa` per position (allowed, league mean, adjusted, `shrink_w`, multiplier), pace, pass rate, pressure, EPA allowed; `evidence_note` | EX | P1 | 📋 |
 | `ff_get_news` | RSS items matched to players with a claim extract | `players?`, `nfl_team?`, `since_hours?` 1–168, `limit?` 1–50, `sources?` | `items[]` with `players_matched[]`, `title`/`blurb` (wrapped), `url` (text only), `claim { type, direction, extractor }`, `reliability_prior` | EX | P1 | 📋 |
@@ -559,20 +559,20 @@ Every tool below comes from [`docs/plan/07-tool-catalog.md`](docs/plan/07-tool-c
 
 | Tool | Purpose | Key inputs | Output summary | Fam. | Prio. | Status |
 |---|---|---|---|---|---|---|
-| `ff_project_players` | Distributions per player-week, scored per league | `players: PlayerSelector` or `pool`, `horizon: week \| ros \| season`, `week?`, `n_sims?` 1 000–20 000, `seed?`, `include_stat_line?` | `model_version`; `projections[]` with `weeks[].points: Dist` (`basis` stamped), `ros_total`, `opportunity`, `shrinkage[]`, `multipliers`, `drivers[]`, `assumptions[]`; `inputs[]` | AN | P0 → P2 | 📋 |
-| `ff_analyze_lineup` | Start/sit under the H2H objective | `team_key?`, `week?`, `objective?: mean \| pwin \| blend`, `only_unlocked?`, `exclude?`, `force_start?`, `compare?[]` | `recommended_lineup[]`, `mode` protect/chase/neutral with basis, `p_win_before/after` + interval, `swaps[]` (`delta_e`, `delta_pwin` as sign + band in `position_cv` mode, `coin_flip`, option value), `conditionals[]`, `stack_flags[]`, `lock_schedule[]`, `no_move`, `rec` | AN | P0 | 📋 |
-| `ff_analyze_matchup` | Win probability — pre, live, season | `mode?: pre \| live \| season`, `method?: normal \| mc`, `n_sims?` | `p_win` + interval, `mu/sigma` both sides, `live` split (final/live/pending), `yahoo_cross_check`, `actionable_slots[]`, `season { p_playoffs, p_bye, p_alive_by_week[], seed_distribution[] }`, `rec` | AN | P0 (pre) · P1 | 📋 |
+| `ff_project_players` | Distributions per player-week, scored per league | `players: PlayerSelector` or `pool`, `horizon: week \| ros \| season`, `week?`, `n_sims?` 1 000–20 000, `seed?`, `include_stat_line?` | `model_version`; `projections[]` with `weeks[].points: Dist` (`basis` stamped), `ros_total`, `opportunity`, `shrinkage[]`, `multipliers`, `drivers[]`, `assumptions[]`; `inputs[]` | AN | P0 → P2 | ✅ |
+| `ff_analyze_lineup` | Start/sit under the H2H objective | `team_key?`, `week?`, `objective?: mean \| pwin \| blend`, `only_unlocked?`, `exclude?`, `force_start?`, `compare?[]` | `recommended_lineup[]`, `mode` protect/chase/neutral with basis, `p_win_before/after` + interval, `swaps[]` (`delta_e`, `delta_pwin` as sign + band in `position_cv` mode, `coin_flip`, option value), `conditionals[]`, `stack_flags[]`, `lock_schedule[]`, `no_move`, `rec` | AN | P0 | ✅ |
+| `ff_analyze_matchup` | Win probability — pre, live, season | `mode?: pre \| live \| season`, `method?: normal \| mc`, `n_sims?` | `p_win` + interval, `mu/sigma` both sides, `live` split (final/live/pending), `yahoo_cross_check`, `actionable_slots[]`, `season { p_playoffs, p_bye, p_alive_by_week[], seed_distribution[] }`, `rec` | AN | P0 (pre) · P1 | ✅ |
 | `ff_analyze_replacement` | Replacement level, VOR, tiers | `positions?`, `horizon?`, `week?`, `baseline?: starter \| stream \| both` | per position: weekly and ROS baselines, `curve[]`, `tiers[]`, `streamability`, `flex_allocation_trace[]`; `players[]` with `vor_ros: Dist`, `xvbd`, tier | AN | P1 | 📋 |
-| `ff_analyze_waivers` | Waiver targets, bids, K/DEF streaming | `positions?` (P0: K/DEF only), `candidates?` ≤ 25, `horizon_weeks?`, `look_ahead?` 0–2, `adds_remaining?`, `faab_budget?`, `reserve?`, `include_drop?` | `candidates[]` with `signals[]`, `weeks_of_value`, `p_role_holds[]`, `marginal_value: Dist`, `competition`, `bid { b_star, p_win_curve[], lambda }`, `claim_or_wait`, `drop` with re-add risk, `kdef` block; `hold_vs_stream`; `waiver_clearing_time`; `rec` | AN | P0 (K/DEF) · P1 | 📋 |
+| `ff_analyze_waivers` | Waiver targets, bids, K/DEF streaming | `positions?` (P0: K/DEF only), `candidates?` ≤ 25, `horizon_weeks?`, `look_ahead?` 0–2, `adds_remaining?`, `faab_budget?`, `reserve?`, `include_drop?` | `candidates[]` with `signals[]`, `weeks_of_value`, `p_role_holds[]`, `marginal_value: Dist`, `competition`, `bid { b_star, p_win_curve[], lambda }`, `claim_or_wait`, `drop` with re-add risk, `kdef` block; `hold_vs_stream`; `waiver_clearing_time`; `rec` | AN | P0 (K/DEF) · P1 | ✅ |
 | `ff_analyze_trade` | Trade evaluation and partner search | `offer { partner_team_key, give[], get[] }` or `find_partners { need_position, max_partners }`, `horizon?`, `risk?` | `delta_me`/`delta_partner: Dist`, `weekly_impact[]`, `playoff_weeks_impact`, `implied_drop`, `bye_conflicts[]`, `why_they_accept[]`, `ratification_risk`, `counters[]`, `verdict`, `deadline`, `rec` — or `partners[]` | AN | P1 | 📋 |
 | `ff_analyze_injury_cascade` | Beneficiaries of an absence | `player: PlayerSelector`, `assume_weeks_out?` | `expected_weeks` (p25/p50/p75, basis), `beneficiaries[]` with `delta_opportunity`, `delta_proj_by_week[]`, `p_role_holds`, `evidence`, availability; `hypothesis_only`; `rec` | AN | P1 | 📋 |
 | `ff_analyze_schedule` | Bye and playoff-week planning | `weeks?`, `include_playoffs?` | `weeks[]` with `lineup_pts: Dist`, `holes[]`, `bye_cluster_cost`, weight; `worst_weeks[]`; `fixes[]`; `playoff_weeks` with `matchup_multipliers[]` and `shrink_w`; `rec` | AN | P1 | 📋 |
 | `ff_analyze_roster` | Rest-of-season construction | `competing?: auto \| yes \| eliminated` | `phase`, `bench_plan[]`, `handcuff_values[]`, `stash_values[]`, `consolidation_candidates[]`, `droppable[]`, `ir { … }`, `over_limit`, `adds_remaining`, `rec` | AN | P1 | 📋 |
 | `ff_analyze_evidence` | News-vs-stats reconciliation with a calibrated table | `player`, `claim? { text ≤ 400, source?, time?, type? }` | `flag`, `prior`, `evidence[]`, `posterior`, `what_would_confirm[]`, `consequence`, `calibration_state { table_n, note }`, `rec` | AN | P2 | 📋 |
 | `ff_analyze_league_activity` | League activity digest | `since_days?` 1–30, `include_rival_needs?` | `transactions` by team with FAAB spent, `standings_movement[]`, `pending_trades_visible[]`, `top_added[]`/`top_dropped[]`, `rival_needs[]`, `faab_price_model`, `rec` | AN | P1 | 📋 |
-| `ff_record_recommendation` | Write the recommendation log | `kind`, `week`, `rec`, `alternatives[]`, `source_calls[]`, `followed_hint?`, `client_ref?`, `note?` ≤ 200 | `log_id`, `recorded_at`, `deduplicated` | LW | P0 | 📋 |
-| `ff_analyze_retrospective` | Score last week's calls | `week?`, `kinds?`, `min_n?` (30) | `calls[]` (`followed`, `regret`, `decisive`), `metrics` (`per_player` CRPS/pinball/coverage/Spearman, `swap_regret`, `brier` per type or "n too small"), `n_by_metric[]`, `sample_size_caveats[]`, `rec` | AN | P0 | 📋 |
-| `ff_list_recommendations` | Browse the log | `week?`, `kind?`, `limit?`, `offset?` | `items[]` with `action_summary` (path-listed as untrusted), `followed`; `page` | OP | P0 | 📋 |
+| `ff_record_recommendation` | Write the recommendation log | `kind`, `week`, `rec`, `alternatives[]`, `source_calls[]`, `followed_hint?`, `client_ref?`, `note?` ≤ 200 | `log_id`, `recorded_at`, `deduplicated` | LW | P0 | ✅ |
+| `ff_analyze_retrospective` | Score last week's calls | `week?`, `kinds?`, `min_n?` (30) | `calls[]` (`followed`, `regret`, `decisive`), `metrics` (`per_player` CRPS/pinball/coverage/Spearman, `swap_regret`, `brier` per type or "n too small"), `n_by_metric[]`, `sample_size_caveats[]`, `rec` | AN | P0 | ✅ |
+| `ff_list_recommendations` | Browse the log | `week?`, `kind?`, `limit?`, `offset?` | `items[]` with `action_summary` (path-listed as untrusted), `followed`; `page` | OP | P0 | ✅ |
 | `ff_analyze_scoring` | What-if scoring under settings variants | `lines[1..25]`, `variants?[0..5]` | `results[]` with `points_league`, `by_variant` | AN | later | 📋 |
 | `ff_analyze_draft` | Draft assistant | — | — | AN | later | 📋 |
 
@@ -600,7 +600,7 @@ Every `ff_prepare_*` returns `{ prepared_id, kind, diff { human, structured[] },
 
 | Tool | Purpose | Key inputs | Output summary | Fam. | Prio. | Status |
 |---|---|---|---|---|---|---|
-| `ff_get_status` | The status snapshot | `include_checks?` | `server` (version, SDK, protocol eras, node, `tool_contract`), `auth`, `capabilities { read, write {…} }`, `league`, `limiter`, `sources[]` with licence and age, `crosswalk`, `store`, `journal`, `jobs[]`, `checks[]` | OP | P0 | 📋 |
+| `ff_get_status` | The status snapshot | `include_checks?` | `server` (version, SDK, protocol eras, node, `tool_contract`), `auth`, `capabilities { read, write {…} }`, `league`, `limiter`, `sources[]` with licence and age, `crosswalk`, `store`, `journal`, `jobs[]`, `checks[]` | OP | P0 | ✅ |
 | `ff_get_playbook` | A Skill's procedure text for clients without Skills or prompts | `skill` | `body`, `references[]` | OP | later | 📋 |
 | `ff_debug_echo` · `ff_debug_elicit` | Two throwaway spikes, **fixture mode only**: does the client forward `structuredContent` to the model? does it render a form-mode elicitation? Results go to `docs/HANDOFF.md` and are deleted afterwards | — | a nonce · an APPROVE/REJECT round trip | OP | Phase 1a week 1 · Phase 1b | 📋 |
 
@@ -613,13 +613,13 @@ Resources are read-side twins of tool data, application-driven, `cacheScope: "pr
 
 | URI | Content | `ttlMs` | Status |
 |---|---|---|---|
-| `ff://league` | The operator-configured league identity — set by you, never by the model | 86 400 000 | 📋 |
-| `ff://league/settings` | The `ff_get_league` digest | 86 400 000 | 📋 |
+| `ff://league` | The operator-configured league identity — set by you, never by the model | 86 400 000 | ✅ |
+| `ff://league/settings` | The `ff_get_league` digest | 86 400 000 | ✅ |
 | `ff://game/stat-categories` | The season's full stat universe with canonical names | 604 800 000 | 📋 |
-| `ff://status` · `ff://status/freshness` | Status without checks · the per-class freshness report | 60 000 | 📋 |
+| `ff://status` · `ff://status/freshness` | Status without checks · the per-class freshness report | 60 000 | ✅ |
 | `ff://roster/snapshot` | Last night's roster snapshot and its diff | 60 000 | 📋 |
-| `ff://docs/tool-outputs` | The tool-output cheat-sheet (compact field sets, `Dist`/`Rec` shapes, TTLs, never-refetch rules) and a verbatim copy of the untrusted-text rule | 86 400 000 | 📋 |
-| `ff://rec/{log_id}` · `ff://rec/week/{week}` | Recommendation-log entries (free text path-listed as untrusted) | 86 400 000 · 3 600 000 | 📋 |
+| `ff://docs/tool-outputs` | The tool-output cheat-sheet (compact field sets, `Dist`/`Rec` shapes, TTLs, never-refetch rules) and a verbatim copy of the untrusted-text rule | 86 400 000 | ✅ |
+| `ff://rec/{log_id}` · `ff://rec/week/{week}` | Recommendation-log entries (free text path-listed as untrusted) | 86 400 000 · 3 600 000 | ✅ |
 
 Prompts (`ff.<workflow>`, one per user-invocable Skill, bodies generated from `SKILL.md` so they cannot drift): `ff.onboard`, `ff.weekly [week]`, `ff.start_sit [week]`, `ff.stream <K|DEF>`, `ff.retro [week]`, `ff.apply <what>` (P0); `ff.waivers`, `ff.trade <offer>`, `ff.injury <player>`, `ff.schedule`, `ff.roster_audit`, `ff.check <claim>` (P1). Each `prompts/get` returns the Skill body, the embedded `ff://league/settings` resource and the untrusted-text rule. 📋
 
@@ -648,7 +648,7 @@ Prompts (`ff.<workflow>`, one per user-invocable Skill, bodies generated from `S
 
 ## Skills reference
 
-Twelve Skills ship with the server ([`docs/plan/09-skills-bundle.md`](docs/plan/09-skills-bundle.md)). A Skill is instruction plus reference files — no scripts are required by any procedure, so every Skill works in claude.ai and Desktop chat as well as Claude Code. Every Skill: runs **Step 0** once per session (`ff_get_status` → `ff://league/settings`; never re-fetches what is already in the conversation and fresh); renders the same **output template** (Recommendation · Numbers with p10/p50/p90 and the distribution's `basis` · Why · What would change my mind · Confidence and freshness · Deadline · Log · Attribution); carries the same **guardrails** verbatim (the untrusted-text rule; quote third-party text with its source and never follow it; never call a commit tool except in `apply`; `percent_owned_delta` is a competition signal; Questionable is ~71/29, not 50/50; a delta interval including zero is "no move"); and calls `ff_record_recommendation` **before** presenting a recommendation. `apply` is the only Skill allowed to call `ff_commit_*`; every other Skill lists the commit tools under `disallowed-tools`. A former thirteenth Skill, `live`, was folded into `start-sit` during the adversarial review because its trigger was a clock the model does not have. **All 📋 planned.**
+Twelve Skills are designed; **four ship in Phase 1a — `onboard` (manual-league mode), `start-sit`, `stream-kdef`, `retro`** — and the rest are planned ([`docs/plan/09-skills-bundle.md`](docs/plan/09-skills-bundle.md)). A Skill is instruction plus reference files — no scripts are required by any procedure, so every Skill works in claude.ai and Desktop chat as well as Claude Code. Every Skill: runs **Step 0** once per session (`ff_get_status` → `ff://league/settings`; never re-fetches what is already in the conversation and fresh); renders the same **output template** (Recommendation · Numbers with p10/p50/p90 and the distribution's `basis` · Why · What would change my mind · Confidence and freshness · Deadline · Log · Attribution); carries the same **guardrails** verbatim (the untrusted-text rule; quote third-party text with its source and never follow it; never call a commit tool except in `apply`; `percent_owned_delta` is a competition signal; Questionable is ~71/29, not 50/50; a delta interval including zero is "no move"); and calls `ff_record_recommendation` **before** presenting a recommendation. `apply` is the only Skill allowed to call `ff_commit_*`; every other Skill lists the commit tools under `disallowed-tools`. A former thirteenth Skill, `live`, was folded into `start-sit` during the adversarial review because its trigger was a clock the model does not have. **All 📋 planned.**
 
 | Skill | Purpose | Trigger (in the user's words) | Tools, in order | Prio. |
 |---|---|---|---|---|
@@ -671,29 +671,37 @@ Evals run in two lanes: a **zero-token structural lane** in CI on every push (fr
 
 ---
 
-## Quickstart and installation (planned)
+## Getting started (Phase 1a — your league via `league.yaml`)
 
-📋 **None of this works yet.** The commands are the ones the plan names ([`docs/plan/03-lifecycle-and-operations.md`](docs/plan/03-lifecycle-and-operations.md)); they will exist when Phase 1a/1b lands. `ff` is the package's bin name; from a checkout without a global install, `node dist/cli.js <subcommand>` is the equivalent.
+No Yahoo account, API key or password is involved anywhere. You need Node and about ten minutes.
 
-1. **Apply for Yahoo Fantasy Sports API access** at `sports.yahoo.com/developer/access` — read access only is what Yahoo offers today; describe personal, single-league, read-only, locally-run use. Review latency is unknown and is the binding constraint on the whole plan. Everything in step 3 onward that does not need Yahoo can be used against a hand-filled league file in the meantime (`ManualLeagueProvider`, Phase 1a).
-2. **Register the app** once approved and note the client id and client secret. Register **no callback URL**: the default login path is `oob` (you paste a code). Only the opt-in `--listener` path needs `https://localhost:8765/callback` registered.
-3. **Node ≥ 24.15** (the line on which `node:sqlite` is a release candidate; Node 22 prints an experimental warning on every start and is rejected): `fnm install 24 && fnm use 24`.
-4. **Clone, install, build:**
+1. **Node ≥ 24.15** (`node:sqlite` is a release candidate on 24): `fnm install 24` (or any Node 24 install).
+2. **Clone outside iCloud-synced folders** (`~/Documents` and `~/Desktop` sync on many Macs and iCloud
+   creates conflict copies inside `node_modules`), then install and build:
    ```sh
-   git clone https://github.com/ChadPapineau/yahoo-fantasy-football-mcp.git
-   cd yahoo-fantasy-football-mcp
-   npm ci          # exact pins from the committed lockfile; install scripts are disabled by .npmrc
-   npm run build   # emits dist/cli.js — the file every launch config points at
+   git clone https://github.com/ChadPapineau/yahoo-fantasy-football-mcp.git ~/Developer/yahoo-fantasy-football-mcp
+   cd ~/Developer/yahoo-fantasy-football-mcp
+   npm ci          # exact pins from the lockfile; install scripts are disabled by .npmrc
+   npm run build   # emits dist/cli.js
    ```
-5. **Put the client secret in a 0600 file** outside the repo (or in the `YAHOO_CLIENT_SECRET` environment variable): `~/.config/fantasy-football-mcp/client_secret`. It is never written beside the tokens.
-6. **Log in once:** `ff auth` prints a URL, you approve in the browser, Yahoo shows a one-time code, you paste it (not echoed). The CLI then probes provisioning and tells you plainly whether the app is provisioned for the Fantasy API or not.
-7. **Check the installation:** `ff doctor` (offline) and `ff doctor --online` (token, provisioning, clock skew, source reachability). `--fix` repairs mode bits and missing directories after a prompt.
-8. **Load the data:** `ff refresh all`, then `ff install-launchd` to schedule the nightly and game-day refreshes.
-9. **Add the server to your client:** `ff print-config --client desktop` or `--client code` prints a snippet with resolved absolute paths and no secret values — see [Launch configuration](#launch-configuration-for-claude-desktop-and-claude-code).
-10. **Install the Skills:** copy `skills/*` (except `_shared`) into `~/.claude/skills/`, or pass `--add-dir <checkout>/skills` to Claude Code for a session. (A Claude Code plugin manifest is a planned P1 addition.)
-11. **Say `/onboard`** — the Skill finds your league and team, summarises the rules, checks the scoring engine against Yahoo's own points for a few players and tells you whether the API grants read-only or read/write access. Then `/weekly`.
+3. **Add the server to Claude:** `node dist/cli.js print-config --client code` prints a `claude mcp add …`
+   command (absolute paths, no secrets) — run it. For Claude Desktop, `--client desktop` prints the JSON to
+   merge into `~/Library/Application Support/Claude/claude_desktop_config.json`, then restart Desktop.
+4. **Install the Skills:** copy each folder in `skills/` except `_shared` into `~/.claude/skills/`.
+5. **Load the data:** `node dist/cli.js refresh all` (nflverse schedules, injuries, rosters, weekly stats,
+   and weather — all free and keyless), then `node dist/cli.js doctor`.
+6. **Describe your league:** in Claude, say `/onboard`. The Skill asks for your scoring, roster slots and
+   players and shows you a `league.yaml` to save as `~/.config/fantasy-football-mcp/league.yaml` with
+   `chmod 600` — it never goes into the repo. (`fixtures/manual/league.yaml` is a placeholder example.)
+   Update the roster section after each add/drop; add an `opponents` entry for the week to get a win
+   probability.
+7. **Use it:** "who should I start this week?" (`start-sit`), "which defense should I stream?"
+   (`stream-kdef`), and after the week is final, `/retro` to score last week's advice.
+8. **Optional:** `node dist/cli.js install-launchd` schedules the data refreshes (nightly and game-day).
 
-Upgrades: `git pull && npm ci && npm run build`, then `ff doctor` (it warns when the client is launching a stale `dist/`). After a Node upgrade re-run `ff print-config` — the launch config carries the exact `node` binary path. Uninstall: `ff uninstall` removes what it created and prints what it will not touch (your client config, Yahoo's consent page).
+Upgrades: `git pull && npm ci && npm run build && node dist/cli.js refresh all`, then `doctor` (it warns when
+the client is launching a stale `dist/`; dataset files from an older schema are refused until refreshed).
+After a Node upgrade re-run `print-config`. Removal: `node dist/cli.js uninstall` (data only with `--purge --yes`).
 
 ---
 
@@ -887,11 +895,11 @@ From [`docs/plan/10-phasing-and-acceptance.md`](docs/plan/10-phasing-and-accepta
 
 | Phase | Scope in one line | Effort | Exit gate (summary) | Status |
 |---|---|---|---|---|
-| **Before code** | Plan approval by the owner; the Yahoo access application submitted (it precedes Phase 0 and starts the decision clock) | — | approval recorded; application date recorded in `docs/HANDOFF.md` | 🚧 approval pending · 📋 application |
-| **0 — Foundation** | Docs-only repo protections (live), package skeleton with the four pinned runtime dependencies, `ci.yml` skeleton, the branch ruleset | S | Z1–Z4: `docs`/`secrets` green; every plan Mermaid block renders; `npm ci && lint && typecheck` pass on an empty `src/` with the boundary rules; the Mermaid job green with `.npmrc` present | ✅ CI half · 📋 rest |
-| **1a — Read-only MVP, Yahoo-free half** | Store + migrations, `ff refresh` for nflverse `schedules`/`injuries`/`roster_weekly`/`stats_player_week` and weather, crosswalk, scoring engine over nflverse lines, projections v1, lineup, K/DEF ranking, recommendation log + retrospective, the 19 P0 tools under `core` with `ManualLeagueProvider`, Skills `start-sit`/`stream-kdef`/`retro` + `onboard` (manual), the data launchd jobs. Two cuts — **1a-minimum** (store, three datasets, crosswalk, engine, E1/E2/E5, two Skills, the log) and **1a-full** — are the owner's choice at approval | L | A1a engine properties at 100 % coverage · A3a Inspector smoke (19 tools, `instructions` once, pointer everywhere) · A4a store and source fault rows incl. dataset publish/re-attach and the 3-s lock contention test (p95 < 300 ms, zero errors) · A5a crosswalk on the fixture YAML · A6 envelope labelling and size ledger · A7 start/sit regret ≤ "last week's points" (hard) with `pwin` vs `mean` reported · A8 K/DEF ≥ 3 candidates with implied totals · A9 retrospective metrics with the "n too small" naming · A10 Skills Lane 1 · A13–A15 process, coverage, latency · A17 structured-content spike | 📋 |
-| **1b — Read-only MVP, Yahoo half** | `ff auth` + token store + lockfile, `YahooProvider` (XML, path builder, limiter, cache, error classifier), the platform-fact tools over Yahoo, the golden test against `player_points`, Yahoo fixtures, `ff smoke`, Skills `onboard` (Yahoo)/`weekly`/`apply` (read-only), the credentialed launchd jobs. Starts on a provisioned token; pauses at the decision gate if none | M | A1b golden gate (every rostered player-week within 0.01) · A2 live self-check · A3b/A4b Inspector and Yahoo fault rows · A5b ≥ 95 % crosswalk · A11b/A12 model-graded evals ≥ 8/10 · A16 usefulness check on the live league · A18 XML safety with the mutation check · A19 elicitation verified per client. **Tag `v0.1.0` when both halves are green** | 📋 |
-| **Decision gate** | Read grant → 1b proceeds. No grant → **X1**: `v0.1.0` ships from 1a's green SHA with `ManualLeagueProvider` for the owner's league (keeps start/sit over his roster, an availability-blind K/DEF ranking, the log and `retro`; loses the live FA pool, opponent rosters, game-day inactives; costs a weekly YAML re-edit) and **X2**: `SleeperProvider` is pulled forward as the first second platform | — | — | 📋 |
+| **Before code** | Plan approval by the owner; the Yahoo access application submitted (it precedes Phase 0 and starts the decision clock) | — | approval recorded; application date recorded in `docs/HANDOFF.md` | ✅ approved 2026-09-30; no Yahoo application (owner decision) |
+| **0 — Foundation** | Docs-only repo protections (live), package skeleton with the four pinned runtime dependencies, `ci.yml` skeleton, the branch ruleset | S | Z1–Z4: `docs`/`secrets` green; every plan Mermaid block renders; `npm ci && lint && typecheck` pass on an empty `src/` with the boundary rules; the Mermaid job green with `.npmrc` present | ✅ done (no required checks yet; ruleset is the owner's step) |
+| **1a — Read-only MVP, Yahoo-free half** | Store + migrations, `ff refresh` for nflverse `schedules`/`injuries`/`roster_weekly`/`stats_player_week` and weather, crosswalk, scoring engine over nflverse lines, projections v1, lineup, K/DEF ranking, recommendation log + retrospective, the 19 P0 tools under `core` with `ManualLeagueProvider`, Skills `start-sit`/`stream-kdef`/`retro` + `onboard` (manual), the data launchd jobs. Two cuts — **1a-minimum** (store, three datasets, crosswalk, engine, E1/E2/E5, two Skills, the log) and **1a-full** — are the owner's choice at approval | L | A1a engine properties at 100 % coverage · A3a Inspector smoke (19 tools, `instructions` once, pointer everywhere) · A4a store and source fault rows incl. dataset publish/re-attach and the 3-s lock contention test (p95 < 300 ms, zero errors) · A5a crosswalk on the fixture YAML · A6 envelope labelling and size ledger · A7 start/sit regret ≤ "last week's points" (hard) with `pwin` vs `mean` reported · A8 K/DEF ≥ 3 candidates with implied totals · A9 retrospective metrics with the "n too small" naming · A10 Skills Lane 1 · A13–A15 process, coverage, latency · A17 structured-content spike | ✅ built + QA/pentest round 1 — 80/80 confirmed findings fixed |
+| **1b — Read-only MVP, Yahoo half** | `ff auth` + token store + lockfile, `YahooProvider` (XML, path builder, limiter, cache, error classifier), the platform-fact tools over Yahoo, the golden test against `player_points`, Yahoo fixtures, `ff smoke`, Skills `onboard` (Yahoo)/`weekly`/`apply` (read-only), the credentialed launchd jobs. Starts on a provisioned token; pauses at the decision gate if none | M | A1b golden gate (every rostered player-week within 0.01) · A2 live self-check · A3b/A4b Inspector and Yahoo fault rows · A5b ≥ 95 % crosswalk · A11b/A12 model-graded evals ≥ 8/10 · A16 usefulness check on the live league · A18 XML safety with the mutation check · A19 elicitation verified per client. **Tag `v0.1.0` when both halves are green** | ⛔ deferred — no Yahoo API access |
+| **Decision gate** | Read grant → 1b proceeds. No grant → **X1**: `v0.1.0` ships from 1a's green SHA with `ManualLeagueProvider` for the owner's league (keeps start/sit over his roster, an availability-blind K/DEF ranking, the log and `retro`; loses the live FA pool, opponent rosters, game-day inactives; costs a weekly YAML re-edit) and **X2**: `SleeperProvider` is pulled forward as the first second platform | — | — | fired → X1: `ManualLeagueProvider` is the league source |
 | **2 — Usage, market, P1 engines** | Team stats, snaps, pbp subset, ffopportunity, Sleeper, DynastyProcess, depth charts, news, optional odds; the 11 P1 tools (30 under `full`); the 6 P1 Skills; `live`/`season` matchup modes; a second fixture league for the unverified engine branches; the plugin manifest (if chosen); two prior seasons for soft backtests | L | B1–B14: every source loads with schema assertion and shows its licence; usage for ≥ 95 % of rostered players; ≤ 2 unmatched on the live league; waiver-detector precision reported; trade/cascade/schedule invariants; the news injection fixtures never unlabelled; live mode never lists a locked slot; 30 tools in order; Lane 2 for all 12 Skills. Tag `v0.2.0` | 📋 |
 | **3 — Model wave** | `v2-opportunity` projections, redistribution priors from pbp history, the calibrated source table and `ff_analyze_evidence`, weekly parameter re-fit with proposals applied only by a human, ≥ 3 held-out seasons | L | C1–C9: v2 beats trailing-4 on CRPS and Spearman on ≥ 2 held-out seasons with 80 % coverage within ±5; start/sit regret below the baselines and `P(win)` calibrated per decile; `P(win)` Brier below Yahoo's; waivers and cascades beat their baselines; news calibration at n ≥ 200; attribution populated. Tag `v0.3.0` | 📋 |
 | **W — Conditional writes** | **Only if Yahoo grants write.** Prerequisites first: the refresh token in the Keychain, the README's session rule, the doctor warning. Then `fspt-w`, the gate with its three channels, the 7 write tools, journal reconcile, `apply` in write mode, Desktop and Code elicitation smoke, write fixtures recorded from the first real writes | M | W1–W11: every gate test green; write tools appear only when provisioned and vanish on the first rejection; no prepare accepts a name; never auto-retried; a live round trip on the real league through each channel with evidence; a signed Keychain helper priced and decided, never assumed | 📋 conditional |

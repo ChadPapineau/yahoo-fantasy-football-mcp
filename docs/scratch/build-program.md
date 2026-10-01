@@ -20,12 +20,6 @@ Agent rules: repo `CLAUDE.md`. Commits only via `scripts/dev/commit-paths.sh`; N
 
 ## RESUME HERE
 
-- Stage A DONE and verified (`fbcd8e8`, wrap-up `cd7fc75`); the build runs in
-  `~/Developer/yahoo-fantasy-football-mcp` (outside iCloud).
-- Stage B DONE and verified (`b69e439`) — workflow `ffmcp-modules`, run `wf_c928f9e4-827` (grounding → 8 parallel
-  modules → analytics → MCP + CLI → integration → independent gate + fix loop). Resume in the same
-  session with `Workflow({scriptPath: <session>/workflows/scripts/ffmcp-modules-wf_c928f9e4-827.js,
-  resumeFromRunId: "wf_c928f9e4-827"})` (completed agents replay from cache). In a new session:
-  read each module's commits on `origin/build/phase-1a` (`git log --format='%h %s'`), then re-run
-  only the stages whose commits are missing.
-- **Stage C RUNNING** — workflow `ffmcp-qa-pentest`, run `wf_8b711506-794` (resume same-session with its scriptPath + resumeFromRunId; 12 finder lenses → 2–3 adversarial verifiers each → remediation by area with regression tests → round gate → re-verification; loop until 2 dry rounds, max 4). Then Stage D (merge).
+**Program complete (2026-09-30).** Stages A–C done and verified; `build/phase-1a` merged to `main`.
+QA round 2 (per-fix re-verification + a second finder sweep) is deferred to after the weekly usage
+reset — see `docs/HANDOFF.md` ▶ NEXT STEP item 4.
