@@ -214,6 +214,96 @@ export function bestLineup(
   return startersOf(a, players, slots);
 }
 
+/**
+ * The starting seats a roster's best legal lineup leaves empty (slot names, one per empty instance;
+ * [] when every seat is filled) — an opponent typed in partially (QA-1-043).
+ */
+export function emptyStartSeats(
+  slots: RosterSlots,
+  players: readonly LineupPlayer[],
+  nowMs: number,
+): string[] {
+  const a = solve({
+    slots,
+    players,
+    value: (p) => p.points.mean,
+    nowMs,
+    exclude: new Set(),
+    force: new Set(),
+  });
+  const filled = new Map<string, number>();
+  for (const slot of a.values()) {
+    if (isStartClass(slotOf(slots, slot))) filled.set(slot, (filled.get(slot) ?? 0) + 1);
+  }
+  const out: string[] = [];
+  for (const s of slots.slots) {
+    if (!isStartClass(s)) continue;
+    for (let i = filled.get(s.name) ?? 0; i < s.count; i++) out.push(s.name);
+  }
+  return out;
+}
+
+/** The assumption naming the opponent's K/DEF stand-ins (QA-1-043). */
+export function standInAssumption(stoodIn: readonly string[]): Assumption {
+  return A(
+    `the opponent's listed players leave his ${stoodIn.join(", ")} slot empty: a stand-in at your own starter's projection is assumed there, not 0 points`,
+    "the opponent's full starting lineup is in league.yaml",
+  );
+}
+
+/** Seats a K/DEF stand-in may fill on an opponent's side (QA-1-043). */
+const STAND_IN_SLOTS: ReadonlySet<string> = new Set(["K", "DEF"]);
+
+/** The opponent's side of a matchup: his starters, and what was missing from what he listed. */
+export interface OpponentLineup {
+  /** His best legal lineup, plus a stand-in for each empty K/DEF seat. */
+  readonly starters: LineupPlayer[];
+  /** Empty non-K/DEF starting seats: P(win) cannot be computed (refused / withheld). */
+  readonly empty: string[];
+  /** Empty K/DEF seats filled with a stand-in (my own starter's projection there), named. */
+  readonly stood_in: string[];
+}
+
+/**
+ * The opponent's lineup a P(win) is computed against (QA-1-043): his best legal lineup by mean; an
+ * empty K or DEF seat (often left out when typing his roster) is filled by a stand-in carrying my own
+ * starter's projection at that slot — never scored 0, which inflated P(win) from 0.75 to 0.88; an
+ * empty skill seat makes P(win) unknowable (`empty`).
+ */
+export function opponentLineup(
+  slots: RosterSlots,
+  opponent: readonly LineupPlayer[],
+  mine: readonly LineupPlayer[],
+  nowMs: number,
+): OpponentLineup {
+  const starters = bestLineup(slots, opponent, nowMs);
+  const seats = emptyStartSeats(slots, opponent, nowMs);
+  const empty = seats.filter((n) => !STAND_IN_SLOTS.has(n));
+  const stoodIn: string[] = [];
+  seats.forEach((name, i) => {
+    if (!STAND_IN_SLOTS.has(name)) return;
+    const slot = slotOf(slots, name);
+    if (slot === undefined) return;
+    const proxy =
+      mine.find((p) => p.slot === name) ??
+      [...mine]
+        .filter((p) => canOccupy(slot, { positions: p.positions, status: p.status }))
+        .sort((a, b) => b.points.mean - a.points.mean || cmpStr(a.player_key, b.player_key))[0];
+    if (proxy === undefined) return;
+    stoodIn.push(name);
+    starters.push({
+      ...proxy,
+      player_key: `${proxy.player_key}#opponent-${name}-${String(i)}`,
+      name: `stand-in ${name}`,
+      nfl_team: null,
+      gsis_id: null,
+      slot: name,
+      lock_at: null,
+    });
+  });
+  return { starters, empty, stood_in: stoodIn };
+}
+
 // --- helpers -------------------------------------------------------------------------------------------
 
 function member(p: LineupPlayer): TotalMember {
@@ -436,11 +526,11 @@ interface Evaluated {
 }
 
 /**
- * E2. Throws AnalyticsError `no_opponent` for `objective: pwin | blend` without an opponent roster
+ * E2. An opponent whose listed players leave a skill seat empty gets no P(win) and the mean objective
+ * (QA-1-043). Throws AnalyticsError `no_opponent` for `objective: pwin | blend` without an opponent roster
  * (NOT_FOUND + MANUAL_NO_OPPONENT_HINT), `invalid_request` for bounds / an empty roster.
  */
 export function analyzeLineup(req: LineupRequest): LineupRecommendation {
-  const objective: Objective = req.objective ?? "mean";
   const { slots, clock } = req;
   if (req.players.length === 0 || req.players.length > LIMITS.maxLineupPlayers) {
     throw new AnalyticsError("invalid_request", "roster size out of range", ["players"]);
@@ -452,11 +542,18 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   if (!(blendW >= 0 && blendW <= 1)) {
     throw new AnalyticsError("invalid_request", "blend_weight must be in 0..1", ["blend_weight"]);
   }
-  const opponent = req.opponent !== null && req.opponent.length > 0 ? req.opponent : null;
-  if (objective !== "mean" && opponent === null) {
+  const listed = req.opponent !== null && req.opponent.length > 0 ? req.opponent : null;
+  if (req.objective !== undefined && req.objective !== "mean" && listed === null) {
     throw new AnalyticsError("no_opponent", "no opponent roster for this week");
   }
   const nowMs = clock.nowMs();
+  // P(win) against a partly typed opponent counted his empty seats as 0 points (QA-1-043): an empty
+  // skill seat withholds P(win) (pwin/blend fall back to mean, said so); an empty K/DEF seat gets a
+  // stand-in at my own starter's projection, named
+  const oppSide = listed === null ? null : opponentLineup(slots, listed, req.players, nowMs);
+  const oppEmpty = oppSide?.empty ?? [];
+  const opponent = oppEmpty.length === 0 ? listed : null;
+  const objective: Objective = opponent === null ? "mean" : (req.objective ?? "mean");
   const exclude = new Set(req.exclude ?? []);
   const force = new Set(req.force_start ?? []);
   const basis = basisOf(req.players);
@@ -470,14 +567,15 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
 
   // the opponent's best-by-mean lineup (locks respected): what the matchup is played against
   let oppStarters: LineupPlayer[] = [];
-  if (opponent !== null) {
-    oppStarters = bestLineup(slots, opponent, nowMs);
+  if (opponent !== null && oppSide !== null) {
+    oppStarters = oppSide.starters;
     assumptions.push(
       A(
         "the opponent starts his highest-projected legal lineup",
         "the opponent's set lineup differs",
       ),
     );
+    if (oppSide.stood_in.length > 0) assumptions.push(standInAssumption(oppSide.stood_in));
   }
   const oppMembers = oppStarters.map(member);
 
@@ -498,7 +596,14 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
     // no opponent: ΔP(win) is measured against an evenly matched opponent (the best mean lineup)
     return { mu_m: m.mu, v_m: m.v, mu_o: meanM.mu, v_o: meanM.v, cov: 0 };
   };
-  if (opponent === null) {
+  if (oppEmpty.length > 0) {
+    assumptions.push(
+      A(
+        `the opponent's listed players leave starting slots empty (${oppEmpty.join(", ")}): P(win) is withheld, the objective is mean${req.objective !== undefined && req.objective !== "mean" ? ` (not ${req.objective})` : ""}, and ΔP(win) is measured against an evenly matched opponent`,
+        "the opponent's full starting lineup is in league.yaml",
+      ),
+    );
+  } else if (opponent === null) {
     assumptions.push(
       A(
         "no opponent roster: P(win) is not reported and ΔP(win) is measured against an evenly matched opponent",
