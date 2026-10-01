@@ -369,3 +369,13 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   smoke in both protocol eras, CI green. The gate's only open item is **A17's manual half**
   (Chad asks Claude Code and Claude Desktop to repeat the `ff_debug_echo` nonce). Orchestrator
   re-ran the gate from a clean install and got the same numbers. Stage C (QA + pentest) next.
+- 2026-09-30 — Stage C round 1 (QA + pentest): 101 findings, 80 confirmed, 73 fixed by area
+  fixers. The round gate (one integrator) applied the 55 cross-area hand-offs and the 7 deferred
+  `serve.ts` findings (store-open messages, transport close → clean shutdown, plan 05 §4.2 serve
+  process tests), each with a failing-first, mutation-checked test. Notable contract changes:
+  store migration 002 (reclog dedup scope), `ds_schema` 2 (D/ST fumble-return TDs — existing
+  dataset files are refused until the next `ff refresh`), nullable FAAB/playoff rule flags, E2
+  `swaps[].out` nullable for fills, E1 persisting only returned projections at 500 samples. CI now
+  cancels superseded non-main runs. Skipped hand-offs (product/architecture decisions) are listed
+  in the round report: git-tree location guard, E5 per-candidate points, lineup `comparisons`
+  refactor, E1 worker thread, publisher `quick_check`, far-week projection persistence.
