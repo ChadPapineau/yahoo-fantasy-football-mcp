@@ -193,7 +193,7 @@ export class ManualLeagueProvider implements FantasyPlatform {
     if (this.cache?.text === text) return { data: this.cache.data, as_of };
     const raw = parseLeagueYaml(text);
     const parsed = leagueFileSchema.safeParse(raw);
-    if (!parsed.success) throw new LeagueFileError("invalid", issuesOf(parsed.error));
+    if (!parsed.success) throw new LeagueFileError("invalid", issuesOf(parsed.error, raw));
     const norm = normalizeLeague(parsed.data);
     if (!norm.ok) throw new LeagueFileError("invalid", norm.issues.slice(0, 50));
     for (const id of norm.data.identifiers) this.opts.logger?.registerSecret("identifier", id);
