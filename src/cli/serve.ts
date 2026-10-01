@@ -8,6 +8,12 @@ import path from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { parseArgs } from "node:util";
 import {
+  deserializeMessage,
+  INVALID_REQUEST,
+  STDIO_DEFAULT_MAX_BUFFER_SIZE,
+  type JSONRPCErrorResponse,
+} from "@modelcontextprotocol/server";
+import {
   serveStdio,
   StdioServerTransport,
   type StdioServerHandle,
@@ -33,6 +39,79 @@ import { storeFactory } from "../store/index.js";
 import type { Store, StoreFactory } from "../store/types.js";
 import { VERSION } from "../version.js";
 import { createLogger, type Logger } from "./log.js";
+
+// --- malformed requests (QA-1-085) ----------------------------------------------------------------------
+
+/**
+ * The reply a stdin line deserves when the SDK's transport would drop it silently (QA-1-085): a
+ * line that parses as JSON but is not a valid JSON-RPC message (`jsonrpc` ≠ "2.0", array params, a
+ * non-object `params`, an object progressToken …) and is a REQUEST with a usable id (a string, or a
+ * finite number) gets JSON-RPC 2.0 §5.1's -32600 Invalid Request under that id. Everything else is
+ * null: a valid message (the SDK answers it), a notification or a response (never answered), an
+ * array (no batching), a null/object id, and an unparseable line (its id is unreadable, and MCP
+ * forbids a null id — it is logged instead).
+ */
+export function invalidRequestReply(line: string): JSONRPCErrorResponse | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  try {
+    deserializeMessage(line);
+    return null;
+  } catch {
+    // not a valid message: answer it below when it is a request with a usable id
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(o, "method")) return null;
+  const id = o.id;
+  const usable =
+    (typeof id === "string" && id.length <= 256) || (typeof id === "number" && Number.isFinite(id));
+  if (!usable) return null;
+  return { jsonrpc: "2.0", id, error: { code: INVALID_REQUEST, message: "Invalid Request" } };
+}
+
+/**
+ * Watches stdin's lines beside the SDK transport (which skips an unparseable line and reports an
+ * invalid one only to `onerror`, without its id) and answers each invalid request through
+ * `reply`. Bounded like the transport's own buffer; returns the detach function.
+ */
+function watchInvalidRequests(
+  stdin: NodeJS.ReadableStream,
+  reply: (msg: JSONRPCErrorResponse) => void,
+  logger: Logger,
+): () => void {
+  let buf = "";
+  const onData = (chunk: Buffer | string): void => {
+    buf += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    if (buf.length > STDIO_DEFAULT_MAX_BUFFER_SIZE) buf = "";
+    let i = buf.indexOf("\n");
+    while (i >= 0) {
+      const line = buf.slice(0, i).replace(/\r$/, "");
+      buf = buf.slice(i + 1);
+      i = buf.indexOf("\n");
+      if (line.trim() === "") continue;
+      const r = invalidRequestReply(line);
+      if (r !== null) {
+        logger.warn("transport.invalid_request", { code: INVALID_REQUEST });
+        reply(r);
+        continue;
+      }
+      try {
+        JSON.parse(line);
+      } catch {
+        logger.warn("transport.parse_error", { bytes: line.length });
+      }
+    }
+  };
+  stdin.on("data", onData);
+  return () => {
+    stdin.off("data", onData);
+  };
+}
 
 /** What `serve` is given (the CLI entry passes the real process streams). */
 export interface ServeOptions {
@@ -373,6 +452,17 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
         logger.warn("transport.error", { error: e.name });
       },
     });
+    cleanups.push(
+      watchInvalidRequests(
+        opts.stdin,
+        (msg) => {
+          transport.send(msg).catch(() => {
+            // stdout already gone: the shutdown path handles it
+          });
+        },
+        logger,
+      ),
+    );
     logger.info("serve.ready", {
       version: VERSION,
       node: process.versions.node,
