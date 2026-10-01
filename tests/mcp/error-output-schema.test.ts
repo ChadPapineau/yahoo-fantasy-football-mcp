@@ -22,7 +22,9 @@ describe("tool error results conform to the advertised outputSchema (QA-1-007)",
   beforeAll(async () => {
     world = await makeWorld();
   }, 60_000);
-  afterAll(() => { world.cleanup(); });
+  afterAll(() => {
+    world.cleanup();
+  });
 
   for (const modern of [false, true])
     it(`${modern ? "2026" : "legacy"} era: no structuredContent on isError; the text holds the code`, async () => {
@@ -40,7 +42,7 @@ describe("tool error results conform to the advertised outputSchema (QA-1-007)",
         const schema = tools.find((t) => t.name === name)?.outputSchema;
         if (r.structuredContent !== undefined && schema !== undefined)
           expect(
-            ajv.compile(schema)(r.structuredContent),
+            ajv.compile(schema as Parameters<typeof ajv.compile>[0])(r.structuredContent),
             `${name}: structured error vs outputSchema`,
           ).toBe(true);
         expect(r.structuredContent, name).toBeUndefined();
