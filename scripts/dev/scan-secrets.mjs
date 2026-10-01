@@ -8,10 +8,18 @@
 // file:line only — never the matched value.
 //
 // Usage:
-//   node scripts/dev/scan-secrets.mjs [--staged] [--all] [--] <file>...
-//     --staged  scan the STAGED content of the given files (git show :<file>)
-//     --all     scan every tracked file (git ls-files)
-// Exit: 0 clean · 1 findings · 2 usage/IO error.
+//   node scripts/dev/scan-secrets.mjs [--staged] [--all] [--index] [--identity] [--] <file>...
+//     --staged    scan the STAGED (index) blob of each given file; a path that is not in the
+//                 index, or that cannot be read, is an error (exit 2) — never "clean"
+//     --all       scan every tracked file (git ls-files)
+//     --index     scan every blob the next commit adds or changes (index vs HEAD, any status but
+//                 D — including type changes — read by object id, so no path is ever re-quoted);
+//                 the pre-commit hook and commit-paths.sh use this (QA-1-088)
+//     --identity  refuse an author or committer address that is not a no-reply or reserved
+//                 placeholder address (QA-1-095); the address itself is never printed
+// Exit: 0 clean · 1 findings · 2 usage/IO error, or a file it cannot scan (QA-1-089: it fails
+// closed — a file too large to read is an error, and a NUL byte only skips a file whose name is a
+// known binary format; anything else is scanned as text).
 //
 // Suppression: a line containing `scan-secrets: allow` is skipped (use only for
 // documented placeholders; gitleaks in CI does not honour this marker).
@@ -53,13 +61,54 @@ const RULES = [
     group: 1,
   },
   {
+    // never narrower than .gitleaks.toml yahoo-league-key / yahoo-team-key: a 2–3 digit game id OR
+    // a game code; case-insensitive (stricter than gitleaks); placeholders 1000 and 10000–10009
+    // (tests/lint/scan-secrets.test.ts checks the two stay aligned, QA-1-089)
     id: "yahoo-league-or-team-key",
-    re: /\b\d{3}\.l\.(\d{4,8})(?:\.t\.\d{1,2})?\b/g,
+    re: /\b(?:\d{2,3}|nfl|mlb|nba|nhl)\.l\.(\d{4,8})(?:\.t\.\d{1,2})?\b/gi,
     allow: (m) => /^1000\d?$/.test(m[1] ?? ""),
   },
   { id: "yahoo-guid", re: /xoauth_yahoo_guid["']?\s*[:=]\s*["']?([A-Z0-9]{26})/g, group: 1 },
-  { id: "email-address", re: /\b[A-Za-z0-9._%+-]+@(?:gmail|yahoo|ymail|outlook|hotmail|icloud|me|aol|proton|protonmail)\.[a-z]{2,}\b/gi },
+  {
+    // ANY mailbox (CLAUDE.md: never commit an email address); only no-reply and reserved
+    // placeholder addresses pass (isPlaceholderEmail). The lookbehind starts a match only at the
+    // beginning of a local-part run, which keeps the scan linear on long word-character lines.
+    id: "email-address",
+    re: /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b/g,
+    // not a mailbox: a no-reply/reserved address; the `git` SSH transport user (git@github.com:…);
+    // or URL userinfo (https://user:pw@host — the authority of a scheme:// URL, not an address)
+    allow: (m) =>
+      isPlaceholderEmail(m[0]) || /^git@/i.test(m[0]) || /\/\/[^/\s@]*$/.test(m.input.slice(0, m.index)),
+  },
 ];
+
+/** RFC 2606 / RFC 6761 reserved names: never a real mailbox. */
+const RESERVED_DOMAIN = /(?:^|\.)(?:example|invalid|test|localhost)$|^example\.(?:com|net|org)$/;
+
+/**
+ * True for an address that can never identify a person: a no-reply mailbox (GitHub's
+ * users.noreply.github.com, noreply@…, no-reply@…) or one on a reserved domain.
+ * @param {string} addr
+ */
+export function isPlaceholderEmail(addr) {
+  const at = addr.lastIndexOf("@");
+  if (at <= 0) return false;
+  const local = addr.slice(0, at).toLowerCase();
+  const domain = addr.slice(at + 1).toLowerCase();
+  if (domain === "users.noreply.github.com") return true;
+  if (/^no-?reply$/.test(local)) return true;
+  return RESERVED_DOMAIN.test(domain);
+}
+
+/** A NUL byte skips a file only when its name is one of these binary formats (QA-1-089 d). */
+const BINARY_EXT =
+  /\.(?:png|jpe?g|gif|webp|ico|icns|bmp|tiff?|avif|heic|pdf|parquet|arrow|feather|sqlite3?|db|gz|tgz|zip|bz2|xz|zst|7z|jar|woff2?|ttf|otf|eot|wasm|mp3|mp4|m4a|mov|wav|ogg|webm|docx|xlsx|pptx|node|dylib|so|o|a|class|bin)$/i;
+
+/** The largest file it reads; anything larger is an error, never skipped (QA-1-089 c). */
+const MAX_SCAN_BYTES = (() => {
+  const n = Number(process.env.FF_SCAN_MAX_BYTES);
+  return Number.isSafeInteger(n) && n > 0 ? n : 64 * 1024 * 1024;
+})();
 
 function loadDenylist() {
   const p = process.env.FF_SCAN_DENYLIST || join(homedir(), ".config", "fantasy-football-mcp-dev", "scan-denylist.txt");
@@ -75,18 +124,74 @@ function normalise(s) {
   return s.toLowerCase().replace(/[‘’ʼ`]/g, "'");
 }
 
-function readContent(file, staged) {
-  if (staged) {
-    try {
-      return execFileSync("git", ["show", `:${file}`], { maxBuffer: 64 * 1024 * 1024 });
-    } catch {
-      return null; // deleted in the index
-    }
-  }
+class ScanError extends Error {}
+
+/** @param {string[]} args */
+function git(args, maxBuffer = 16 * 1024 * 1024) {
+  return execFileSync("git", args, { maxBuffer, stdio: ["ignore", "pipe", "pipe"] });
+}
+
+/** Reads one blob by object id, refusing (ScanError) one larger than MAX_SCAN_BYTES. */
+function readBlob(sha, file) {
+  const size = Number(git(["cat-file", "-s", sha]).toString("utf8").trim());
+  if (!(size >= 0)) throw new ScanError(`cannot size the staged blob of ${file}`);
+  if (size > MAX_SCAN_BYTES) throw new ScanError(`${file} is ${String(size)} bytes, over the ${String(MAX_SCAN_BYTES)}-byte scan limit — it cannot be scanned, so it cannot be committed`);
+  return git(["cat-file", "blob", sha], MAX_SCAN_BYTES + 1024);
+}
+
+/**
+ * The index blob of `file` (--staged). A path missing from the index is an error, never
+ * "deleted": callers only pass staged paths, and a mangled (e.g. C-quoted) name must not pass.
+ */
+function readStaged(file) {
+  const out = git(["--literal-pathspecs", "ls-files", "-s", "-z", "--", file]).toString("utf8");
+  const entries = out.split("\0").filter(Boolean);
+  const exact = entries.filter((e) => e.slice(e.indexOf("\t") + 1) === file);
+  if (exact.length !== 1) throw new ScanError(`${file} is not (uniquely) in the index`);
+  const [mode, sha] = (exact[0] ?? "").split(/[ \t]/);
+  if (mode === "160000") return null; // a submodule commit, not a blob
+  return readBlob(sha ?? "", file);
+}
+
+function readWorktree(file) {
   if (!existsSync(file)) return null;
   const st = statSync(file);
   if (!st.isFile()) return null;
+  if (st.size > MAX_SCAN_BYTES) throw new ScanError(`${file} is ${String(st.size)} bytes, over the ${String(MAX_SCAN_BYTES)}-byte scan limit — it cannot be scanned`);
   return readFileSync(file);
+}
+
+/**
+ * Every blob the next commit adds or changes: `git diff --cached --raw -z --no-renames` (index
+ * vs HEAD, or vs the empty tree before the first commit). NUL-separated, so no name is quoted;
+ * every status except D is kept (A, M, T type change, …); blobs are read by object id.
+ * @returns {{file: string, sha: string}[]}
+ */
+function indexEntries() {
+  const raw = git(["diff", "--cached", "--raw", "-z", "--no-renames", "--no-abbrev", "--no-ext-diff", "--ignore-submodules=none"], 256 * 1024 * 1024)
+    .toString("utf8")
+    .split("\0");
+  const entries = [];
+  for (let i = 0; i < raw.length; i++) {
+    const meta = raw[i];
+    if (!meta) continue;
+    if (!meta.startsWith(":")) throw new ScanError(`unexpected git diff --raw record: ${meta.slice(0, 40)}`);
+    const [, newMode, , newSha, status = ""] = meta.slice(1).split(" ");
+    const paths = /^[RC]/.test(status) ? 2 : 1;
+    const file = raw[i + paths] ?? "";
+    i += paths;
+    if (status.startsWith("D") || newMode === "000000" || newMode === "160000") continue;
+    if (!newSha || /^0+$/.test(newSha)) throw new ScanError(`${file}: no staged blob id (status ${status})`);
+    entries.push({ file, sha: newSha });
+  }
+  return entries;
+}
+
+/** The address in a `git var GIT_*_IDENT` line ("Name <addr> 1700000000 +0000"). */
+function identEmail(which) {
+  const ident = git(["var", which]).toString("utf8");
+  const m = /<([^<>]*)>\s+\d+\s+[+-]\d{4}\s*$/.exec(ident.trim());
+  return m?.[1] ?? "";
 }
 
 function isBinary(buf) {
@@ -98,40 +203,72 @@ function isBinary(buf) {
 const args = process.argv.slice(2);
 let staged = false;
 let all = false;
+let index = false;
+let identity = false;
 const files = [];
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === "--staged") staged = true;
   else if (a === "--all") all = true;
+  else if (a === "--index") index = true;
+  else if (a === "--identity") identity = true;
   else if (a === "--") files.push(...args.slice(i + 1)), (i = args.length);
   else files.push(a);
 }
-if (all) {
-  files.push(...execFileSync("git", ["ls-files", "-z"]).toString("utf8").split("\0").filter(Boolean));
+
+/** @param {unknown} e */
+function fail(e) {
+  process.stderr.write(`scan-secrets: ${e instanceof Error ? e.message : String(e)}\n`);
+  process.exit(2);
 }
-if (!files.length) {
-  process.stderr.write("scan-secrets: no files given (use --all or pass paths)\n");
+
+/** @type {{file: string, read: () => Buffer | null}[]} */
+const targets = [];
+try {
+  if (identity) {
+    for (const which of ["GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"]) {
+      if (!isPlaceholderEmail(identEmail(which))) {
+        process.stderr.write(
+          `scan-secrets: commit identity refused — the ${which === "GIT_AUTHOR_IDENT" ? "author" : "committer"} address is not a no-reply or reserved placeholder address (address not printed).\n` +
+            "  Set one for this clone:  git config user.email '<id>+<login>@users.noreply.github.com'\n",
+        );
+        process.exit(1);
+      }
+    }
+  }
+  if (all) {
+    for (const f of git(["ls-files", "-z"], 64 * 1024 * 1024).toString("utf8").split("\0").filter(Boolean)) {
+      targets.push({ file: f, read: () => readWorktree(f) });
+    }
+  }
+  if (index) for (const { file, sha } of indexEntries()) targets.push({ file, read: () => readBlob(sha, file) });
+  for (const f of files) targets.push({ file: f, read: () => (staged ? readStaged(f) : readWorktree(f)) });
+} catch (e) {
+  fail(e);
+}
+if (!targets.length && !index && !identity) {
+  process.stderr.write("scan-secrets: no files given (use --all, --index or pass paths)\n");
   process.exit(2);
 }
 
 const deny = loadDenylist();
 const findings = [];
 let scanned = 0;
-for (const file of files) {
+let binary = 0;
+for (const { file, read } of targets) {
   if (file === "scripts/dev/scan-secrets.mjs") continue; // this file names the patterns
   // the gitleaks self-test fixture is DELIBERATELY full of fake, well-formed secrets
   // (CI proves gitleaks fires on it); it is the only path excluded, by exact name
   if (file === "scripts/gitleaks-selftest/must-flag.txt") continue;
   let buf;
   try {
-    buf = readContent(file, staged);
+    buf = read();
   } catch (e) {
-    process.stderr.write(`scan-secrets: cannot read ${file}: ${e.message}\n`);
-    process.exit(2);
+    fail(e instanceof ScanError ? e : new Error(`cannot read ${file}: ${e instanceof Error ? e.message : String(e)}`));
   }
-  if (!buf || isBinary(buf)) continue;
-  if (buf.length > 8 * 1024 * 1024) {
-    process.stderr.write(`scan-secrets: skipping ${file} (> 8 MB)\n`);
+  if (!buf) continue;
+  if (isBinary(buf) && BINARY_EXT.test(file)) {
+    binary++;
     continue;
   }
   scanned++;
@@ -147,7 +284,6 @@ for (const file of files) {
         if ((rule.id === "assigned-secret" || rule.id === "env-secret" || rule.id === "bearer-token") && PLACEHOLDER.test(value)) continue;
         // a filesystem path or URL named *_TOKEN_STORE / *_SECRET_FILE is a location, not a secret
         if ((rule.id === "assigned-secret" || rule.id === "env-secret") && /^(?:~\/|\/|\.\.?\/|\$\{?[A-Z_]|https?:\/\/)/.test(value)) continue;
-        if (rule.id === "email-address" && /noreply|example/i.test(value)) continue;
         findings.push(`${file}:${idx + 1}  [${rule.id}]`);
         if (!rule.re.global) break;
       }
@@ -164,4 +300,6 @@ if (findings.length) {
   for (const f of findings) process.stderr.write(`  ${f}\n`);
   process.exit(1);
 }
-process.stdout.write(`scan-secrets: clean (${scanned} text file(s) scanned${deny.length ? `, local deny-list: ${deny.length} term(s)` : ""})\n`);
+process.stdout.write(
+  `scan-secrets: clean (${scanned} text file(s) scanned${binary ? `, ${binary} binary file(s) skipped` : ""}${identity ? ", commit identity ok" : ""}${deny.length ? `, local deny-list: ${deny.length} term(s)` : ""})\n`,
+);

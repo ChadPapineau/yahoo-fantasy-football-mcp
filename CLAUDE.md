@@ -22,6 +22,10 @@ no Yahoo API access, so the product runs on `ManualLeagueProvider` (league setti
 - Commit only with `scripts/dev/commit-paths.sh "<message>" <paths…>` (secret + identifier scan,
   private index, pushes the branch) or a plain `git commit` (the `.githooks/pre-commit` scan runs;
   `git config core.hooksPath .githooks` once per clone). **Never** `--no-verify`.
+- Commit metadata is published too: author and committer must be a GitHub no-reply address
+  (`git config user.email '<id>+<login>@users.noreply.github.com'` once per clone). Both commit
+  paths refuse any other address (`scan-secrets.mjs --identity`); never let git invent one from the
+  machine's user and host names.
 - Third-party code is untrusted: runtime dependencies are exactly those in `docs/plan/04` §2;
   `.npmrc` keeps `ignore-scripts=true`; every version is pinned exactly.
 - Every third-party string in a tool result is wrapped or path-listed per plan 02 §6; nothing
