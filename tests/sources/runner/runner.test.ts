@@ -22,6 +22,7 @@ import {
   type TempArea,
 } from "../../../src/sources/runner.js";
 import type { HttpDownload, HttpGet, SchemaReport } from "../../../src/sources/source.js";
+import type { DatasetPublisher, PublishOptions } from "../../../src/store/types.js";
 import { captureLog, netError } from "../../http/helpers.js";
 import {
   fakePublisher,
@@ -63,6 +64,8 @@ function deps(over: Partial<RefreshDeps> = {}): RefreshDeps & {
       sleeps.push(ms);
       return Promise.resolve();
     },
+    // the fakes publish no real file: the current one reads healthy unless a test says otherwise
+    checkDataset: () => "ok" as const,
   };
   return { ...base, ...over } as RefreshDeps & {
     publisher: ReturnType<typeof fakePublisher>;
@@ -190,15 +193,96 @@ describe("unchanged release (plan 01 §5.5 'skips if unchanged')", () => {
     expect(d.publisher.unchanged).toEqual([]);
   });
 
-  it("a failing recordUnchanged is a store failure (not recorded again)", async () => {
+  it("[QA-1-097] a failing recordUnchanged falls through to publish (the file may be gone) — never a store failure", async () => {
     const d = deps({
       refreshLog: fakeRefreshLog([okRow("nflverse:injuries", "2026-09-30T13:36:27Z")]),
       publisher: fakePublisher(undefined, { throwOnUnchanged: true }),
     });
-    const r = await runRefresh({ source: fakeSource(), seasons: [2026], week: null }, d);
-    expectStatus(r, "failed");
-    expect(r.error).toBe("store");
-    expect(d.refreshLog.rows).toHaveLength(1);
+    const src = fakeSource();
+    const r = await runRefresh({ source: src, seasons: [2026], week: null }, d);
+    expectStatus(r, "published");
+    expect(src.calls.fetch).toBe(1);
+    expect(d.publisher.published).toHaveLength(1);
+    expect(d.refreshLog.rows).toHaveLength(1); // no failure row
+    expect(await tmpLeft()).toEqual([]);
+  });
+
+  describe("[QA-1-097] 'unchanged' only when the current file is servable", () => {
+    const spyPublisher = () => {
+      const inner = fakePublisher();
+      const options: (PublishOptions | undefined)[] = [];
+      const p: DatasetPublisher = {
+        ...inner,
+        publish(source, version, released, fill, o) {
+          options.push(o);
+          return inner.publish(source, version, released, fill);
+        },
+      };
+      return { p, options, inner };
+    };
+
+    it("the check is asked about the file refresh_log lists, at the upstream version", async () => {
+      const seen: unknown[] = [];
+      await runRefresh(
+        { source: fakeSource(), seasons: [2026], week: null },
+        deps({
+          refreshLog: fakeRefreshLog([okRow("nflverse:injuries", "2026-09-30T13:36:27Z")]),
+          checkDataset: (...a) => {
+            seen.push(a);
+            return "ok";
+          },
+        }),
+      );
+      expect(seen).toEqual([
+        ["nflverse:injuries", "/cache/ds/nflverse:injuries.sqlite", "2026-09-30T13:36:27Z"],
+      ]);
+    });
+
+    for (const health of ["missing", "unreadable", "mismatch", "throws"] as const) {
+      it(`a ${health} current file is republished, bypassing the under-lock 'already current' check`, async () => {
+        const { p, options, inner } = spyPublisher();
+        const cap = captureLog();
+        const src = fakeSource();
+        const r = await runRefresh(
+          { source: src, seasons: [2026], week: null },
+          deps({
+            publisher: p,
+            log: cap.log,
+            refreshLog: fakeRefreshLog([okRow("nflverse:injuries", "2026-09-30T13:36:27Z")]),
+            checkDataset: () => {
+              if (health === "throws") throw new Error("EIO");
+              return health;
+            },
+          }),
+        );
+        expectStatus(r, "published");
+        expect(src.calls.fetch).toBe(1);
+        expect(inner.unchanged).toEqual([]);
+        expect(options).toEqual([{ skipIfCurrent: false }]);
+        expect(cap.lines.map((e) => e.event)).toContain("refresh.dataset_repair");
+      });
+    }
+
+    it("the check is not consulted when the version differs, on --force, or for a time bucket", async () => {
+      let asked = 0;
+      const checkDataset = () => {
+        asked++;
+        return "missing" as const;
+      };
+      const refreshLog = fakeRefreshLog([okRow("nflverse:injuries", "older")]);
+      await runRefresh(
+        { source: fakeSource(), seasons: [2026], week: null },
+        deps({ refreshLog, checkDataset }),
+      );
+      await runRefresh(
+        { source: fakeSource(), seasons: [2026], week: null, force: true },
+        deps({
+          refreshLog: fakeRefreshLog([okRow("nflverse:injuries", "2026-09-30T13:36:27Z")]),
+          checkDataset,
+        }),
+      );
+      expect(asked).toBe(0);
+    });
   });
 
   it("a throwing or null-version refresh log is read as 'no previous release'", async () => {
