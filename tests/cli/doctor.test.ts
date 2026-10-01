@@ -46,7 +46,7 @@ import { makeLogger } from "../../src/cli/io.js";
 import { JOBS, LAUNCHCTL, launchAgentsDir, plistPath } from "../../src/cli/launchd.js";
 import { main } from "../../src/cli/main.js";
 import { SERVER_NAME } from "../../src/cli/print-config.js";
-import { openExistingStore, openStore } from "../../src/cli/store-access.js";
+import { openExistingStore, openStore, storeOpenReason } from "../../src/cli/store-access.js";
 import { datasetFilePath, storePath } from "../../src/config/paths.js";
 import { loadConfig, type Config } from "../../src/config/schema.js";
 import { fixedClock } from "../../src/domain/clock.js";
@@ -316,6 +316,42 @@ describe("row 4 — config dir and league file", () => {
     ]);
   });
 
+  it("league.yaml: the detail states the REAL mode; an owner-unreadable file fails with a chmod remedy [QA-1-056]", () => {
+    const s = fresh({ create: true });
+    const league = path.join(s.configDir, "league.yaml");
+    copyFileSync(FIXTURE_LEAGUE, league);
+    chmodSync(league, 0o400);
+    expect(checkConfigDir(cfg(s))).toMatchObject({
+      status: "ok",
+      details: ["league.yaml is 0400"],
+    });
+    for (const m of [0o000, 0o200]) {
+      chmodSync(league, m);
+      const r = checkConfigDir(cfg(s));
+      expect(r.status, m.toString(8)).toBe("fail");
+      expect(r.message).toBe(
+        `league.yaml is 0${m.toString(8).padStart(3, "0")} — you cannot read it`,
+      );
+      expect(r.fix).toContain("chmod 600");
+      expect(JSON.stringify(r)).not.toContain("is 0600");
+    }
+    chmodSync(league, 0o600);
+    expect(checkConfigDir(cfg(s)).details).toEqual(["league.yaml is 0600"]);
+  });
+
+  it("--fix --yes restores 0600 on an owner-unreadable league.yaml [QA-1-056]", async () => {
+    const s = fresh({ create: true });
+    mkdirSync(s.cacheDir, { recursive: true, mode: 0o700 });
+    const league = path.join(s.configDir, "league.yaml");
+    copyFileSync(FIXTURE_LEAGUE, league);
+    chmodSync(league, 0o000);
+    const io = makeIo(s);
+    const r = await runDoctor(io, { json: true, online: false, fix: true, yes: true });
+    expect(io.err.text).toContain(`fixed: chmod 600 ${league}`);
+    expect(byId(r.rows, "config_dir").status).toBe("ok");
+    expect(byId(r.rows, "league_file").status).toBe("ok");
+  });
+
   it("league file: missing → fail with the onboard hint; invalid → value-free issues; valid → ok, no names", () => {
     const s = fresh({ create: true });
     const io = makeIo(s);
@@ -421,6 +457,86 @@ describe("rows 8–10 — store, datasets, journal", () => {
       if (ex.kind === "open") ex.store.close();
     }
     expect(checkDatasets(makeIo(s), c, { kind: "missing" }).status).toBe("fail");
+  });
+
+  it("row 8: an unwritable cache dir names the real problem; row 9 skips instead of 'never_loaded' [QA-1-053]", () => {
+    const s = refreshed();
+    const c = cfg(s);
+    const clock = fixedClock("2026-09-30T18:10:00.000Z");
+    chmodSync(s.cacheDir, 0o500);
+    try {
+      const ex = openExistingStore(c, clock, log(s));
+      try {
+        const r8 = checkStore(c, ex);
+        expect(r8.status).toBe("fail");
+        expect(r8.message).toContain("not writable");
+        expect(r8.fix).toContain("chmod 700");
+        expect(r8.fix).not.toMatch(/move it aside|refresh all/);
+        const r9 = checkDatasets(makeIo(s, { clock }), c, ex);
+        expect(r9).toMatchObject({ status: "skip", message: "store not open" });
+        expect(JSON.stringify(r9)).not.toContain("never_loaded");
+      } finally {
+        if (ex.kind === "open") ex.store.close();
+      }
+    } finally {
+      chmodSync(s.cacheDir, 0o700);
+    }
+  });
+
+  it("row 8: a store that is not a database is named as such; a read-only store gets a chmod remedy [QA-1-053]", () => {
+    const s = refreshed();
+    const c = cfg(s);
+    const clock = fixedClock(REFRESHED_AT);
+    // every SQLite open failure maps to a fixed reason with its own remedy (never "move it aside"
+    // for a permission problem)
+    const sqliteError = (errcode: number): Error =>
+      Object.assign(new Error("x"), { code: "ERR_SQLITE_ERROR", errcode });
+    expect(storeOpenReason(sqliteError(1544))).toBe("readonly"); // SQLITE_READONLY_DIRECTORY
+    expect(storeOpenReason(sqliteError(26))).toBe("not_a_database");
+    expect(storeOpenReason(sqliteError(11))).toBe("corrupt");
+    expect(storeOpenReason(sqliteError(5))).toBe("busy");
+    expect(storeOpenReason(sqliteError(14))).toBe("cannot_open");
+    expect(storeOpenReason(sqliteError(1))).toBe("other");
+    expect(storeOpenReason(new TypeError("db.enableDefensive is not a function"))).toBe(
+      "unsupported_node",
+    );
+    expect(storeOpenReason("x")).toBe("other");
+    const ro = checkStore(c, { kind: "error", message: "Error: x", reason: "readonly" });
+    expect(ro.fix).toContain("chmod 600");
+    expect(ro.fix).not.toContain("move it aside");
+    expect(checkStore(c, { kind: "error", message: "Error: odd" }).message).toBe(
+      "store.sqlite could not be opened: Error: odd",
+    );
+    chmodSync(storePath(s.cacheDir), 0o600);
+    writeFileSync(storePath(s.cacheDir), "GARBAGE".repeat(2000));
+    const bad = openExistingStore(c, clock, log(s));
+    expect(bad).toMatchObject({ kind: "error", reason: "not_a_database" });
+    const r = checkStore(c, bad);
+    expect(r.message).toContain("is not a SQLite database");
+    expect(r.fix).toContain("restore a backup");
+    expect(checkDatasets(makeIo(s, { clock }), c, bad).status).toBe("skip");
+    // a newer or pending store is not open either: row 9 skips rather than claim never_loaded
+    for (const ex of [
+      { kind: "newer", storeVersion: 9, binaryVersion: 1 },
+      { kind: "pending", storeVersion: 0, binaryVersion: 1 },
+    ] as const)
+      expect(checkDatasets(makeIo(s, { clock }), c, ex).status).toBe("skip");
+  });
+
+  it("--fix --yes restores 0700 (u+w) on our own unwritable cache dir [QA-1-053]", async () => {
+    const s = refreshed();
+    chmodSync(s.cacheDir, 0o500);
+    try {
+      const io = makeIo(s, { env: fixtureEnv(), clock: fixedClock("2026-09-30T18:10:00.000Z") });
+      const r = await runDoctor(io, { json: true, online: false, fix: true, yes: true });
+      expect(io.err.text).toContain(`fixed: chmod 700 ${s.cacheDir}`);
+      expect(byId(r.rows, "store").status).toBe("ok");
+      expect(byId(r.rows, "datasets").details.join("\n")).not.toMatch(
+        /^nflverse:\w+: never_loaded/m,
+      );
+    } finally {
+      chmodSync(s.cacheDir, 0o700);
+    }
   });
 
   it("row 10: skip without a store; ok when empty; warn on a pending row", () => {
