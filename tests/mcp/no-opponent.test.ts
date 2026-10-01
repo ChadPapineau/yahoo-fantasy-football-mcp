@@ -15,7 +15,9 @@ let world: World;
 beforeAll(async () => {
   world = await makeWorld();
 }, 60_000);
-afterAll(() => { world.cleanup(); });
+afterAll(() => {
+  world.cleanup();
+});
 
 describe("ff_analyze_matchup without an opponent for the week (QA-1-008, QA-1-028)", () => {
   it("NOT_FOUND with an E3 hint that names only E3's own arguments", async () => {
