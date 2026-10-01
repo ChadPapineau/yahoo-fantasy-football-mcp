@@ -231,9 +231,19 @@ export const MANUAL_LEAGUE_MISSING_HINT =
 /** league.yaml exists but is malformed, a symlink, or not 0600 → INTERNAL with this hint (never VALIDATION). */
 export const LEAGUE_FILE_INVALID_HINT =
   "league.yaml is invalid or unsafe: run `ff doctor` in a terminal, fix what it names, then retry.";
-/** E3 (and E2 `pwin`) without an opponent roster → NOT_FOUND with this hint. */
+/**
+ * An opponent whose league.yaml players leave starting seats empty → NOT_FOUND with this hint
+ * (QA-1-043) — byte-identical to INCOMPLETE_OPPONENT_HINT in src/domain/analytics/errors.ts.
+ */
+export const MANUAL_INCOMPLETE_OPPONENT_HINT =
+  "The opponent's players in league.yaml leave starting slots empty: list his full starting lineup to get a win probability, or use objective mean.";
+
+/**
+ * E3 (and E2 `pwin`) without an opponent for the week → NOT_FOUND with this hint, which says what
+ * to add where (QA-1-069).
+ */
 export const MANUAL_NO_OPPONENT_HINT =
-  "No opponent roster in league.yaml for this week: add it to get a win probability, or use objective mean.";
+  "No opponent for this week in league.yaml: add - { week: <week>, team: <id> } under opponents (and that team's players under other_teams) to get a win probability, or use objective mean.";
 
 /** The capabilities the manual league may lack, and the fixed warning a tool adds for each. */
 export const MANUAL_FEATURE_WARNINGS = Object.freeze({
@@ -272,6 +282,7 @@ export const SERVER_HINTS: ReadonlySet<string> = new Set([
   MANUAL_LEAGUE_MISSING_HINT,
   LEAGUE_FILE_INVALID_HINT,
   MANUAL_NO_OPPONENT_HINT,
+  MANUAL_INCOMPLETE_OPPONENT_HINT,
 ]);
 
 /** One league.yaml problem: a JSON-path-like location and a fixed reason — never the value. */

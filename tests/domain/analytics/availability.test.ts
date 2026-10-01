@@ -3,12 +3,20 @@
 import { describe, expect, it } from "vitest";
 import { pActive } from "../../../src/domain/analytics/availability.js";
 import { GAME_DAY_WINDOW_MS, P_ACTIVE } from "../../../src/domain/analytics/constants.js";
-import { AnalyticsError, NO_OPPONENT_HINT } from "../../../src/domain/analytics/errors.js";
+import {
+  AnalyticsError,
+  INCOMPLETE_OPPONENT_HINT,
+  NO_OPPONENT_HINT,
+} from "../../../src/domain/analytics/errors.js";
 import { collectInputs, mergeInputs, newestAsOf } from "../../../src/domain/analytics/inputs.js";
 import type { DatasetStamp, InjuryReport } from "../../../src/domain/analytics/types.js";
 import { fixedClock } from "../../../src/domain/clock.js";
 import type { PlatformStamp } from "../../../src/domain/league/types.js";
-import { MANUAL_NO_OPPONENT_HINT, SERVER_HINTS } from "../../../src/providers/platform.js";
+import {
+  MANUAL_INCOMPLETE_OPPONENT_HINT,
+  MANUAL_NO_OPPONENT_HINT,
+  SERVER_HINTS,
+} from "../../../src/providers/platform.js";
 
 const KO = Date.parse("2026-09-27T17:00:00Z");
 const report = (status: string | null, practice: string | null = null): InjuryReport => ({
@@ -153,6 +161,16 @@ describe("AnalyticsError", () => {
     expect(e.ffCode).toBe("NOT_FOUND");
     expect(e.ffHint).toBe(MANUAL_NO_OPPONENT_HINT);
     expect(NO_OPPONENT_HINT).toBe(MANUAL_NO_OPPONENT_HINT);
+    expect(SERVER_HINTS.has(e.ffHint ?? "")).toBe(true);
+    // QA-1-069: the hint says what to add where
+    expect(NO_OPPONENT_HINT).toMatch(/under opponents/);
+    expect(NO_OPPONENT_HINT).toMatch(/other_teams/);
+  });
+  it("incomplete_opponent → NOT_FOUND with a server hint the mapper honours [QA-1-043]", () => {
+    const e = new AnalyticsError("incomplete_opponent", "x");
+    expect(e.ffCode).toBe("NOT_FOUND");
+    expect(e.ffHint).toBe(INCOMPLETE_OPPONENT_HINT);
+    expect(INCOMPLETE_OPPONENT_HINT).toBe(MANUAL_INCOMPLETE_OPPONENT_HINT);
     expect(SERVER_HINTS.has(e.ffHint ?? "")).toBe(true);
   });
   it("other codes map without a hint; detail is capped", () => {

@@ -19,7 +19,7 @@ export type AnalyticsErrorCode =
  * error mapper's SERVER_HINTS check accepts it).
  */
 export const NO_OPPONENT_HINT =
-  "No opponent roster in league.yaml for this week: add it to get a win probability, or use objective mean.";
+  "No opponent for this week in league.yaml: add - { week: <week>, team: <id> } under opponents (and that team's players under other_teams) to get a win probability, or use objective mean.";
 
 /**
  * The fixed hint for `incomplete_opponent` (QA-1-043). The error mapper honours it once it is one of
