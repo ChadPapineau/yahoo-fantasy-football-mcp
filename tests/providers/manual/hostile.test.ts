@@ -297,6 +297,16 @@ describe("schema-level attacks and mistakes", () => {
     ).toMatch(/my_team\.manager: too large/);
   });
 
+  it("names: default-ignorable code points are refused at the door [QA-1-074]", async () => {
+    // soft hyphen, combining grapheme joiner, Hangul filler, variation selector, tag character:
+    // invisible in a client yet not controls, zero-width spaces or bidi overrides
+    for (const cp of ["\\u00ad", "\\u034f", "\\u3164", "\\ufe0f", "\\U000E0041"])
+      expect(
+        reasons(await invalid(edit("  name: Team A\n", `  name: "Team${cp}${CANARY}"\n`))),
+        cp,
+      ).toMatch(/control, zero-width or bidi/);
+  });
+
   it("status codes must match the grammar (no prose in a code field)", async () => {
     expect(reasons(await invalid(edit("status: O }", `status: "Out - ${CANARY}" }`)))).toMatch(
       /not a status code/,
