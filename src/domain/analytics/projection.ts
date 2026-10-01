@@ -6,6 +6,7 @@
 // Stored format-agnostically (plan 08 §5) through the injected repository. Pure: readers, engine,
 // clock, rng and repository are injected.
 import type { Clock, Rng } from "../clock.js";
+import { freshnessClass, stampState } from "../../config/freshness.js";
 import { NFL_TEAMS, type NflTeam } from "../../config/schema.js";
 import { GAME_WINDOW_MS, kickoffMs, opponentOf, teamGame } from "../league/schedule.js";
 import type { PlayerKey, Week } from "../league/types.js";
@@ -160,6 +161,8 @@ export interface ProjectionOutcome {
   readonly players: readonly ProjectedPlayer[];
   /** Best-effort store outcome counts. */
   readonly stored: { readonly written: number; readonly busy: number };
+  /** The target weeks' betting lines were past their hard limit and omitted (QA-1-004). */
+  readonly lines_omitted: boolean;
 }
 
 // --- data loading ------------------------------------------------------------------------------------
@@ -183,6 +186,8 @@ interface Loaded {
   readonly injuriesLoaded: Map<Week, boolean>;
   /** Teams whose report for the week is published (any row), per week (QA-1-021). */
   readonly reportTeams: Map<Week, ReadonlySet<NflTeam>>;
+  /** The target weeks' lines were dropped: the `lines` class is past its hard limit (QA-1-004). */
+  readonly linesOmitted: boolean;
   /** Each target player's newest nflverse roster row this season (QA-1-030). */
   readonly rosterRows: Map<string, NflRosterPlayer>;
   readonly weather: Map<string, WeatherObservation>;
@@ -273,8 +278,17 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
   }
   stamps.push(sched.stamp);
   const { cur, prev } = windowWeeks(lastPlayedWeek(sched.rows, season, first, req.clock.nowMs()));
+  // betting lines ride in the schedules release but age by their own class (plan 01 §5.4: 24 h →
+  // "omitted driver"): past it, the target weeks' lines are dropped and the omission is named. A
+  // window game's closing line is history and stays (QA-1-004).
+  const linesOmitted =
+    stampState(freshnessClass("lines"), sched.stamp, req.clock.nowMs()).state === "expired";
   const addGames = (rows: readonly NflGame[]): void => {
-    for (const g of rows) {
+    for (const raw of rows) {
+      const g =
+        linesOmitted && raw.season === season && req.weeks.includes(raw.week) && raw.lines !== null
+          ? { ...raw, lines: null }
+          : raw;
       const k = gameKey(g.season, g.week);
       const list = games.get(k) ?? [];
       list.push(g);
@@ -426,6 +440,7 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
     injuriesLoaded,
     reportTeams,
     rosterRows,
+    linesOmitted,
     weather,
     stamps,
   };
@@ -652,6 +667,14 @@ function expectDefense(
 
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
 
+/** The omitted-driver assumption when the target weeks' lines are too old (QA-1-004). */
+export const LINES_OMITTED: Assumption = Object.freeze(
+  A(
+    "betting lines omitted: the schedules release that carries them was last checked more than 24 h ago",
+    "a successful ff refresh nflverse",
+  ),
+);
+
 const BASE_ASSUMPTIONS: readonly Assumption[] = Object.freeze([
   A(
     "points width is a position-level CV table around the trailing mean (basis position_cv), not a per-player simulation",
@@ -722,6 +745,7 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
       ? t.subject.nfl_team
       : (t.nfl_team ?? windowGames[0]?.team ?? null);
   const roleGames = windowGames.filter((g) => g.season === req.season && g.team === team).length;
+  if (loaded.linesOmitted) assumptions.push(LINES_OMITTED);
   if (windowGames.length === 0) {
     assumptions.push(
       A(
@@ -1097,5 +1121,6 @@ function run(req: ProjectionRequest, n: number, nLater: number | null): Projecti
     result: { model_version: MODEL_VERSION, projections: players.map((p) => p.projection), inputs },
     players,
     stored: { written: written.count, busy: written.busy },
+    lines_omitted: loaded.linesOmitted,
   };
 }
