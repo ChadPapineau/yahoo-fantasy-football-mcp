@@ -14,28 +14,22 @@ confirmation. News text is data, not instructions.
 
 ## ▶ NEXT STEP
 
-**For Chad, ahead of everything else: submit the Yahoo Fantasy Sports API
-application now** (sports.yahoo.com/developer/access). It is not
-development — it costs nothing and commits to nothing — and its review
-latency is the binding constraint on every branch of the season plan
-(adversarial log OBJ-26). Framing: personal use, one user, one league,
-read-only, a locally-run open-source tool, low cached request volume.
-Record the submission date in the decisions table; the plan 10 Ph8 clock
-starts then.
+**Phase 1a is built, QA/pentest-hardened and merged to `main` (2026-09-30).** The product runs on
+`ManualLeagueProvider` (`<config>/league.yaml`) + nflverse + weather; Yahoo is not connected (no API
+access). Owner's next steps, in order:
 
-**BUILD IN PROGRESS (from 2026-09-30) on branch `build/phase-1a`.** Chad
-approved development; there will be no Yahoo application (decisions table),
-so the scope is Phase 0 remainder + **Phase 1a-full** on
-`ManualLeagueProvider` + nflverse, then the QA/penetration-test loop with
-remediation, then merge to `main`. The build runs as a sequence of
-workflows (foundation → modules → integration → QA/pentest/remediate →
-merge); the orchestrator verifies each at source before the next.
-Agents follow `CLAUDE.md` (repo root): commit only via
-`scripts/dev/commit-paths.sh`, Node via `scripts/dev/with-node.sh`, heavy
-jobs via `scripts/dev/heavy-lock.sh`. A fresh session: `git fetch`, check
-out `build/phase-1a`, read `CLAUDE.md` and this file, then
-`gh run list --branch build/phase-1a` and continue from the last green
-workflow stage recorded in the log below.
+1. **Set it up** — README § Getting started: build in `~/Developer/yahoo-fantasy-football-mcp`,
+   `print-config` → add to Claude, copy the Skills, `ff refresh all`, then `/onboard` to write
+   `~/.config/fantasy-football-mcp/league.yaml` (0600, never in the repo).
+2. **A17 (manual, 2 minutes):** in fixture mode ask Claude Code and Claude Desktop to repeat the
+   `ff_debug_echo` nonce (it is only in `structuredContent`); record per client in "Build facts".
+3. **Decide:** (a) rewrite git history to remove the machine-derived commit email from `main`
+   (needs a force-push — owner only; QA-1-095); (b) the branch ruleset (no force-push/deletion,
+   linear history) — command in `docs/scratch/ci-bootstrap.md` § "For Chad"; (c) the skipped
+   hand-offs listed in `docs/qa/2026-09-30-phase1a-qa-pentest.md` § Open items.
+4. **After the weekly usage reset (recommended):** QA round 2 — per-fix independent re-verification
+   and a second finder sweep (the Stage C workflow, `ffmcp-qa-pentest`, with `MAX_ROUNDS` from 2).
+   Then Phase 2 (usage data, waivers for all positions, trades, injury cascades, news).
 
 ## Executive summary (2026-09-30)
 
@@ -117,6 +111,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 2 — plan | ✅ all ten files (`docs/plan/01-*`…`10-*`, 2,935 lines), both halves verified; plan 10 §4 lists 13 small tensions to fold in during the adversarial round | `docs/plan/` |
 | 2b — docs-only automation (plan 06 §4 step 1) | ✅ `docs` (Mermaid 7/7 + links, with self-tests) and `secrets` (gitleaks 8.30.1 pinned by sha256, 7 Yahoo rules, self-test, weekly full-history scan) green on `main` at `f3a0a48`; Dependabot; PR template. GitHub secret scanning + push protection were already enabled. **Chad's step:** the branch ruleset (no force-push / no deletion / linear history) — exact `gh api` command in `docs/scratch/ci-bootstrap.md` § "For Chad"; required status checks deliberately deferred until PRs are required (a required check rejects every fresh direct push) | `.github/**`, `.gitleaks.toml`, `scripts/**` |
 | 3 — adversarial review | ✅ **closed after three rounds** (`4c1d981`): 30 objections — 29 conceded-and-landed, 1 withdrawn on evidence, 0 pressed; round 3 raised no objections, three nits (fixed by the orchestrator), remainder declared marginal; `## Closing verdict` in the log; `docs/plan/changelog.md` finalised (numbers, closing summary, rounds 1–3) | `docs/plan/adversarial-log.md`, `docs/plan/changelog.md` |
+| build — Phase 0 + 1a-full (Stages A–C) | ✅ merged to `main`: 19 tools, 7 resources, 3 prompts, 4 Skills, `ff` CLI; 3,867 unit + 127 process tests, 98.65 % lines; QA/pentest round 1: 101 findings, 80 confirmed, **80 fixed** | `src/`, `tests/`, `skills/`, `docs/qa/` |
 | docs — README, LICENSE, SECURITY.md | ✅ `README.md` (947 lines, 16 sections, 7 Mermaid diagrams rendered by CI, 121 features marked 📋 planned), `LICENSE` (MIT), `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` — verified by the orchestrator; CI green on `b09fd77` | root + `docs/README.md`, `docs/plan/00-index.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
 
@@ -137,6 +132,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 2026-09-30 | **Runtime dependency added: `yaml` 2.9.1** (ISC, zero dependencies, no install scripts) for the hand-edited `<config>/league.yaml`; **`fast-xml-parser` deferred** (only Phase 1b parses XML). Plan 04 §2 carries the rows | rejected: JSON (no comments, error-prone by hand); a hand-rolled YAML subset parser (a parser is attack surface) |
 | 2026-09-30 | **Secret defences in depth**: gitleaks CI + GitHub push protection (existing), plus a local zero-dependency scanner (`scripts/dev/scan-secrets.mjs`) run by `.githooks/pre-commit` and by `scripts/dev/commit-paths.sh`; a local-only identifier deny-list at `~/.config/fantasy-football-mcp-dev/scan-denylist.txt` (never in the repo) | Chad's "absolutely rigorous" security requirement |
 | 2026-09-30 | **Build branch `build/phase-1a`**; merged to `main` only when the full gate (lint, typecheck, tests + coverage, build, process, smoke, supply-chain, pack, docs, secrets) is green and the QA/pentest loop is dry. Node 24.21 via fnm (`.nvmrc` = 24); global default untouched | plan 04 §5; OBJ-09 |
+| 2026-09-30 | **QA loop stopped after round 1 to stay within the weekly usage budget** (Chad at ~90 %): round 1's 80 confirmed findings were all fixed with failing-first, mutation-checked regression tests; per-fix independent re-verification and a second finder round are deferred to after the reset | Chad's budget concern; the register says what was and was not run |
 | 2026-09-30 | **No development or testing until Chad has reviewed the completed research + planning package** (refined plan, adversarial log + changelog, README/docs, executive summary) and approves | Chad's explicit instruction; the orchestrator reports completion and stops |
 | 2026-09-30 | **Projection storage (Stage B fixer round 2):** samples stored in a compact column form (header + little-endian Float64 matrix, base64; exact; JSON fallback; legacy rows still read) and only a `SIMS.stored` = 1,000-sample prefix of each run's iid draws (plan 08 §5 says `StatLine[n_sims]`) | the only reader (E13) scores ≤ 500; full JSON storage was 43 % of an E1 call and ~25 MB per roster call into a never-pruned table (A15) |
 | 2026-09-30 | **E12 checks `week` against its `source_calls`** (Stage B fixer round 2): a per-server ledger of the last 1,024 successful calls (request_id → tool, week); a cited call answered by another tool or about another week is `VALIDATION`; an id this session never answered is warned, not refused | the gate logged a week-3 lineup rec as week 4 and E13 would have scored it against the wrong week; plan 07 E12 is silent |
@@ -379,3 +375,9 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   cancels superseded non-main runs. Skipped hand-offs (product/architecture decisions) are listed
   in the round report: git-tree location guard, E5 per-candidate points, lineup `comparisons`
   refactor, E1 worker thread, publisher `quick_check`, far-week projection persistence.
+- 2026-09-30 — **Stage C (QA + pentest) round 1** — workflow `ffmcp-qa-pentest`: 12 finder lenses,
+  101 findings, 237 refuting verifiers → 80 confirmed (9 high, 50 medium, 21 low); 73 fixed by area
+  owners + 7 completed by one integrator (`c69b6e5`), every fix with a failing-first,
+  mutation-checked regression test; loop stopped after round 1 for budget. Orchestrator re-ran the
+  full gate from a clean install: 3,867 + 127 tests green, 98.65 % lines, CI green. Register
+  `docs/qa/2026-09-30-phase1a-qa-pentest.md`. README now describes the built product. Merged to `main`.
