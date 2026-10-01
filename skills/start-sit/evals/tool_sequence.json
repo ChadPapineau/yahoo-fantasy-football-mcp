@@ -87,7 +87,7 @@
           "id": "projections",
           "tool": "ff_project_players",
           "args": {
-            "players": { "player_keys": ["manual.p.00-0030279", "manual.p.00-0033090"] },
+            "players": { "player_keys": ["manual.p.00-0038134", "manual.p.00-0036963"] },
             "horizon": "week",
             "week": 4,
             "seed": 20260930

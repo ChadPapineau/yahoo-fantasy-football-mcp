@@ -46,10 +46,10 @@ If the user named players, resolve each name with `fantasy-football-mcp-server:f
 1. Call `fantasy-football-mcp-server:ff_analyze_lineup` with `only_unlocked: true` — set it automatically; a locked player is never moved, benched or suggested.
 2. **Availability.** Under the manual league there is no game-day availability source at all: no platform status, no inactive list. Say so. The user's own "X is inactive" is unconfirmed until the fantasy app shows it: give a conditional ("if the app shows X as Out or Inactive, put Y in — Y's game kicks off at 16:25 ET, so the swap is still open") rather than treating the report as fact. Only when the user confirms the app shows X as inactive, pass X in `exclude`.
 3. `fantasy-football-mcp-server:ff_get_roster` may be re-read once with `force_refresh: true`; `fantasy-football-mcp-server:ff_get_scoreboard` is re-read on every call in this branch.
-4. `fantasy-football-mcp-server:ff_project_players` for the players whose games have not started only.
+4. `fantasy-football-mcp-server:ff_project_players` for the players whose games have not started only (`is_editable` true on the roster).
 5. **Live win probability is not available in this version** — say "live odds are not available yet". When an opponent roster exists, `fantasy-football-mcp-server:ff_analyze_matchup` with `mode: "pre"` gives the pre-game number; label it pre-game, and treat every in-game score as provisional.
 6. `fantasy-football-mcp-server:ff_record_recommendation` with `kind: "lineup"` and the `rec` of the `ff_analyze_lineup` call in step 1 — a game-day swap is a lineup change, and the weekly review scores swap regret only for lineup entries. The pre-game `ff_analyze_matchup` number is context for the answer, not the logged call.
-7. Output: `actionable_slots[]` with their lock times, then the single best swap among unlocked slots — or **"Nothing actionable: every slot is locked."**
+7. Output: the slots still open — the roster's players whose `is_editable` is true, each with its `lock_at` (the later groups of `lock_schedule[]`) — then the single best swap among unlocked slots, or **"Nothing actionable: every slot is locked."** This list comes from `ff_get_roster`, so it is there with or without an opponent.
 
 ### 5. Output additions (on top of the contract)
 - The lineup by slot: `E`, `p10`, `p90`, and the distribution `basis` (`position_cv` in this version — "a position-level spread").
