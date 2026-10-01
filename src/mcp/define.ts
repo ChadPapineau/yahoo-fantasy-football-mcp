@@ -16,6 +16,7 @@ import {
   buildEnvelope,
   envelopeSchema,
   fitToBudget,
+  serializeEnvelope,
   toToolResult,
   type BudgetTrim,
   type InputStamp,
@@ -66,6 +67,14 @@ export interface ToolOutput<D> {
    * call's request_id so E12 can refuse a rec logged under a different week than its source call.
    */
   readonly week?: number;
+  /**
+   * Runs once the result fits its budget, with `data` exactly as the caller will receive it (after
+   * any truncation): side effects that must cover only what is returned — E1 persists only the
+   * projections it actually returns (QA-1-031). Returns warnings to append (dropped, with a log line,
+   * if appending them would break the budget).
+   */
+  // method syntax: a ToolOutput<D> must stay assignable to ToolOutput<unknown> (bivariant param)
+  onEmit?(data: D): readonly string[];
 }
 
 // --- the call ledger (E12's source_calls check) ------------------------------------------------------
@@ -360,8 +369,17 @@ export async function runTool(
     log.error("tool.over_budget", { request_id: ctx.requestId, tool: def.name, size: fit.size });
     throw new FfError("INTERNAL");
   }
+  let emitted = fit.envelope;
+  if (out.onEmit !== undefined) {
+    const extra = out.onEmit(emitted.data);
+    if (extra.length > 0) {
+      const withWarnings = { ...emitted, warnings: [...emitted.warnings, ...extra] };
+      if (serializeEnvelope(withWarnings).length <= budget) emitted = withWarnings;
+      else log.warn("tool.emit_warnings_dropped", { request_id: ctx.requestId, tool: def.name });
+    }
+  }
   if (full !== null) {
-    const parsed = full.safeParse(JSON.parse(JSON.stringify(fit.envelope)));
+    const parsed = full.safeParse(JSON.parse(JSON.stringify(emitted)));
     if (!parsed.success) {
       log.error("tool.output_invalid", {
         request_id: ctx.requestId,
@@ -372,7 +390,7 @@ export async function runTool(
     }
   }
   rememberCall(services, ctx.requestId, { tool: def.name, week: out.week ?? null });
-  return toToolResult(fit.envelope, full !== null);
+  return toToolResult(emitted, full !== null);
 }
 
 /** Registers one tool on `server` with everything plan 01 §4 requires. */
