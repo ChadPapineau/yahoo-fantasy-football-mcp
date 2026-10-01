@@ -130,7 +130,7 @@ export const DS_GAMES = table({
       "TEXT",
       true,
       ["game_id", "stadium_id", "stadium"],
-      "resolveVenueId(game_id, stadium_id, stadium) from src/sources/venues.ts: per-game override → unique stadium-name match → stadium_id; null when unknown. nflverse mis-codes some international games (2026_05_PHI_JAX: stadium_id JAX00, stadium 'Tottenham Hotspur Stadium'; 2025's six international games carry the home team's stadium)",
+      "resolveVenueId(game_id, stadium_id, stadium) from src/sources/venues.ts: per-game override → unique stadium-name match → stadium_id; null when unknown. nflverse mis-codes some international games (2026_05_PHI_JAX: stadium_id JAX00, stadium 'Tottenham Hotspur Stadium'; 2025's seven international games carry the home team's stadium)",
     ),
   ],
   primary_key: ["season", "game_id"],
