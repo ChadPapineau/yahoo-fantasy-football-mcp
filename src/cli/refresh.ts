@@ -5,8 +5,13 @@
 // each source through src/sources/runner.ts in order (schedules first, so weather sees this run's
 // schedule). Exit 0 when every source published, was unchanged or skipped; 1 when any failed.
 import { randomInt } from "node:crypto";
-import path from "node:path";
-import { datasetDir, storePath } from "../config/paths.js";
+import {
+  datasetDir,
+  ensureSecureDir,
+  PathSecurityError,
+  runTempDir,
+  storePath,
+} from "../config/paths.js";
 import type { Config } from "../config/schema.js";
 import { MAX_SEED, seededRng } from "../domain/clock.js";
 import { createHttpClient } from "../http/client.js";
@@ -253,7 +258,22 @@ export async function refresh(
       : new Map<string, readonly number[]>();
   const http = createHttpClient({ ...(transport === null ? {} : { fetch: transport }), log });
   const rng = seededRng(randomInt(0, MAX_SEED));
-  const temp = fsTempArea(path.join(config.cacheDir, "tmp"));
+  // The run temp area must be our own real 0700 directory: a symlinked <cache>/tmp would send every
+  // download (and the runner's recursive clean-up) into wherever it points (QA-1-087).
+  const tmpDir = runTempDir(config.cacheDir);
+  try {
+    ensureSecureDir(tmpDir, { create: true, what: "run temp directory" });
+  } catch (e) {
+    publisher.close();
+    store.close();
+    await writeLine(
+      io.stderr,
+      `ff refresh: ${e instanceof PathSecurityError ? `${e.name}: ${e.message}` : errorText(e)}`,
+    );
+    if (opts.notify) await notifier.notifyFailure(job, "temp_dir");
+    return EXIT.ERROR;
+  }
+  const temp = fsTempArea(tmpDir);
   const results: RefreshResult[] = [];
   const lines: string[] = [];
   try {

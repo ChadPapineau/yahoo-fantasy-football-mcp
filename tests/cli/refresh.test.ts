@@ -2,7 +2,8 @@
 // lock, notifications): the fixture-mode run publishes real dataset files through the real http
 // client/runner/publisher; unchanged releases skip; a failure is exit 1 with a notification; every
 // argument is validated; nothing touches the network (fixture transport or a failing fake fetch).
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { EXIT } from "../../src/cli/exit.js";
 import { main } from "../../src/cli/main.js";
@@ -193,6 +194,19 @@ describe("ff refresh <source>", () => {
     expect(await main(["refresh", "nflverse:schedules", "--notify"], io)).toBe(EXIT.ERROR);
     expect(io.err.text).toContain("the store could not be opened");
     expect(fx.calls[0]?.args[1]).toContain("failed: store");
+  });
+
+  it("never writes run temp files through a symlinked <cache>/tmp [QA-1-087]", async () => {
+    const s = sandbox();
+    sb = s;
+    mkdirSync(s.cacheDir, { mode: 0o700 });
+    const elsewhere = path.join(s.dir, "elsewhere");
+    mkdirSync(elsewhere, { mode: 0o700 });
+    symlinkSync(elsewhere, path.join(s.cacheDir, "tmp"));
+    const io = makeIo(s, { env: fixtureEnv() });
+    expect(await main(["refresh", "nflverse:injuries", "--seasons", "2026"], io)).toBe(EXIT.ERROR);
+    expect(io.err.text).toMatch(/symbolic link/);
+    expect(readdirSync(elsewhere)).toEqual([]);
   });
 
   it("an aborted run (SIGINT) is exit 1", async () => {

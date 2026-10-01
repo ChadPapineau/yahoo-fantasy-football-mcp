@@ -5,7 +5,14 @@
 // consistent backups). Only files this program created, matched by exact name patterns, are removed.
 import { lstatSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
-import { backupDir, datasetDir, ensureSecureDir, resolveAbsolute } from "../config/paths.js";
+import {
+  backupDir,
+  datasetDir,
+  ensureSecureDir,
+  PathSecurityError,
+  resolveAbsolute,
+  runTempDir,
+} from "../config/paths.js";
 import type { Config } from "../config/schema.js";
 import { prunePreMigrationBackups } from "../store/backup.js";
 import { PUBLISH_LOCK_STALE_MS } from "../store/index.js";
@@ -36,6 +43,25 @@ export interface PruneReport {
   readonly premigration_backups: readonly string[];
 }
 
+/**
+ * Whether `dir` is one of our own directories to prune in: `false` when it does not exist, `true`
+ * when it is a real 0700 directory owned by this user; anything else (a symlink someone pointed
+ * elsewhere, loose bits, another owner, an insecure parent) throws — prune never reads through it,
+ * let alone deletes in it (QA-1-087).
+ */
+function ownDirExists(dir: string, what: string): boolean {
+  try {
+    ensureSecureDir(dir, { create: false, what });
+    return true;
+  } catch (e) {
+    if (e instanceof PathSecurityError && e.reason === "missing") return false;
+    throw e;
+  }
+}
+
+const ownUid = (): number | null =>
+  typeof process.getuid === "function" ? process.getuid() : null;
+
 function oldEntries(dir: string, re: RegExp, nowMs: number): { name: string; dir: boolean }[] {
   let names: string[];
   try {
@@ -43,13 +69,15 @@ function oldEntries(dir: string, re: RegExp, nowMs: number): { name: string; dir
   } catch {
     return [];
   }
+  const uid = ownUid();
   const out: { name: string; dir: boolean }[] = [];
   for (const n of names.sort()) {
     if (!re.test(n)) continue;
     const st = lstatSync(path.join(dir, n));
     if (nowMs - st.mtimeMs < DEBRIS_MIN_AGE_MS) continue;
     if (st.isFile() || st.isSymbolicLink()) out.push({ name: n, dir: false });
-    else if (st.isDirectory()) out.push({ name: n, dir: true });
+    // a run temp dir is ours (mkdtemp under our 0700 tmp/); one owned by anyone else is left alone
+    else if (st.isDirectory() && (uid === null || st.uid === uid)) out.push({ name: n, dir: true });
   }
   return out;
 }
@@ -60,15 +88,22 @@ export function pruneFiles(
   nowMs: number,
 ): Omit<PruneReport, "platform_cache_rows"> {
   const ds = datasetDir(cacheDir);
-  const debris = oldEntries(ds, DS_DEBRIS_RE, nowMs).filter((e) => !e.dir);
+  const tmp = runTempDir(cacheDir);
+  const backups = backupDir(cacheDir);
+  // every directory is checked before anything is removed from any of them
+  const has = {
+    ds: ownDirExists(ds, "dataset directory"),
+    tmp: ownDirExists(tmp, "run temp directory"),
+    backups: ownDirExists(backups, "backups directory"),
+  };
+  const debris = has.ds ? oldEntries(ds, DS_DEBRIS_RE, nowMs).filter((e) => !e.dir) : [];
   for (const e of debris) rmSync(path.join(ds, e.name), { force: true });
-  const tmp = path.join(cacheDir, "tmp");
-  const runs = oldEntries(tmp, RUN_TMP_RE, nowMs);
+  const runs = has.tmp ? oldEntries(tmp, RUN_TMP_RE, nowMs) : [];
   for (const e of runs) rmSync(path.join(tmp, e.name), { recursive: e.dir, force: true });
   return {
     dataset_debris: debris.map((e) => e.name),
     run_temp: runs.map((e) => e.name),
-    premigration_backups: prunePreMigrationBackups(backupDir(cacheDir)),
+    premigration_backups: has.backups ? prunePreMigrationBackups(backups) : [],
   };
 }
 
@@ -101,7 +136,11 @@ export async function prune(
     }
     report = { platform_cache_rows: rows, ...pruneFiles(config.cacheDir, io.clock.nowMs()) };
   } catch (e) {
-    await writeLine(io.stderr, `ff prune: ${errorText(e)}`);
+    // a refused path names which directory (local output: the user's own paths)
+    await writeLine(
+      io.stderr,
+      `ff prune: ${e instanceof PathSecurityError ? `${e.name}: ${e.message}` : errorText(e)}`,
+    );
     if (opts.notify) await notifier.notifyFailure("store-prune", "prune");
     return EXIT.ERROR;
   }

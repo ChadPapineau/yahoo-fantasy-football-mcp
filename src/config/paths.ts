@@ -32,6 +32,8 @@ export const STORE_FILE_NAME = "store.sqlite";
 export const DATASET_DIR_NAME = "ds";
 /** The backups directory inside the cache dir (plan 03 §7). */
 export const BACKUP_DIR_NAME = "backups";
+/** The run-temp directory inside the cache dir (`ff refresh` downloads; one mkdtemp dir per run). */
+export const RUN_TEMP_DIR_NAME = "tmp";
 /** The optional non-secret config file inside the config dir (plan 03 §3). */
 export const CONFIG_FILE_NAME = "config.json";
 /** The manual league file inside the config dir (plan 01 §8, round 2 OBJ-29). */
@@ -262,6 +264,11 @@ export function datasetDir(cacheDir: string): string {
 /** `<cache>/backups/`. */
 export function backupDir(cacheDir: string): string {
   return path.join(cacheDir, BACKUP_DIR_NAME);
+}
+
+/** `<cache>/tmp/` — refresh run temp dirs; a real 0700 directory, never followed if a symlink. */
+export function runTempDir(cacheDir: string): string {
+  return path.join(cacheDir, RUN_TEMP_DIR_NAME);
 }
 
 /** `<config>/config.json`. */
