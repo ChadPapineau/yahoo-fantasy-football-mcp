@@ -194,6 +194,10 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
             e.push(
               "ff_analyze_waivers positions must be a non-empty subset of [K, DEF] in Phase 1a",
             );
+          } else if (pos.length !== 1) {
+            // QA-1-063: a result carries ONE hold_vs_stream and ONE rec, for whichever position
+            // gains most — a call over both leaves the other position without a verdict or a log
+            e.push("ff_analyze_waivers must rank exactly one position per call (K, then DEF)");
           }
         }
         return e;

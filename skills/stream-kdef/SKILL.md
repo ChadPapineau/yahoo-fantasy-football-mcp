@@ -2,7 +2,7 @@
 name: stream-kdef
 description: Picks the kicker or team defense (DST) to start or stream in the user's fantasy-football league from implied team totals, spreads, roof and wind, and the league's K/DEF scoring brackets, with a two-week look-ahead and a hold-versus-stream verdict.
 when_to_use: stream, streaming, kicker, defense, DST, D/ST, DEF, which K, which defense, hold my defense, drop my kicker
-argument-hint: "[K|DEF] [week]"
+argument-hint: "[K|DEF]"
 disallowed-tools:
   - fantasy-football-mcp-server:ff_commit_lineup
   - fantasy-football-mcp-server:ff_commit_transaction
@@ -30,21 +30,24 @@ Step 0 of [orient](references/orient.md). If the league's roster slots have no K
 `fantasy-football-mcp-server:ff_get_schedule` with `weeks: [w, w + 1]` (this week and next): kickoffs, byes, `lines.implied` for both teams, roof, and `weather` where a forecast exists (a dome or a closed roof makes the wind irrelevant). Never re-derive an implied total yourself.
 
 ### 4. The pool
-`fantasy-football-mcp-server:ff_list_players` with `position: "K"` and then `position: "DEF"`, `status: "A"`. Under the manual league there is no platform free-agent pool: the pool is every NFL team's kicker and defense, and each carries `availability: "unknown"`.
+`fantasy-football-mcp-server:ff_list_players` with `status: "A"` and `position: "K"` or `position: "DEF"` — the position being ranked (both, one after the other, when the user asked about both). Under the manual league there is no platform free-agent pool: the pool is every NFL team's kicker and defense, and each carries `availability: "unknown"`.
 
 Opponent pressure and turnover profiles are not a separate input in this version; the ranking uses the sacks and takeaways the analytics estimate from recent games (`kdef.sacks_e`, `kdef.takeaways_e`).
 
-### 5. Rank
-`fantasy-football-mcp-server:ff_analyze_waivers` with `positions: ["K", "DEF"]` (or just the one the user asked about) and `look_ahead: 2`.
+### 5. Rank — one call per position
+`fantasy-football-mcp-server:ff_analyze_waivers` with `positions: ["K"]` or `positions: ["DEF"]` and `look_ahead: 2`. When the user asked about both, make two calls, kicker first. One position per call, because a result carries one `hold_vs_stream` and one `rec`: a call over both positions gives a verdict for only one of them. The ranking is always for the league's current week (the tool takes no week); for a later week, say so and use the look-ahead (`kdef.next_week`).
 
 ### 6. Log, then answer
-`fantasy-football-mcp-server:ff_record_recommendation` with `kind: "stream"` and the result's `rec`, then render with the output contract and these additions.
+`fantasy-football-mcp-server:ff_record_recommendation` with `kind: "stream"` and each ranking's `rec` — one entry per position, with its own `client_ref` (`stream-kdef-w4-k`, `stream-kdef-w4-def`) — then render with the output contract and these additions.
 
 ## Output additions
-- The top 3 per position: `E`, `p10`, `p90`, the `basis`, and the drivers — implied team total, opponent implied total, the bracket expectation (`brackets_e`), sacks and takeaways expected, `rare_c` (return and defensive touchdowns as a small constant, never a forecast).
-- Next week's look-ahead for each (`kdef.next_week`): opponent, implied total, expected points.
-- The current starter's Δ against the best option, and `hold_vs_stream` with `streamability`: **hold** or **stream**, and why.
-- The waiver clearing time when known (`waiver_clearing_time`; unknown under the manual league).
+- The top 3 per position, from that position's call. For each candidate:
+  - **Expected points this week**: the value of its `signals[]` entry of kind stream. This version returns no range for a candidate on its own — never present the numbers below as one.
+  - **Gain over the current starter**: `marginal_value.mean` with `marginal_value.p10` / `marginal_value.p50` / `marginal_value.p90` and `marginal_value.basis`, labelled "gain over your current kicker/defense". A range that includes 0 is "no move".
+  - **Drivers**: `kdef.implied_total`, `kdef.opp_implied_total`, the bracket expectation `kdef.brackets_e`, for a defense `kdef.sacks_e` and `kdef.takeaways_e`, and `kdef.rare_c` (return and defensive touchdowns as a small constant, never a forecast).
+- Next week's look-ahead for each (`kdef.next_week`): opponent, implied total, expected points (`kdef.next_week.e`).
+- Per position: `hold_vs_stream.current_starter_delta` (this week's points gained by the best option over the current starter) and `hold_vs_stream.streamability` (the best option's projected points divided by the starter's, averaged over the two weeks; above 1 favours streaming). The verdict — **hold** or **stream** — is that call's `rec.action` (`rec.no_move` is true for hold), with why.
+- The waiver clearing time when known (`waiver_clearing_time`; null under the manual league).
 - **Manual steps** that start with checking availability: "In the fantasy app, open Players → filter DEF → search for the team. If it is available: Add, dropping <current DEF> — before <lock time>. If it is taken: use the next one on the list."
 
 ## Guardrails specific to stream-kdef
