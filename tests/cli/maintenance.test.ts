@@ -350,10 +350,14 @@ describe("ff backup --to <path> (a destination the user chose) [QA-1-050, QA-1-1
     chmodSync(shared, 0o777);
     writeFileSync(path.join(s.dir, "a-file"), "x");
     const inRepo = path.join(ROOT, "fixtures", `qa-1-050-${String(process.pid)}.sqlite`);
+    // "~/documents" IS ~/Documents on a case-insensitive filesystem (macOS APFS default), so it is
+    // refused as cloud-synced; on a case-sensitive one (the Linux CI runner) it is another,
+    // nonexistent directory and is refused as such — either way never written
+    const caseInsensitive = existsSync(path.join(s.home, "DOCUMENTS"));
     const cases: [string, RegExp][] = [
       ["rel.sqlite", /absolute/],
       [path.join(s.home, "Documents", "ff.sqlite"), /cloud-synced/],
-      ["~/documents/ff.sqlite", /cloud-synced/],
+      ["~/documents/ff.sqlite", caseInsensitive ? /cloud-synced/ : /does not exist/],
       [inRepo, /repository checkout/],
       [path.join(s.dir, "no-such-dir", "ff.sqlite"), /does not exist/],
       [path.join(s.dir, "a-file", "ff.sqlite"), /not a directory/],
