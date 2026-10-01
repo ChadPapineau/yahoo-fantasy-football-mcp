@@ -17,7 +17,7 @@ import {
   type ProjectionReaders,
 } from "../../domain/analytics/index.js";
 import type { Projection, Rec } from "../../domain/analytics/types.js";
-import { seededRng, type Rng } from "../../domain/clock.js";
+import { seedFrom, seededRng, type Rng } from "../../domain/clock.js";
 import { lockAtFor } from "../../domain/league/schedule.js";
 import { MAX_ROSTER_SIZE, canOccupy, slotByName } from "../../domain/league/slots.js";
 import { manualPlayerKeyFor, type RosterSlots, type Week } from "../../domain/league/types.js";
@@ -96,16 +96,45 @@ function rngFor(ctx: ToolContext, seed: number | undefined): Rng {
   return seededRng(seed ?? ctx.services.newSeed?.() ?? randomInt(0, BOUNDS.seed.max));
 }
 
-/** The dataset readers the engines use (weather only when a weather source is configured). */
+/**
+ * The seed of an E2/E3/E5 call, which takes no `seed` argument (QA-1-003, QA-1-023): derived from
+ * the call's canonical inputs — the tool, the league, the team, the week and every input's source and
+ * as_of — so an identical call over identical data gives identical quantiles and p_win (means and
+ * decisions are seed-independent already), and any data change draws a new one.
+ */
+export function callSeed(
+  tool: string,
+  key: { readonly league: string; readonly team: string; readonly week: Week },
+  inputs: readonly InputStamp[],
+): number {
+  return seedFrom(
+    JSON.stringify({
+      tool,
+      league: key.league,
+      team: key.team,
+      week: key.week,
+      inputs: inputs.map((i) => [i.source, i.as_of]),
+    }),
+  );
+}
+
+/**
+ * The dataset readers the engines use (weather only when a weather source is configured), with the
+ * nflverse weekly rosters so a reserve/cut/inactive player is out (QA-1-030).
+ */
 function readers(ctx: ToolContext): ProjectionReaders {
   const d = ctx.services.datasets;
   return {
     schedules: d.schedules,
     injuries: d.injuries,
     playerWeeks: d.playerWeeks,
+    rosters: { latest: (season) => rosterRows(ctx, season) },
     ...(ctx.options.weatherSource === "off" ? {} : { weather: d.weather }),
   };
 }
+
+/** The warning E2/E3 add when the projections ran without betting lines (QA-1-004). */
+export const LINES_OMITTED_WARNING = "betting lines omitted: older than 24 h";
 
 /**
  * The dataset gate every analytics tool passes first: schedules and stats must have been loaded
@@ -427,7 +456,8 @@ const currentSeat = z.strictObject({
 });
 
 const swapRow = z.strictObject({
-  out: playerKey,
+  /** Null for a fill of an empty starting seat (QA-1-020, QA-1-040). */
+  out: playerKey.nullable(),
   in: playerKey,
   slot: slotName,
   delta_e: z.number(),
@@ -620,7 +650,7 @@ function involvedKeys(d: E2Data, withOut: boolean): Set<string> {
   const out = new Set<string>();
   for (const s of d.swaps) {
     out.add(s.in);
-    if (withOut) out.add(s.out);
+    if (withOut && s.out !== null) out.add(s.out);
   }
   for (const c of d.conditionals) out.add(c.if.player_key).add(c.then.in);
   for (const c of d.comparisons ?? []) out.add(c.in);
@@ -754,11 +784,15 @@ export const analyzeLineupTool = defineTool({
     inputs.push(...datasetGate(ctx, lc, [w]));
     const settings = await scoringOf(ctx, lc, inputs);
     const slots = await slotsOf(ctx, lc, inputs);
-    const rng = rngFor(ctx, undefined);
+    const myKey = teamOf(lc, args.team_key).team_key;
+    const rng = rngFor(
+      ctx,
+      callSeed("ff_analyze_lineup", { league: lc.ref.league_key, team: myKey, week: w }, inputs),
+    );
     const mine = await lineupPlayers(ctx, lc, args.team_key, w, settings, rng, inputs, warnings);
     checkConstraints(args, mine.players, mine.rosterKeys, slots);
-    const myKey = teamOf(lc, args.team_key).team_key;
     const opp = await opponentPlayers(ctx, lc, myKey, w, settings, rng, inputs, warnings);
+    if (mine.out.lines_omitted) warnings.push(LINES_OMITTED_WARNING);
     const rec = analyzeLineup({
       slots,
       players: mine.players,
@@ -771,6 +805,8 @@ export const analyzeLineupTool = defineTool({
       ...(args.compare === undefined ? {} : { compare: args.compare }),
       clock: ctx.services.clock,
       inputs: mine.out.result.inputs,
+      // a fill of an empty starting seat is listed as { out: null, in, slot } (QA-1-020, QA-1-040)
+      fills_in_swaps: true,
     });
     const swapRows = rec.swaps.map((s) => ({
       ...s,
@@ -876,12 +912,16 @@ export const analyzeMatchupTool = defineTool({
     inputs.push(...datasetGate(ctx, lc, [w]));
     const settings = await scoringOf(ctx, lc, inputs);
     const slots = await slotsOf(ctx, lc, inputs);
-    const rng = rngFor(ctx, undefined);
-    const mine = await lineupPlayers(ctx, lc, args.team_key, w, settings, rng, inputs, warnings);
     const myKey = teamOf(lc, args.team_key).team_key;
+    const rng = rngFor(
+      ctx,
+      callSeed("ff_analyze_matchup", { league: lc.ref.league_key, team: myKey, week: w }, inputs),
+    );
+    const mine = await lineupPlayers(ctx, lc, args.team_key, w, settings, rng, inputs, warnings);
     const opp = await opponentPlayers(ctx, lc, myKey, w, settings, rng, inputs, warnings);
     if (opp === null || opp.players.length === 0)
       throw new FfError("NOT_FOUND", { hint: MATCHUP_NO_OPPONENT_HINT });
+    if (mine.out.lines_omitted) warnings.push(LINES_OMITTED_WARNING);
     const r = analyzeMatchupPre({
       slots,
       players: mine.players,
@@ -1034,6 +1074,11 @@ export function balancedCandidates<C extends { readonly position: string }>(
   return out;
 }
 
+/** A projection subject's identity (a gsis id, or `def:<team>`). */
+function subjectId(s: KdefCandidateInput["subject"]): string {
+  return s.kind === "player" ? s.gsis_id : `def:${s.nfl_team}`;
+}
+
 function kdefUniverse(
   ctx: ToolContext,
   lc: LeagueContext,
@@ -1127,19 +1172,29 @@ export const analyzeWaiversTool = defineTool({
           ]
         : [],
     );
+    // a rostered K/DEF entered by name only has a name-hash key, yet resolves to the same subject as
+    // its universe row: never list my own starter as a streaming candidate (QA-1-041 follow-up)
+    const mineSubjects = new Set(current.map((c) => subjectId(c.subject)));
+    universe = universe.filter((c) => !mineSubjects.has(subjectId(c.subject)));
     const caps = await ctx.services.platform.capabilities();
+    const myKey = teamOf(lc, args.team_key).team_key;
     const out = analyzeKdef({
       positions: args.positions,
       season: lc.league.season,
       week: w,
       look_ahead: weeks.length - 1,
+      // a weekly-lock league locks every K/DEF at the week's first kickoff (QA-1-022)
+      lock_mode: lockModeOf(lc.league),
       universe,
       current,
       availability_known: caps.read_features.free_agent_pool,
       settings,
       readers: readers(ctx),
       clock: ctx.services.clock,
-      rng: rngFor(ctx, undefined),
+      rng: rngFor(
+        ctx,
+        callSeed("ff_analyze_waivers", { league: lc.ref.league_key, team: myKey, week: w }, inputs),
+      ),
     });
     if (!out.availability_known) warnings.push(MANUAL_FA_POOL_WARNING);
     const a = out.analysis;

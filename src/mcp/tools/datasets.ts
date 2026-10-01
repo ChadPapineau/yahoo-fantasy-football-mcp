@@ -4,6 +4,7 @@
 // weather). Third-party text is wrapped or path-listed; practice rows become fixed codes (plan 02
 // §6.4: news/injury text feeds analytics only as extracted structured features).
 import { z } from "zod/v4";
+import { freshnessClass, stampState } from "../../config/freshness.js";
 import { GAME_DAY_WINDOW_MS } from "../../domain/analytics/constants.js";
 import { pActive } from "../../domain/analytics/availability.js";
 import type { InjuryReport } from "../../domain/analytics/types.js";
@@ -139,6 +140,10 @@ const d2Data = z.strictObject({
   base_rates_note: z.string().max(200),
 });
 
+/** D3's warning when the schedule's betting lines are past their hard limit (QA-1-004). */
+export const LINES_EXPIRED_WARNING =
+  "betting lines omitted: older than 24 h (run `ff refresh nflverse:schedules` in a terminal)";
+
 /** The fixed base-rate note (plan 07 D2). */
 export const BASE_RATES_NOTE = "Q → played 71 % 2017–2023 (05 §3.5)";
 
@@ -180,17 +185,42 @@ export const getInjuries = defineTool({
     const rrIn = optionalDataset(rr, ctx.nowMs, lc.allowStale);
     if (rrIn !== null && !inputs.some((i) => i.source === rrIn.source)) inputs.push(rrIn);
     const roster = new Map(rr.rows.map((r) => [r.gsis_id, r]));
+    // reports are published team by team (QA-1-021): "not listed" means cleared only once his team's
+    // report is out; before that, last week's designation carries — as the projection judges it
+    const teamsReported = (rows: readonly InjuryReport[], wk: Week): ReadonlySet<string> =>
+      new Set(rows.filter((r) => r.season === season && r.week === wk).map((r) => r.nfl_team));
+    const nowTeams =
+      reports.stamp === null
+        ? new Set<string>()
+        : teamsReported(ctx.services.datasets.injuries.reports(season, w, null).rows, w);
+    const prior = w - 1;
+    const priorReports =
+      prior >= 1 ? ctx.services.datasets.injuries.reports(season, prior, gsis) : null;
+    const priorTeams =
+      prior >= 1 && priorReports !== null && priorReports.stamp !== null
+        ? teamsReported(ctx.services.datasets.injuries.reports(season, prior, null).rows, prior)
+        : new Set<string>();
+    const priorByGsis = new Map(
+      (priorReports?.rows ?? [])
+        .filter((r) => r.season === season && r.week === prior)
+        .map((r) => [r.gsis_id, r]),
+    );
     const src = (f: string): string => textSource(lc.ref.platform, f);
     const rows = targets.map((t) => {
       const report = t.subject.kind === "player" ? (byGsis.get(t.subject.gsis_id) ?? null) : null;
       const g = t.nfl_team === null ? null : teamGame(t.nfl_team, weekRows);
       const kick = g === null ? null : kickoffMs(g.kickoff);
       const platformStatus = codeOrNull(t.platform?.status ?? null, STATUS_CODE_RE);
+      const rosterStatus =
+        t.subject.kind === "player" ? rosterStatusFor(roster.get(t.subject.gsis_id), w) : null;
       const avail = pActive({
-        rosterStatus:
-          t.subject.kind === "player" ? rosterStatusFor(roster.get(t.subject.gsis_id), w) : null,
+        rosterStatus,
         report,
         injuriesLoaded: reports.stamp !== null,
+        reportPublished: t.nfl_team !== null && nowTeams.has(t.nfl_team),
+        priorPublished: t.nfl_team !== null && priorTeams.has(t.nfl_team),
+        priorReport:
+          t.subject.kind === "player" ? (priorByGsis.get(t.subject.gsis_id) ?? null) : null,
         platformStatus,
         kickoffMs: kick,
         nowMs: ctx.nowMs,
@@ -249,7 +279,9 @@ export const getInjuries = defineTool({
         p_active: avail.p,
         p_active_basis: avail.basis,
         trend: practiceTrend(report),
-        ir_eligible: isIrEligibleStatus(platformStatus ?? oc),
+        // an NFL reserve-list player (RES) is IR-eligible whatever the report says (QA-1-030)
+        ir_eligible:
+          isIrEligibleStatus(platformStatus ?? oc) || rosterStatus?.trim().toUpperCase() === "RES",
         sources_agree:
           gameDay || report === null || platformStatus === null ? null : oc === platformStatus,
         game_day: gameDay,
@@ -421,6 +453,10 @@ export const getSchedule = defineTool({
     const all = seasonGames(ctx, season);
     const sIn = requiredDataset(all, ctx.nowMs, allowStale);
     if (sIn !== null) inputs.push(sIn);
+    // betting lines past their hard limit (24 h) are not served, as the projections omit them (QA-1-004)
+    const linesExpired =
+      all.stamp !== null &&
+      stampState(freshnessClass("lines"), all.stamp, ctx.nowMs).state === "expired";
     const wanted = new Set(weeks);
     const games = all.rows
       .filter((g) => wanted.has(g.week))
@@ -471,7 +507,7 @@ export const getSchedule = defineTool({
         divisional: g.divisional,
         rest_days: { away: g.rest_days.away, home: g.rest_days.home },
         lines:
-          !args.include_lines || g.lines === null
+          !args.include_lines || g.lines === null || linesExpired
             ? null
             : {
                 spread_line: g.lines.spread_line,
@@ -487,6 +523,8 @@ export const getSchedule = defineTool({
         score: g.score === null ? null : { away: g.score.away, home: g.score.home },
       };
     });
+    if (args.include_lines && linesExpired && games.some((g) => g.lines !== null))
+      warnings.push(LINES_EXPIRED_WARNING);
     const byesAll = byeWeeks(all.rows, season, NFL_TEAMS);
     const byes: Record<string, (typeof NFL_TEAMS)[number][]> = {};
     for (const w of weeks) {
