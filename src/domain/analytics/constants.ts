@@ -250,7 +250,8 @@ export const SIMS = Object.freeze({
   min: 1000,
   max: 20000,
   default: 4000,
-  stored: 1000,
+  /** = RETRO_SAMPLE_CAP (src/mcp/tools/reclog.ts), the only reader's cap (QA-1-031/081). */
+  stored: 500,
   /**
    * The most lines one call simulates (QA-1-079): n_sims is shared down evenly over the call's
    * player-weeks past this (never below `min`), so the worst in-bounds request — 50 players × 6 weeks
