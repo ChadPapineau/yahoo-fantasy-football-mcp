@@ -111,7 +111,7 @@ export const recordRecommendation = defineTool({
   name: "ff_record_recommendation",
   family: "local_write",
   description:
-    "Log a recommendation (an analytics result's rec, alternatives, source request ids) before presenting it. Local write, idempotent on client_ref.",
+    "Log a recommendation (an analytics result's rec, alternatives, source request ids) before presenting it. Local write, idempotent on client_ref within a league, season, week and kind.",
   input: recordRecommendationInputSchema,
   opaqueInput: {
     rec: "data.rec of the analytics result being logged, unchanged (Rec: ff://docs/tool-outputs)",

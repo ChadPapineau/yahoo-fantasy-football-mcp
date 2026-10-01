@@ -7,6 +7,9 @@ import type { PageOf } from "../../domain/league/types.js";
 import {
   LOG_ID_RE,
   RECOMMENDATION_KINDS,
+  RECORD_DEDUP_SCOPE,
+  recordDedupParams,
+  recordDedupScope,
   type RecommendationListItem,
   type RecommendationLogRepository,
   type RecommendationOutcome,
@@ -85,12 +88,14 @@ export function recommendationLogRepository({ db, writes }: RepoDeps): Recommend
       const json = JSON.stringify(input);
       return writes.required("recommendation_log", () =>
         immediate(db, () => {
-          if (input.client_ref !== null) {
+          // the dedup scope is league + season + week + kind + client_ref, never the key alone (QA-1-061)
+          const scope = recordDedupScope(input);
+          if (scope !== null) {
             const prior = db
               .prepare(
-                "SELECT log_id, recorded_at, week, kind FROM recommendation_log WHERE league_key = ? AND client_ref = ?",
+                `SELECT log_id, recorded_at, week, kind FROM recommendation_log WHERE ${RECORD_DEDUP_SCOPE.map((c) => `${c} = ?`).join(" AND ")}`,
               )
-              .get(input.league_key, input.client_ref) as
+              .get(...recordDedupParams(scope)) as
               { log_id: string; recorded_at: string; week: number; kind: string } | undefined;
             if (prior !== undefined)
               return {

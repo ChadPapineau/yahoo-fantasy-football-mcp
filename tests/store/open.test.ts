@@ -26,6 +26,8 @@ afterEach(() => {
 });
 
 const mode = (p: string): number => statSync(p).mode & 0o777;
+/** The binary's schema version (migration 002 made it 2 — QA-1-061); the tests follow the list. */
+const BINARY_V = targetVersion(MIGRATIONS);
 
 describe("open: files, modes, pragmas", () => {
   it("creates the cache dir 0700, the store 0600, the ds dir 0700; WAL + foreign keys + trusted_schema off", () => {
@@ -65,13 +67,13 @@ describe("open: files, modes, pragmas", () => {
       expect(sql, tname).toMatch(/NEVER PRUNED/);
     }
     for (const s of MIGRATION_001_SQL) expect(s).not.toMatch(/\bds_/);
-    expect(readSchemaVersion(new DatabaseSync(t.storePath, { readOnly: true }))).toBe(1);
+    expect(readSchemaVersion(new DatabaseSync(t.storePath, { readOnly: true }))).toBe(BINARY_V);
   });
 
   it("migrates a pre-existing empty 0600 file (version 0) without a backup", () => {
     writeFileSync(t.storePath, "", { mode: 0o600 });
     const store = openStore(t);
-    expect(store.schemaVersion).toBe(1);
+    expect(store.schemaVersion).toBe(BINARY_V);
     store.close();
     expect(existsSync(t.backupDir)).toBe(false);
   });
@@ -110,7 +112,7 @@ describe("open: files, modes, pragmas", () => {
     const s = store.stats();
     expect(s.path).toBe(t.storePath);
     expect(s.size_bytes).toBeGreaterThan(0);
-    expect(s.schema_version).toBe(1);
+    expect(s.schema_version).toBe(BINARY_V);
     expect(s.cache_misses_busy).toBe(0);
     expect(s.attached).toEqual([]);
     store.close();
@@ -135,7 +137,7 @@ describe("open: version refusal and migrate:false", () => {
     }
     expect(err).toBeInstanceOf(StoreVersionError);
     expect((err as StoreVersionError).storeVersion).toBe(7);
-    expect((err as StoreVersionError).binaryVersion).toBe(1);
+    expect((err as StoreVersionError).binaryVersion).toBe(BINARY_V);
     expect((err as StoreVersionError).exitCode).toBe(1);
     expect(statSync(t.storePath).size).toBe(before);
   });
@@ -156,7 +158,7 @@ describe("open: version refusal and migrate:false", () => {
   it("migrate:false on a current store opens normally", () => {
     openStore(t).close();
     const s = openStore(t, { migrate: false });
-    expect(s.schemaVersion).toBe(1);
+    expect(s.schemaVersion).toBe(BINARY_V);
     s.close();
   });
 
@@ -171,7 +173,7 @@ describe("open: version refusal and migrate:false", () => {
     const bad = [
       ...MIGRATIONS,
       {
-        version: 2,
+        version: BINARY_V + 1,
         name: "broken",
         up: (db: DatabaseSync) => {
           db.exec("CREATE TABLE half_done (x INTEGER)");
@@ -181,7 +183,7 @@ describe("open: version refusal and migrate:false", () => {
     ];
     expect(() => openStore(t, {}, { migrations: bad })).toThrow(/boom/);
     const db = new DatabaseSync(t.storePath, { readOnly: true });
-    expect(readSchemaVersion(db)).toBe(1);
+    expect(readSchemaVersion(db)).toBe(BINARY_V);
     expect(
       db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'half_done'").get(),
     ).toBeUndefined();
