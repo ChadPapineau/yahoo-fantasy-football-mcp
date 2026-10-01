@@ -28,7 +28,8 @@ import type {
   TeamRef,
   Week,
 } from "../../domain/league/types.js";
-import type { ProjectionSubject, ScoringSettings } from "../../domain/scoring/types.js";
+import { positionTypeForLeaguePosition, withPositionType } from "../../domain/scoring/index.js";
+import type { ProjectionSubject, ScoringSettings, StatLine } from "../../domain/scoring/types.js";
 import { isProvisionalWeek } from "../../config/freshness.js";
 import {
   isUntrustedSource,
@@ -376,4 +377,17 @@ export async function slotsOf(
 export function seasonOfInstant(nowMs: number): number {
   const d = new Date(nowMs);
   return d.getUTCMonth() < 2 ? d.getUTCFullYear() - 1 : d.getUTCFullYear();
+}
+
+/**
+ * A player's stat line typed by his LEAGUE position (QA-1-018): nflverse types a line by its own
+ * roster position, so a player the league lists as WR but nflverse as CB would score 0 under the
+ * offence rules. The line keeps nflverse's type only when the league position maps to none.
+ */
+export function leagueTypedLine(
+  line: StatLine,
+  leaguePosition: string | null | undefined,
+): StatLine {
+  const pt = positionTypeForLeaguePosition(leaguePosition);
+  return pt === null || pt === line.position_type ? line : withPositionType(line, pt);
 }

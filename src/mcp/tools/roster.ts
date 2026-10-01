@@ -50,6 +50,7 @@ import {
   crosswalkRun,
   leagueContext,
   leagueUniverse,
+  leagueTypedLine,
   lockModeOf,
   nflTeamOf,
   optionalDataset,
@@ -381,7 +382,10 @@ export const getPlayerStats = defineTool({
           : r.subject?.kind === "defense"
             ? dLines.rows.filter((l) => l.nfl_team === (r.subject as { nfl_team: string }).nfl_team)
             : [];
-      const scored = own.map((l) => score(l.line, settings));
+      // a player line is scored as the league's position (QA-1-018); a D/ST line is DT already
+      const scored = own.map((l) =>
+        score("gsis_id" in l ? leagueTypedLine(l.line, r.position) : l.line, settings),
+      );
       const engine = scored.length === 0 ? null : scored.reduce((a, s) => a + s.points, 0);
       const values = sumValues(own.map((l) => l.line));
       const plat = platformByKey.get(r.key);
