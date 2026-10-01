@@ -85,6 +85,16 @@ const LEDGER: readonly (readonly [string, RegExp, (f: Facts) => boolean])[] = [
     (f) => f.opp.matchups.every((m) => m.teams.every((t) => t.points === null)),
   ],
   [
+    "a week without an opponent returns matchups []",
+    /no entry returns `matchups: \[\]`/,
+    (f) => f.none.matchups.length === 0,
+  ],
+  [
+    "a week without an opponent: matchups empty and no warning",
+    /`matchups` is empty and there is no warning/,
+    (f) => f.none.matchups.length === 0 && f.none.warnings.length === 0,
+  ],
+  [
     "a week without an opponent: matchups [] and no warning",
     /`matchups: \[\]`,? (?:and |with )?no warning/,
     (f) => f.none.matchups.length === 0 && f.none.warnings.length === 0,
@@ -153,7 +163,7 @@ describe("QA-1-062: the Skills describe the manual league's scoreboard, transact
       .join("\n");
     for (const label of [
       "the scoreboard holds the opponent entered for that week",
-      "a week without an opponent: matchups [] and no warning",
+      "a week without an opponent returns matchups []",
       "transactions are the ones listed in the league file",
     ]) {
       const re = LEDGER.find(([l]) => l === label)?.[1];

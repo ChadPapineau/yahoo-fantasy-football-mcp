@@ -32,7 +32,7 @@ Call `fantasy-football-mcp-server:ff_get_roster` for the user's team and the wee
 If the user named players, resolve each name with `fantasy-football-mcp-server:ff_search_players` (or read the key from the roster) — never guess a `player_key`.
 
 ### 3. Pre-game branch
-1. `fantasy-football-mcp-server:ff_get_scoreboard` for the week, to find the opponent. Under the manual league the scoreboard holds only the opponent entered for this week in the league file's `opponents:`, without scores; when there is none, `matchups` is empty and there is no warning.
+1. `fantasy-football-mcp-server:ff_get_scoreboard` for the week, to find the opponent. Under the manual league the scoreboard holds only the opponent entered for this week in the league file's `opponents:`, without scores; a week with no entry returns `matchups: []` (repeat any warning that comes with it).
 2. `fantasy-football-mcp-server:ff_get_roster` with the opponent's `team_key`, when there is one. If there is none, carry on: the lineup is chosen by expected points (`objective: "mean"`), and the answer says a win probability needs this week's opponent in the league file.
 3. `fantasy-football-mcp-server:ff_get_injuries` for the user's roster (and the opponent's, when known). Use `p_active` — never "50/50" for Questionable.
 4. `fantasy-football-mcp-server:ff_project_players` for both rosters, `horizon: "week"`, the week.
