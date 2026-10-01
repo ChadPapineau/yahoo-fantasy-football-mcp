@@ -16,6 +16,7 @@ import type { Config } from "../config/schema.js";
 import { MAX_SEED, seededRng } from "../domain/clock.js";
 import { createHttpClient } from "../http/client.js";
 import { NFLVERSE_SOURCES } from "../sources/nflverse/index.js";
+import { nflSeasonAt } from "../sources/nflverse/release.js";
 import { fsTempArea, isRefreshSuccess, runRefresh, type RefreshResult } from "../sources/runner.js";
 import type { DataSource } from "../sources/source.js";
 import { weatherSourceFor } from "../sources/weather/index.js";
@@ -84,11 +85,10 @@ export function jobNameFor(target: RefreshTarget): string {
 /**
  * The NFL season in progress at `nowMs`: the calendar year from September, the previous year
  * through August (the Super Bowl is in February; nflverse opens a season's files in September).
+ * The one rule the release resolver uses too, so the two can never drift (QA-1-033).
  */
 export function currentSeason(nowMs: number): number {
-  const d = new Date(nowMs);
-  const y = d.getUTCFullYear();
-  return d.getUTCMonth() >= 8 ? y : y - 1;
+  return nflSeasonAt(nowMs);
 }
 
 /**

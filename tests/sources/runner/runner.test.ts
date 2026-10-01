@@ -2,7 +2,7 @@
 // version null, schema fail, publish fail/throw/locked, transient retry then success, retries
 // exhausted, off-season and never-loaded skips, temp cleanup on every path, aborts, and seeded,
 // bounded jitter. Fakes only; temp dirs under os.tmpdir().
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -15,6 +15,7 @@ import {
   fsTempArea,
   isRefreshSuccess,
   JOB_LOCKED_ERROR,
+  PUBLISHED_UNRECORDED_MESSAGE,
   runRefresh,
   seasonState,
   type RefreshDeps,
@@ -22,7 +23,11 @@ import {
   type TempArea,
 } from "../../../src/sources/runner.js";
 import type { HttpDownload, HttpGet, SchemaReport } from "../../../src/sources/source.js";
-import type { DatasetPublisher, PublishOptions } from "../../../src/store/types.js";
+import {
+  PUBLISH_UNRECORDED,
+  type DatasetPublisher,
+  type PublishOptions,
+} from "../../../src/store/types.js";
 import { captureLog, netError } from "../../http/helpers.js";
 import {
   fakePublisher,
@@ -553,6 +558,17 @@ describe("publish outcomes", () => {
     expect(await tmpLeft()).toEqual([]);
   });
 
+  it("published_unrecorded: the new file is live, its log row missing — never reported as intact [QA-1-032]", async () => {
+    const d = deps({ publisher: fakePublisher(() => ({ ok: false, error: PUBLISH_UNRECORDED })) });
+    const r = await runRefresh({ source: fakeSource(), seasons: [2026], week: null }, d);
+    expectStatus(r, "failed");
+    expect(r.error).toBe("published_unrecorded");
+    expect(r.message).toBe(PUBLISHED_UNRECORDED_MESSAGE);
+    expect(r.message).not.toMatch(/intact/);
+    expect(d.refreshLog.rows).toEqual([]);
+    expect(await tmpLeft()).toEqual([]);
+  });
+
   it("a throwing publisher → failed publish, recorded", async () => {
     const d = deps({ publisher: fakePublisher(undefined, { throwOnPublish: true }) });
     const r = await runRefresh({ source: fakeSource(), seasons: [2026], week: null }, d);
@@ -842,5 +858,22 @@ describe("fsTempArea", () => {
     await t.remove(a);
     await t.remove(join(root, "t", "never-existed"));
     expect(await readdir(join(root, "t"))).toEqual([]);
+  });
+
+  it("refuses a world-writable or symlinked root, whoever the caller is [QA-1-087]", async () => {
+    const open = join(root, "open");
+    await mkdir(open, { mode: 0o700 });
+    await chmod(open, 0o777);
+    await expect(fsTempArea(open).create("nflverse:injuries")).rejects.toThrow();
+    expect(await readdir(open)).toEqual([]);
+    const target = join(root, "elsewhere");
+    await mkdir(target, { mode: 0o700 });
+    await symlink(target, join(root, "link"));
+    await expect(fsTempArea(join(root, "link")).create("nflverse:injuries")).rejects.toThrow();
+    expect(await readdir(target)).toEqual([]);
+    // a fresh root is created owner-only
+    const fresh = join(root, "fresh");
+    await fsTempArea(fresh).create("nflverse:injuries");
+    expect((await stat(fresh)).mode & 0o077).toBe(0);
   });
 });

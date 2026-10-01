@@ -4,9 +4,10 @@
 // version() → (release unchanged AND the current file healthy → recordUnchanged) → fetch → assertSchema → publisher.publish(fill
 // via source.publish; the unchanged check re-made under the job lock) → outcome. Pure orchestration over injected HttpGet/Clock/Rng/publisher/temp
 // area: no Date.now, no Math.random, no process globals. Never throws: every path returns a result.
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { DatasetSourceId } from "../config/freshness.js";
+import { ensureSecureDir } from "../config/paths.js";
 import type { RefreshLogRepository, ScheduleReader } from "../domain/analytics/types.js";
 import type { Clock, Rng } from "../domain/clock.js";
 import type { IsoInstant, Week } from "../domain/league/types.js";
@@ -16,6 +17,7 @@ import { abortableSleep, type Sleep } from "../http/sleep.js";
 import { checkDatasetFile, type DatasetCheck, type DatasetHealth } from "./dataset-health.js";
 import {
   PUBLISH_ALREADY_CURRENT,
+  PUBLISH_UNRECORDED,
   type DatasetPublisher,
   type PublishOutcome,
   type PublishStats,
@@ -55,6 +57,8 @@ export type RefreshErrorCode =
   | "not_found"
   | "schema"
   | "publish"
+  /** The new file is live but its refresh_log row could not be written (QA-1-032). */
+  | "published_unrecorded"
   | "store"
   | "aborted"
   | "invalid_request"
@@ -65,6 +69,10 @@ export type RefreshErrorCode =
  * upstream yet (a new season before its first data — plan 06 §2; QA-1-033).
  */
 export type SkipReason = "off_season" | "schedules_never_loaded" | "locked" | "not_published";
+
+/** The message of a `published_unrecorded` result (never "the previous file is intact"). */
+export const PUBLISHED_UNRECORDED_MESSAGE =
+  "published: the new dataset file is live but its refresh_log row could not be written; the next refresh records it";
 
 /** The result of one refresh run. */
 export type RefreshResult =
@@ -113,7 +121,8 @@ export interface TempArea {
 export function fsTempArea(root: string): TempArea {
   return {
     async create(source) {
-      await mkdir(root, { recursive: true, mode: 0o700 });
+      // owner-only, never a symlink, refusing a group/other-writable root (QA-1-087) — whoever calls
+      ensureSecureDir(root, { create: true, what: "run temp directory" });
       return mkdtemp(join(root, `${source.replace(/[^a-z0-9_]/gi, "_")}-`));
     },
     async remove(path) {
@@ -470,6 +479,10 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
           deps.log?.info("refresh.skipped", { source: id, reason: "locked" });
           return { status: "skipped", source: id, reason: "locked" };
         }
+        // after the commit point: the new file IS live, only its log row is missing (QA-1-032) —
+        // the previous file is not intact, and the next refresh records the live one first
+        if (outcome.error === PUBLISH_UNRECORDED)
+          return await fail("published_unrecorded", PUBLISHED_UNRECORDED_MESSAGE, null, false);
         // The publisher recorded its own refresh_log row for a failed publish.
         return await fail(
           "publish",
