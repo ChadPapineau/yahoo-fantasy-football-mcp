@@ -234,6 +234,13 @@ export const INACTIVES_LEAD_MS = 90 * 60 * 1000;
 export const SIMS = Object.freeze({ min: 1000, max: 20000, default: 4000, stored: 1000 });
 
 /**
+ * The deterministic expectation behind every Dist `mean` (QA-1-024): equal-probability quadrature
+ * nodes of the same gamma width the samples are drawn from. 128 nodes put a bonus/bracket threshold's
+ * probability on a 1/128 grid; a linear score is reproduced exactly.
+ */
+export const EXPECTATION = Object.freeze({ nodes: 128 });
+
+/**
  * Same-team weekly correlations (research 05 §3.3, 2022–2025 full-PPR [V RotoWire]): QB–WR +0.31,
  * QB–TE +0.27, QB–RB +0.07, WR–WR −0.02; every other pair 0 (game stacks are folk practice [F]).
  */

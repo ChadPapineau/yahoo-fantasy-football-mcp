@@ -138,3 +138,13 @@ export function seededRng(seed: number): Rng {
     throw new RangeError("rng: seed must be an integer in 0..2^31-1");
   return rngFromPath(seed, "");
 }
+
+/**
+ * A stable seed for a call that names none (QA-1-003, QA-1-023): FNV-1a + splitmix32 over a canonical
+ * key of the call's inputs (league, team, week, settings hash, inputs' as_of …), folded into
+ * 0..MAX_SEED. Identical inputs → identical seed → identical sampled spreads, so a re-run of the same
+ * question gives the same answer; any changed input gives an independent stream.
+ */
+export function seedFrom(key: string): number {
+  return splitmix32(fnv1a(key))() & MAX_SEED;
+}

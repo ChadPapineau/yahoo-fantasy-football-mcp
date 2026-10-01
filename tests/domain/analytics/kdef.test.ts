@@ -8,6 +8,7 @@ import {
   type KdefRequest,
 } from "../../../src/domain/analytics/kdef.js";
 import { LIMITS } from "../../../src/domain/analytics/constants.js";
+import { projectPlayers } from "../../../src/domain/analytics/projection.js";
 import { fixedClock, seededRng } from "../../../src/domain/clock.js";
 import type { ScoringSettings } from "../../../src/domain/scoring/types.js";
 import {
@@ -105,9 +106,21 @@ describe("analyzeKdef", () => {
       role: "start",
     });
     expect(held.analysis.candidates.every((c) => c.weeks_of_value !== null)).toBe(true);
-    // a weak starter gets streamed over, with a drop subject and a positive marginal value
-    const worst = first.analysis.candidates.at(-1);
-    const weak = universe.find((u) => u.player_key === worst?.player_key);
+    // a weak starter (the universe's lowest expected DEF — the 10th-best sits within the hold
+    // margin of the best once ranking reads expected points, not sample noise) gets streamed over
+    const defs = universe.filter((u) => u.position === "DEF");
+    const proj = projectPlayers({
+      targets: defs.map((d) => ({ ...d, platform_status: null })),
+      season: 2026,
+      weeks: [3],
+      settings,
+      readers: fixtureReaders(data),
+      clock: fixedClock(beforeWeek(data, 3)),
+      rng: seededRng(5),
+      n_sims: 1000,
+    });
+    const means = proj.result.projections.map((p) => p.weeks[0]?.points.mean ?? 0);
+    const weak = defs[means.indexOf(Math.min(...means))];
     if (weak === undefined) throw new Error("no weak DEF");
     const streamed = analyzeKdef(req({ positions: ["DEF"], current: [weak] }));
     expect(streamed.analysis.hold_vs_stream?.current_starter_delta).toBeGreaterThan(0);
