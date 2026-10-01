@@ -2,7 +2,11 @@
 // (plan 02 §5: never a key list over 25 — `team_key`, `nfl_team` and `pool` are the sanctioned ways
 // past it), through the crosswalk (research 04 §D) so every row has a gsis id or a team defence.
 import { isNflTeam, type NflTeam } from "../../config/schema.js";
-import { PROJECTABLE_POSITIONS } from "../../domain/analytics/constants.js";
+import {
+  PROJECTABLE_POSITIONS,
+  ROSTER_INACTIVE_THIS_WEEK,
+} from "../../domain/analytics/constants.js";
+import type { NflRosterPlayer } from "../../domain/crosswalk/types.js";
 import {
   manualPlayerKeyFor,
   type PlatformPlayer,
@@ -40,6 +44,35 @@ export interface Target {
   readonly platform: PlatformPlayer | null;
   /** The roster entry, for `team_key` selections. */
   readonly entry: RosterEntry | null;
+}
+
+/** nflverse `roster_weekly.status` of a player on a team's active roster (E5's kicker universe). */
+export const ACTIVE_ROSTER_STATUS = "ACT";
+
+/**
+ * The `roster_weekly.status` codes of a team's CURRENT players (QA-1-035): active, reserve list
+ * (RES — injured reserve, PUP, NFI: shown, unavailable) and game-day inactive (INA). A released
+ * (CUT), practice-squad (DEV), retired, suspended or unsigned player is not the team's player.
+ */
+export const ON_TEAM_ROSTER_STATUSES: ReadonlySet<string> = new Set([
+  ACTIVE_ROSTER_STATUS,
+  "RES",
+  ROSTER_INACTIVE_THIS_WEEK,
+]);
+
+/** Whether a newest roster row's status puts the player on his team's roster. */
+export function onTeamRoster(status: string | null): boolean {
+  return status !== null && ON_TEAM_ROSTER_STATUSES.has(status.trim().toUpperCase());
+}
+
+/**
+ * The roster status that applies to `week` (the projection's rule, QA-1-030): the newest row at or
+ * before the week — never a later week's — and INA only for its own week.
+ */
+export function rosterStatusFor(row: NflRosterPlayer | undefined, week: Week): string | null {
+  if (row === undefined || row.week > week || row.status === null) return null;
+  const c = row.status.trim().toUpperCase();
+  return c === ROSTER_INACTIVE_THIS_WEEK && row.week !== week ? null : row.status;
 }
 
 /** The most rows an `nfl_team` selection yields (fantasy positions only, then the defence). */
@@ -191,7 +224,7 @@ export async function selectTargets(
   } else if ("nfl_team" in selector) {
     const team = selector.nfl_team;
     const rows = rr.rows
-      .filter((r) => r.team === team && FANTASY_POSITIONS.has(r.position))
+      .filter((r) => r.team === team && FANTASY_POSITIONS.has(r.position) && onTeamRoster(r.status))
       .sort((a, b) =>
         a.position === b.position
           ? a.full_name < b.full_name
