@@ -261,8 +261,9 @@ describe("stampState — the class basis picks the instant (critics C-12, C-08b)
   });
   it("release basis: a missed daily check goes stale, then expired, by checked_at", () => {
     const cls = freshnessClass("nflverse_schedules");
+    // 7 h: past the 30-min game-day TTL AND the 6 h 30 off-day TTL (QA-1-036), whatever day NOW is
     expect(
-      stampState(cls, { as_of: iso(D), fetched_at: iso(D), checked_at: iso(2 * H) }, NOW).state,
+      stampState(cls, { as_of: iso(D), fetched_at: iso(D), checked_at: iso(7 * H) }, NOW).state,
     ).toBe("stale");
     expect(
       stampState(cls, { as_of: iso(9 * D), fetched_at: iso(9 * D), checked_at: iso(8 * D) }, NOW)
@@ -347,5 +348,35 @@ describe("stampState — the class basis picks the instant (critics C-12, C-08b)
         },
       ),
     );
+  });
+});
+
+describe("schedules and lines: a 30-minute TTL on game days only [QA-1-036]", () => {
+  // local wall-clock instants, as launchd's calendar fires them (2026-09-30 is a Wednesday)
+  const local = (d: number, h: number, m = 0): number => new Date(2026, 8, d, h, m).getTime();
+  const stamp = (checkedMs: number) => ({
+    as_of: "2026-09-01T00:00:00.000Z",
+    fetched_at: "2026-09-01T00:00:00.000Z",
+    checked_at: new Date(checkedMs).toISOString(),
+  });
+  for (const id of ["nflverse_schedules", "lines"] as const)
+    it(`${id}: an off-day check stays fresh through the 6-hourly cadence; a game-day check goes stale after 30 min`, () => {
+      const cls = freshnessClass(id);
+      // Wednesday 06:00 check: the next is at 12:00 (+ run time)
+      expect(stampState(cls, stamp(local(30, 6)), local(30, 11, 59)).state).toBe("fresh");
+      expect(stampState(cls, stamp(local(30, 6)), local(30, 12, 31)).state).toBe("stale");
+      // Sunday 13:00 check: the job runs every 30 min
+      expect(stampState(cls, stamp(local(27, 13)), local(27, 13, 29)).state).toBe("fresh");
+      expect(stampState(cls, stamp(local(27, 13)), local(27, 13, 31)).state).toBe("stale");
+      // Thursday and Monday are game days too
+      expect(stampState(cls, stamp(local(24, 20)), local(24, 20, 31)).state).toBe("stale");
+      expect(stampState(cls, stamp(local(28, 20)), local(28, 20, 31)).state).toBe("stale");
+      // Saturday is an off day
+      expect(stampState(cls, stamp(local(26, 12)), local(26, 18, 0)).state).toBe("fresh");
+    });
+  it("every other class keeps one TTL every day", () => {
+    for (const id of FRESHNESS_CLASS_IDS)
+      if (id !== "nflverse_schedules" && id !== "lines")
+        expect(FRESHNESS_TABLE[id].offDayTtlSeconds, id).toBeNull();
   });
 });
