@@ -1,12 +1,14 @@
 // normalize.ts — a schema-valid league.yaml → the static manual-league model (plan 01 §8 X1: one
 // league, my roster, optional other rosters / opponents / FA pool / transactions; plan 10 D5 FAAB
 // budget and acquisition limits) plus the cross-field checks zod cannot express (week order, team
-// ids, opponents, slot names, duplicate players). Player keys follow `manualPlayerKeyFor` (critic
+// ids, opponents, slot names, slot counts and position eligibility, duplicate players — keyed off the
+// player, not the spelling: QA-1-046). Player keys follow `manualPlayerKeyFor` (critic
 // C-13); an entry without a gsis id gets a deterministic `manual.p.n-<hash>` key and resolves later
 // through the crosswalk's name + team + position match (plan 10 A5a).
 import { createHash } from "node:crypto";
 import type { NflTeam } from "../../config/schema.js";
 import { MANUAL_KEY_RE } from "../../config/schema.js";
+import { nameKey } from "../../domain/crosswalk/normalize.js";
 import { ruleCapabilities } from "../../domain/league/rules.js";
 import type { LockMode } from "../../domain/league/schedule.js";
 import {
@@ -15,6 +17,7 @@ import {
   defineSlot,
   MAX_ROSTER_SIZE,
   slotByName,
+  slotRefusal,
 } from "../../domain/league/slots.js";
 import type { ScoringSettings } from "../../domain/scoring/types.js";
 import { manualPlayerKeyFor } from "../../domain/league/types.js";
@@ -184,6 +187,38 @@ export function unverifiedRuleFields(f: LeagueFile): readonly string[] {
   return Object.freeze(out);
 }
 
+/**
+ * The set of players already listed in a scope, compared by the PLAYER rather than by the entry's
+ * spelling (QA-1-046): two entries are the same player when they share a gsis id, or when their
+ * crosswalk-folded names (`nameKey`: apostrophes, punctuation, case, diacritics, suffixes), NFL team
+ * and position agree — unless both carry gsis ids and those differ (two real players). A defence is
+ * its team. `Ja'Marr Chase`, `JaMarr Chase` and `Ja'Marr Chase` + gsis id are one player.
+ */
+export class PlayerIdentities {
+  private readonly gsis = new Set<string>();
+  private readonly byName = new Map<string, (string | null)[]>();
+
+  private static nameOf(p: ManualPlayer): string {
+    if (p.is_defense) return `def|${p.nfl_team}`;
+    return `${nameKey(p.name) ?? normName(p.name)}|${p.nfl_team}|${p.position}`;
+  }
+
+  /** Whether `p` is a player already in the set. */
+  has(p: ManualPlayer): boolean {
+    if (p.gsis_id !== null && this.gsis.has(p.gsis_id)) return true;
+    const seen = this.byName.get(PlayerIdentities.nameOf(p));
+    return seen?.some((g) => g === null || p.gsis_id === null || g === p.gsis_id) ?? false;
+  }
+
+  add(p: ManualPlayer): void {
+    if (p.gsis_id !== null) this.gsis.add(p.gsis_id);
+    const k = PlayerIdentities.nameOf(p);
+    const seen = this.byName.get(k);
+    if (seen === undefined) this.byName.set(k, [p.gsis_id]);
+    else seen.push(p.gsis_id);
+  }
+}
+
 /** Result of normalisation: the model, or the cross-field issues. */
 export type NormalizeResult =
   | { readonly ok: true; readonly data: ManualLeagueData }
@@ -237,23 +272,34 @@ export function normalizeLeague(f: LeagueFile): NormalizeResult {
   const teamRef = (id: number): TeamRef =>
     Object.freeze({ platform: "manual", league_key, team_key: `${league_key}.t.${String(id)}` });
   const ids = new Set<number>([myId]);
-  const allKeys = new Map<PlayerKey, string>();
+  const everyone = new PlayerIdentities();
   const players = (
     list: readonly RosterEntryInput[] | undefined,
     path: string,
-    seatCheck: boolean,
   ): ManualPlayer[] | null => {
     if (list === undefined) return null;
     const out: ManualPlayer[] = [];
-    const local = new Set<PlayerKey>();
+    const local = new PlayerIdentities();
+    const seated = new Map<string, number>();
     list.forEach((e, i) => {
       const p = toManualPlayer(e);
       const at = `${path}[${String(i)}]`;
-      if (local.has(p.key)) issue(at, "player listed twice on this team");
-      else if (seatCheck && allKeys.has(p.key)) issue(at, "player is on more than one team");
-      local.add(p.key);
-      if (seatCheck) allKeys.set(p.key, path);
-      if (slotByName(slots, p.slot) === null) issue(`${at}.slot`, "slot is not in roster_slots");
+      if (local.has(p)) issue(at, "player listed twice on this team");
+      else if (everyone.has(p)) issue(at, "player is on more than one team");
+      local.add(p);
+      everyone.add(p);
+      const slot = slotByName(slots, p.slot);
+      if (slot === null) issue(`${at}.slot`, "slot is not in roster_slots");
+      else if (slot.class !== "bench") {
+        // Bench overflow stays representable (the roster tool flags over_limit); a starter, flex or
+        // IR slot holding more players than it seats is a roster no platform could hold.
+        // IR eligibility is a status flag the roster tool reports; a position is not.
+        if (slotRefusal(slot, p) === "position")
+          issue(`${at}.slot`, "position cannot fill this slot");
+        const n = (seated.get(slot.name) ?? 0) + 1;
+        seated.set(slot.name, n);
+        if (n > slot.count) issue(`${at}.slot`, "slot has more players than its count");
+      }
       out.push(p);
     });
     return out;
@@ -265,7 +311,7 @@ export function normalizeLeague(f: LeagueFile): NormalizeResult {
     name: f.my_team.name,
     manager: f.my_team.manager ?? null,
     is_mine: true,
-    players: Object.freeze(players(f.my_team.players, "my_team.players", true) ?? []),
+    players: Object.freeze(players(f.my_team.players, "my_team.players") ?? []),
   });
   const teams: ManualTeam[] = [mine];
   (f.other_teams ?? []).forEach((t, i) => {
@@ -273,7 +319,7 @@ export function normalizeLeague(f: LeagueFile): NormalizeResult {
     if (ids.has(t.id)) issue(`${at}.id`, "duplicate team id");
     if (t.id > f.league.num_teams) issue(`${at}.id`, "must not exceed league.num_teams");
     ids.add(t.id);
-    const ps = players(t.players, `${at}.players`, true);
+    const ps = players(t.players, `${at}.players`);
     teams.push(
       Object.freeze({
         ref: teamRef(t.id),
@@ -304,9 +350,9 @@ export function normalizeLeague(f: LeagueFile): NormalizeResult {
     const out: ManualPlayer[] = [];
     (list ?? []).forEach((e, i) => {
       const p = toManualPlayer(e);
-      if (allKeys.has(p.key)) issue(`${path}[${String(i)}]`, "player is also on a roster");
+      if (everyone.has(p)) issue(`${path}[${String(i)}]`, "player is also on a roster");
       else {
-        allKeys.set(p.key, path);
+        everyone.add(p);
         out.push(p);
       }
     });
