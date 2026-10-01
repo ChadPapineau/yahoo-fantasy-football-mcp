@@ -11,8 +11,9 @@
 #   `npm ci` of the committed lockfile with ignore-scripts=true (.npmrc) is fast enough.
 # - Safe on a public repo: permissions contents: read; no secrets; `pull_request` (never
 #   pull_request_target); persist-credentials: false so the job token never lands in .git/config.
-# - Concurrency cancels superseded runs for PRs only — a cancelled run on a pushed commit is a commit
-#   without a verdict (as docs.yml).
+# - Concurrency cancels superseded runs for PRs and for pushes to any branch but main (a build branch
+#   pushes many commits; only the newest needs a verdict); a run on main is never cancelled — a
+#   cancelled run on main is a commit without a verdict (as docs.yml).
 # - smoke: the MCP Inspector CLI is pinned EXACTLY (npx pins are not Dependabot-managed — bump
 #   deliberately) and runs from $RUNNER_TEMP with npm_config_ignore_scripts=true, so neither the
 #   project .npmrc nor an install script of the Inspector's own tree is involved. It drives the built
@@ -34,7 +35,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
 
 jobs:
   lint:
