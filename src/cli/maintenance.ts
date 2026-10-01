@@ -25,7 +25,7 @@ import { errorText, openStore } from "./store-access.js";
 
 /** The Yahoo cache's hard limit — rows older than this are useless (plan 01 §5.2: 7 d max). */
 export const PLATFORM_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-/** Weekly backups kept (plan 06 §1.2 `store backup`). */
+/** Weeks of backups kept (plan 06 §1.2 `store backup`, keep 4): every backup of the newest 4 weeks. */
 export const KEEP_WEEKLY_BACKUPS = 4;
 /** Temp debris younger than this may belong to a running refresh and is left alone. */
 export const DEBRIS_MIN_AGE_MS = PUBLISH_LOCK_STALE_MS;
@@ -170,7 +170,27 @@ export function weeklyBackupPath(dir: string, nowMs: number): string {
   return path.join(dir, `store-${day}-${iso.slice(11, 19).replaceAll(":", "")}.sqlite`);
 }
 
-/** Deletes weekly backups beyond the newest `keep` (names sort by date); returns names removed. */
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The week a `store-YYYY-MM-DD(-HHMMSS)?.sqlite` name belongs to (Monday-based, UTC — the same
+ * calendar the dated name is written in), or `null` for a name whose date is not a real date.
+ */
+export function backupWeekOf(name: string): number | null {
+  if (!WEEKLY_RE.test(name)) return null;
+  const day = name.slice("store-".length, "store-".length + 10);
+  const ms = Date.parse(`${day}T00:00:00.000Z`);
+  if (!Number.isFinite(ms) || new Date(ms).toISOString().slice(0, 10) !== day) return null;
+  // 1970-01-05 was a Monday: day 4 since the epoch starts week 0
+  return Math.floor((Math.round(ms / DAY_MS) - 4) / 7);
+}
+
+/**
+ * Keeps every backup of the newest `keep` WEEKS that have one and deletes the backups of older
+ * weeks; returns the names removed. Plan 06 §1.2's "keep 4" is four weekly restore points: extra
+ * `ff backup` runs inside one week (a time-suffixed name) add to that week and never push an older
+ * week out (QA-1-054). A name whose date is not a real date is never deleted.
+ */
 export function rotateWeeklyBackups(dir: string, keep = KEEP_WEEKLY_BACKUPS): string[] {
   let names: string[];
   try {
@@ -178,16 +198,21 @@ export function rotateWeeklyBackups(dir: string, keep = KEEP_WEEKLY_BACKUPS): st
   } catch {
     return [];
   }
-  const weekly = names
-    .filter((n) => WEEKLY_RE.test(n))
-    .sort()
-    .reverse();
+  const byWeek = new Map<number, string[]>();
+  for (const n of names) {
+    const w = backupWeekOf(n);
+    if (w !== null) byWeek.set(w, [...(byWeek.get(w) ?? []), n]);
+  }
+  const kept = new Set([...byWeek.keys()].sort((a, b) => b - a).slice(0, Math.max(0, keep)));
   const removed: string[] = [];
-  for (const n of weekly.slice(keep)) {
-    const p = path.join(dir, n);
-    if (lstatSync(p).isFile()) {
-      rmSync(p, { force: true });
-      removed.push(n);
+  for (const [w, files] of byWeek) {
+    if (kept.has(w)) continue;
+    for (const n of files) {
+      const p = path.join(dir, n);
+      if (lstatSync(p).isFile()) {
+        rmSync(p, { force: true });
+        removed.push(n);
+      }
     }
   }
   return removed.sort();
