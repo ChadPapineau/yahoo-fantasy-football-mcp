@@ -7,7 +7,7 @@
 // clock, rng and repository are injected.
 import type { Clock, Rng } from "../clock.js";
 import { NFL_TEAMS, type NflTeam } from "../../config/schema.js";
-import { kickoffMs, opponentOf, teamGame } from "../league/schedule.js";
+import { GAME_WINDOW_MS, kickoffMs, opponentOf, teamGame } from "../league/schedule.js";
 import type { PlayerKey, Week } from "../league/types.js";
 import { scoringEngine } from "../scoring/engine.js";
 import { at } from "../scoring/numeric.js";
@@ -190,9 +190,15 @@ function gamesAt(games: ReadonlyMap<string, NflGame[]>, season: number, week: We
   return games.get(gameKey(season, week)) ?? [];
 }
 
-function windowWeeks(season: number, firstWeek: Week): { cur: Week[]; prev: Week[] } {
+/**
+ * The trailing window's weeks (QA-1-012): the WINDOW.maxGames calendar weeks ending at `lastWeek` —
+ * the latest played week before the first target week, never the week before the target itself — so
+ * a projection three months out reads the games already played instead of an empty future window.
+ * The rest of the window is filled from the previous season's last weeks.
+ */
+function windowWeeks(lastWeek: Week): { cur: Week[]; prev: Week[] } {
   const cur: Week[] = [];
-  for (let w = Math.max(1, firstWeek - WINDOW.maxGames); w < firstWeek; w++) cur.push(w);
+  for (let w = Math.max(1, lastWeek - WINDOW.maxGames + 1); w <= lastWeek; w++) cur.push(w);
   const prev: Week[] = [];
   const need = WINDOW.maxGames - cur.length;
   for (let w = WINDOW.priorSeasonLastWeek - need + 1; w <= WINDOW.priorSeasonLastWeek; w++) {
@@ -223,20 +229,41 @@ function weightGames(
   }));
 }
 
+/**
+ * The latest week before `first` with a played game (final, or past its game window at `nowMs`); 0
+ * when none — the trailing window's anchor (QA-1-012).
+ */
+function lastPlayedWeek(
+  rows: readonly NflGame[],
+  season: number,
+  first: Week,
+  nowMs: number,
+): Week {
+  let last = 0;
+  for (const g of rows) {
+    if (g.season !== season || g.week >= first || g.week <= last) continue;
+    const k = kickoffMs(g.kickoff);
+    if (g.is_final || (k !== null && k + GAME_WINDOW_MS <= nowMs)) last = g.week;
+  }
+  return last;
+}
+
 function load(req: ProjectionRequest, needDefense: boolean): Loaded {
   const { season } = req;
   const first = Math.min(...req.weeks);
-  const { cur, prev } = windowWeeks(season, first);
   const stamps: (DatasetStamp | null)[] = [];
   const games = new Map<string, NflGame[]>();
 
-  const sched = req.readers.schedules.games(season, [...new Set([...cur, ...req.weeks])]);
+  const before: Week[] = [];
+  for (let w = 1; w < first; w++) before.push(w);
+  const sched = req.readers.schedules.games(season, [...new Set([...before, ...req.weeks])]);
   if (sched.stamp === null) {
     throw new AnalyticsError("dataset_never_loaded", "schedules never loaded", [
       "nflverse:schedules",
     ]);
   }
   stamps.push(sched.stamp);
+  const { cur, prev } = windowWeeks(lastPlayedWeek(sched.rows, season, first, req.clock.nowMs()));
   const addGames = (rows: readonly NflGame[]): void => {
     for (const g of rows) {
       const k = gameKey(g.season, g.week);
@@ -688,7 +715,12 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
           ? A("position not projected by v1-trailing: zero points", "a supported position")
           : team === null
             ? A("no NFL team known: zero points", "the player joins a team")
-            : A(`bye in week ${String(week)}: zero points`, "never — the schedule is fixed");
+            : weekGames.length > 0 && week <= WINDOW.priorSeasonLastWeek
+              ? A(`bye in week ${String(week)}: zero points`, "never — the schedule is fixed")
+              : A(
+                  `no game scheduled in week ${String(week)}: zero points`,
+                  "the week's games are scheduled (postseason pairings)",
+                );
       if (!assumptions.some((a) => a.text === why.text)) assumptions.push(why);
       weeks.push({
         week,
