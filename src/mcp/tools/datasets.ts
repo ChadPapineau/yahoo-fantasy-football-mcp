@@ -36,13 +36,14 @@ import {
   leagueContext,
   optionalDataset,
   requiredDataset,
+  rosterRows,
   seasonGames,
   seasonOfInstant,
   textSource,
   weekOf,
   type LeagueContext,
 } from "./common.js";
-import { rosterTargets, selectTargets, type Target } from "./select.js";
+import { rosterStatusFor, rosterTargets, selectTargets, type Target } from "./select.js";
 import {
   bareName,
   code,
@@ -174,6 +175,11 @@ export const getInjuries = defineTool({
     const gIn = optionalDataset(games, ctx.nowMs, lc.allowStale);
     if (gIn !== null) inputs.push(gIn);
     const weekRows = games.rows.filter((g) => g.week === w);
+    // the NFL roster status (RES, INA, CUT …) feeds p_active as the projection does (QA-1-035)
+    const rr = rosterRows(ctx, season);
+    const rrIn = optionalDataset(rr, ctx.nowMs, lc.allowStale);
+    if (rrIn !== null && !inputs.some((i) => i.source === rrIn.source)) inputs.push(rrIn);
+    const roster = new Map(rr.rows.map((r) => [r.gsis_id, r]));
     const src = (f: string): string => textSource(lc.ref.platform, f);
     const rows = targets.map((t) => {
       const report = t.subject.kind === "player" ? (byGsis.get(t.subject.gsis_id) ?? null) : null;
@@ -181,6 +187,8 @@ export const getInjuries = defineTool({
       const kick = g === null ? null : kickoffMs(g.kickoff);
       const platformStatus = codeOrNull(t.platform?.status ?? null, STATUS_CODE_RE);
       const avail = pActive({
+        rosterStatus:
+          t.subject.kind === "player" ? rosterStatusFor(roster.get(t.subject.gsis_id), w) : null,
         report,
         injuriesLoaded: reports.stamp !== null,
         platformStatus,
