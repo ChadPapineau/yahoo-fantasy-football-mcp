@@ -223,6 +223,47 @@ describe("locations (plan 02 §3.3)", () => {
     expect(c.fixtureDir).toBe(fixtures);
     expect(c.leagueFile).toBe(path.join(fixtures, "manual", "league.yaml"));
   });
+  it("the fixture waiver covers only the package's own fixtures, never an arbitrary FF_FIXTURE_DIR [QA-1-094]", () => {
+    mkdirSync(path.join(home, "Documents"), { mode: 0o700 });
+    for (const fx of ["/", home, ROOT, path.join(home, "Documents")]) {
+      const issues = issuesOf(() =>
+        loadConfig(
+          input({
+            FF_FIXTURE_DIR: fx,
+            FF_LEAGUE_FILE: path.join(home, "Documents", "league.yaml"),
+          }),
+        ),
+      );
+      expect(issues, fx).toEqual([
+        { key: "FF_LEAGUE_FILE", reason: expect.stringMatching(/cloud-synced/) as unknown },
+      ]);
+      const inRepo = issuesOf(() =>
+        loadConfig(input({ FF_FIXTURE_DIR: fx, FF_LEAGUE_FILE: path.join(ROOT, "src", "l.yaml") })),
+      );
+      expect(inRepo, fx).toEqual([
+        {
+          key: "FF_LEAGUE_FILE",
+          reason: expect.stringMatching(/inside the repository/) as unknown,
+        },
+      ]);
+    }
+    // a league under some other FF_FIXTURE_DIR is allowed where any league may live, but it is
+    // not a fixture league: 0600 and the config-dir rules still apply to it
+    const fx = path.join(home, "fx");
+    const own = loadConfig(
+      input({ FF_FIXTURE_DIR: fx, FF_LEAGUE_FILE: path.join(fx, "league.yaml") }),
+    );
+    expect(own.fixtureDir).toBe(fx);
+    expect(own.fixtureLeague).toBe(false);
+    const real = loadConfig(
+      input({
+        FF_FIXTURE_DIR: path.join(ROOT, "fixtures"),
+        FF_LEAGUE_FILE: path.join(ROOT, "fixtures", "manual", "league.yaml"),
+      }),
+    );
+    expect(real.fixtureLeague).toBe(true);
+    expect(loadConfig(input({})).fixtureLeague).toBe(false);
+  });
   it("still refuses an in-repo league file outside the fixture dir in fixture mode", () => {
     const issues = issuesOf(() =>
       loadConfig(
