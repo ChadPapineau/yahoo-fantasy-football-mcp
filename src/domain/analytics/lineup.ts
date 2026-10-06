@@ -7,7 +7,7 @@
 // `only_unlocked` game-day view. Pure.
 import type { Clock } from "../clock.js";
 import type { NflTeam } from "../../config/schema.js";
-import { canOccupy } from "../league/slots.js";
+import { buildRosterSlots, canOccupy } from "../league/slots.js";
 import { isLocked, kickoffMs, latestExecutionTime } from "../league/schedule.js";
 import type {
   IsoInstant,
@@ -93,6 +93,12 @@ export interface LineupRequest {
   readonly compare?: readonly { readonly out: PlayerKey; readonly in: PlayerKey }[];
   readonly clock: Clock;
   readonly inputs?: readonly InputFreshness[];
+  /**
+   * Starting seats (slot names, one per seat) held by rostered players the engine cannot project —
+   * a league.yaml line that matches no NFL player (QA-2-039). Such a seat is not empty: it is kept
+   * as it is, never "filled", left out of the totals, and P(win) is withheld.
+   */
+  readonly unscored_seats?: readonly string[];
   /**
    * List a fill of an empty starting seat in `swaps` as `{ out: null, … }` (QA-1-020). Off by default
    * until the tool's output schema accepts a null `out`; a fill is a move (no_move, action, subjects,
@@ -246,6 +252,21 @@ export function emptyStartSeats(
     for (let i = filled.get(s.name) ?? 0; i < s.count; i++) out.push(s.name);
   }
   return out;
+}
+
+/** `slots` without the starting seats named in `names` (one seat per entry; QA-2-039). */
+function withoutSeats(slots: RosterSlots, names: readonly string[]): RosterSlots {
+  if (names.length === 0) return slots;
+  const cut = new Map<string, number>();
+  for (const n of names) cut.set(n, (cut.get(n) ?? 0) + 1);
+  return buildRosterSlots(
+    slots.slots.map((s) => {
+      const k = cut.get(s.name) ?? 0;
+      return k === 0 || !isStartClass(s)
+        ? s
+        : Object.freeze({ ...s, count: Math.max(0, s.count - k) });
+    }),
+  );
 }
 
 /** The assumption naming the opponent's K/DEF stand-ins (QA-1-043). */
@@ -664,7 +685,11 @@ interface Evaluated {
  * `force_start` the lineup cannot seat.
  */
 export function analyzeLineup(req: LineupRequest): LineupRecommendation {
-  const { slots, clock } = req;
+  const { clock } = req;
+  // a seat held by a player the data cannot match is not empty (QA-2-039): it leaves my side of the
+  // solve — kept as it is, never filled — and the opponent's lineup still uses every seat
+  const unscored = req.unscored_seats ?? [];
+  const slots = withoutSeats(req.slots, unscored);
   if (req.players.length === 0 || req.players.length > LIMITS.maxLineupPlayers) {
     throw new AnalyticsError("invalid_request", "roster size out of range", ["players"]);
   }
@@ -686,9 +711,10 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   // P(win) against a partly typed opponent counted his empty seats as 0 points (QA-1-043): an empty
   // skill seat withholds P(win) (pwin/blend fall back to mean, said so); an empty K/DEF seat gets a
   // stand-in at my own starter's projection, named
-  const oppSide = listed === null ? null : opponentLineup(slots, listed, req.players, nowMs);
+  const oppSide = listed === null ? null : opponentLineup(req.slots, listed, req.players, nowMs);
   const oppEmpty = oppSide?.empty ?? [];
-  const opponent = oppEmpty.length === 0 ? listed : null;
+  // my own unscored seats make my total unknown: P(win) withheld as for an incomplete opponent
+  const opponent = oppEmpty.length === 0 && unscored.length === 0 ? listed : null;
   const objective: Objective = opponent === null ? "mean" : (req.objective ?? "mean");
   const exclude = new Set(req.exclude ?? []);
   const force = new Set(req.force_start ?? []);
@@ -738,6 +764,14 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
     // no opponent: ΔP(win) is measured against an evenly matched opponent (the best mean lineup)
     return { mu_m: m.mu, v_m: m.v, mu_o: meanM.mu, v_o: meanM.v, cov: 0 };
   };
+  if (unscored.length > 0) {
+    assumptions.push(
+      A(
+        `${plural(unscored.length, "starting seat", "starting seats")} (${[...new Set(unscored)].slice(0, 5).join(", ")}) held by a player the NFL data does not match: kept as it is, left out of the totals; no P(win)`,
+        "the player's league.yaml line matches (ff_get_status lists the unmatched players)",
+      ),
+    );
+  }
   if (!h2h) {
     assumptions.push(
       A(
@@ -752,7 +786,7 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
         "the opponent's full starting lineup is in league.yaml",
       ),
     );
-  } else if (opponent === null) {
+  } else if (opponent === null && listed === null) {
     assumptions.push(
       A(
         "no opponent for this week (no opponents entry, or his players are missing): P(win) is not reported; ΔP(win) is against an evenly matched opponent",
