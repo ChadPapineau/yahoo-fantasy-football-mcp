@@ -66,7 +66,7 @@
             "kind": "lineup",
             "week": 4,
             "rec": { "$ref": "lineup.data.rec" },
-            "alternatives": [],
+            "alternatives": { "$alternatives": { "from": "lineup", "projections": "projections" } },
             "source_calls": { "$source_calls": ["roster", "injuries", "projections", "lineup"] },
             "followed_hint": "unknown",
             "client_ref": "start-sit-2026-w4-flex"
@@ -111,7 +111,7 @@
             "kind": "lineup",
             "week": 4,
             "rec": { "$ref": "lineup.data.rec" },
-            "alternatives": [],
+            "alternatives": { "$alternatives": { "from": "lineup", "projections": "projections" } },
             "source_calls": { "$source_calls": ["roster", "projections", "lineup"] },
             "followed_hint": "unknown",
             "client_ref": "start-sit-2026-w4-gameday"
