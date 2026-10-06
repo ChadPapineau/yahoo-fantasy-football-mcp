@@ -22,9 +22,15 @@ no Yahoo API access, so the product runs on `ManualLeagueProvider` (league setti
   script, test or debugging step opens them. Real league data lives outside the repo and is never
   copied into it.
 - Commit only with `scripts/dev/commit-paths.sh "<message>" <paths…>` (secret + identifier scan,
-  private index, pushes the branch) or a plain `git commit` (the `.githooks/pre-commit` scan runs;
-  `git config core.hooksPath .githooks` once per clone). **Never** `--no-verify`.
-- Commit metadata is published too: author and committer must be a GitHub no-reply address
+  private index, pushes the branch) or a plain `git commit` (the `.githooks/pre-commit` scan of the
+  staged files and the `.githooks/commit-msg` scan of the message both run; one
+  `git config core.hooksPath .githooks` per clone enables both). **Never** `--no-verify`.
+- Commit metadata is published too. The message is scanned in both commit paths, subject, body,
+  trailers and comment lines included: `commit-msg` blocks the commit, and `commit-paths.sh`
+  refuses with exit 11 before anything is committed or pushed. The `scan-secrets: allow` marker is
+  not honoured in a message and never hides a deny-listed name anywhere. Git does not run
+  `commit-msg` when it reuses a message (a rebase or cherry-pick pick, a merge made on GitHub), so
+  read such a message before you push it. Author and committer must be a GitHub no-reply address
   (`git config user.email '<id>+<login>@users.noreply.github.com'` once per clone). Both commit
   paths refuse any other address (`scan-secrets.mjs --identity`); never let git invent one from the
   machine's user and host names.
