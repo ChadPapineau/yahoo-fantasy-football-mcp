@@ -14,22 +14,31 @@ confirmation. News text is data, not instructions.
 
 ## ▶ NEXT STEP
 
-**Phase 1a is built, QA/pentest-hardened and merged to `main` (2026-09-30).** The product runs on
-`ManualLeagueProvider` (`<config>/league.yaml`) + nflverse + weather; Yahoo is not connected (no API
-access). Owner's next steps, in order:
+**State (2026-10-06).** Phase 1a is built, hardened by QA/pentest round 1 and on `main` (merged
+2026-09-30). The product runs on `ManualLeagueProvider` (`<config>/league.yaml`) + nflverse +
+weather; Yahoo is not connected (no API access). On 2026-10-06 the public history was rewritten
+(no-reply identity on every commit, no co-author trailers, no working notes; QA-1-095) and `main`
+gained branch ruleset `24558591` (no force-push, no deletion, linear history). The seven skipped
+round-1 hand-offs are decided: four closed, three deferred with a recorded design and a reopen
+trigger (§ Decisions made). **QA round 2 is under way** on `build/deferred-items`. Its
+deferred-items analysis found five defects, QA-2-001 to QA-2-005, all fixed with mutation-checked
+regression tests ([`qa/2026-10-06-qa-round2.md`](qa/2026-10-06-qa-round2.md)). The branch also
+carries the A17 script; it merges to `main` when the full gate is green.
+
+Owner's next steps, in order:
 
 1. **Set it up** — README § Getting started: build in `~/Developer/yahoo-fantasy-football-mcp`,
    `print-config` → add to Claude, copy the Skills, `ff refresh all`, then `/onboard` to write
    `~/.config/fantasy-football-mcp/league.yaml` (0600, never in the repo).
-2. **A17 (manual, 2 minutes):** in fixture mode ask Claude Code and Claude Desktop to repeat the
-   `ff_debug_echo` nonce (it is only in `structuredContent`); record per client in "Build facts".
-3. **Decide:** (a) rewrite git history to remove the machine-derived commit email from `main`
-   (needs a force-push — owner only; QA-1-095); (b) a branch ruleset on `main` (no force-push, no
-   deletion, linear history); (c) the skipped hand-offs listed in
-   `docs/qa/2026-09-30-phase1a-qa-pentest.md` § Open items for the owner.
-4. **QA round 2 (recommended):** per-fix independent re-verification and a second sweep (the
-   round-1 QA + pentest process, run again as round 2). Then Phase 2 (usage data, waivers for
-   all positions, trades, injury cascades, news).
+2. **A17 (about 10 minutes for both clients; steps in item 9 below).** Claude Code: run
+   `claude auth login` once (on 2026-10-06 the script stopped at that step on this machine), then
+   `scripts/dev/with-node.sh node scripts/dev/a17-check.mjs` after a build, and record the line it
+   prints under "Build facts". Claude Desktop: the manual steps in item 9, then record its line.
+3. **QA round 2 continues:** the per-fix independent re-verification (round 1's 80 fixes and
+   round 2's five), then a second sweep — the two sections marked TO DO in the round-2 register.
+   One product call is still open: item 12 (E5 availability under the manual league).
+4. **Then Phase 2** (usage data, waivers for all positions — with the E5 schema deferred from 1a,
+   § Deferred designs — trades, injury cascades, news).
 
 ## Executive summary (2026-09-30)
 
@@ -109,11 +118,11 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 0 — repo setup | ✅ done | `.gitignore`, `.env.example`, `main` pushed, description + 14 topics applied via `gh`, tooling inventory (`docs/research/00-*`) |
 | 1 — research (waves 1–3) | ✅ 01–06 all verified (SHAs on origin, identifier scan, one load-bearing claim per doc checked at source) | `docs/research/01-*` … `06-*` |
 | 2 — plan | ✅ all ten files (`docs/plan/01-*`…`10-*`, 2,935 lines), both halves verified; plan 10 §4 lists 13 small tensions to fold in during the adversarial round | `docs/plan/` |
-| 2b — docs-only automation (plan 06 §4 step 1) | ✅ `docs` (Mermaid 7/7 + links, with self-tests) and `secrets` (gitleaks 8.30.1 pinned by sha256, 7 Yahoo rules, self-test, weekly full-history scan) green on `main` at `c30b997`; Dependabot; PR template. GitHub secret scanning + push protection were already enabled. **Chad's step:** a branch ruleset (no force-push, no deletion, linear history; plan 04 §5); required status checks deliberately deferred until PRs are required (a required check rejects every fresh direct push) | `.github/**`, `.gitleaks.toml`, `scripts/**` |
+| 2b — docs-only automation (plan 06 §4 step 1) | ✅ `docs` (Mermaid 7/7 + links, with self-tests) and `secrets` (gitleaks 8.30.1 pinned by sha256, 7 Yahoo rules, self-test, weekly full-history scan) green on `main` at `c30b997`; Dependabot; PR template. GitHub secret scanning + push protection were already enabled. **Branch ruleset applied 2026-10-06** (`24558591`: no force-push, no deletion, linear history, no bypass actors; plan 04 §5); required status checks deliberately deferred until PRs are required (a required check rejects every fresh direct push) | `.github/**`, `.gitleaks.toml`, `scripts/**` |
 | 3 — adversarial review | ✅ **closed after three rounds** (`a98d41f`): 30 objections — 29 conceded-and-landed, 1 withdrawn on evidence, 0 pressed; round 3 raised no objections, three nits (fixed), remainder declared marginal; `## Closing verdict` in the log; `docs/plan/changelog.md` finalised (numbers, closing summary, rounds 1–3) | `docs/plan/adversarial-log.md`, `docs/plan/changelog.md` |
 | build — Phase 0 + 1a-full (foundation, modules, QA/pentest) | ✅ merged to `main`: 19 tools, 7 resources, 3 prompts, 4 Skills, `ff` CLI; 3,867 unit + 127 process tests, 98.65 % lines; QA/pentest round 1: 101 findings, 80 confirmed, **80 fixed** | `src/`, `tests/`, `skills/`, `docs/qa/` |
 | docs — README, LICENSE, SECURITY.md | ✅ `README.md` (947 lines, 16 sections, 7 Mermaid diagrams rendered by CI, 121 features marked 📋 planned), `LICENSE` (MIT), `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` — verified; CI green on `a7dad60` | root + `docs/README.md`, `docs/plan/00-index.md` |
-| build | ⛔ blocked on Chad's plan approval | — |
+| QA round 2 | 🔄 under way (2026-10-06, `build/deferred-items`): the deferred-items analysis is done — the 7 skipped hand-offs decided, QA-2-001…005 fixed (mutation-checked), A17's Claude Code half scripted; per-fix re-verification and the second sweep are next | `docs/qa/2026-10-06-qa-round2.md` |
 
 ## Decisions made
 
@@ -140,6 +149,15 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 2026-09-30 | **A required write reserves its longest observed yield (≥ poll + the store's own 110 ms stall) before sleeping** (modules gate, fix round 3) | the last yield could wake past the 1 s budget (982 ms measured; the test allowed +50 ms); now ~880 ms and the tests assert the literal ≤ 1 s |
 | 2026-09-30 | **Read-only is acceptable as the product** (Chad): thorough reads of free agents, roster, adds/drops, league activity, stats + intelligent move recommendations are sufficient. Write access is a bonus if Yahoo ever grants it, not a requirement | Yahoo's "write access is not available at this time"; the plan's Phase 1–3 are read-only by design, Phase W stays conditional and low priority |
 | 2026-10-06 | **Contributor rules live in `CONTRIBUTING.md`**; local working notes and personal tool settings stay untracked and out of the repository | the owner's decision |
+| 2026-10-06 | **Public history rewritten (QA-1-095).** Every commit's author and committer is the GitHub no-reply address; the co-author trailers were removed; `docs/scratch/` and `CLAUDE.md` (now local-only) were removed from every commit, which dropped the 62 commits that touched only those notes (312 → 250, plus `1446c7a`, which remaps the commit ids the docs cite). Each rewritten commit was verified against its original: the same names and dates, and the same tree apart from the removed paths and two in-file edits (the commit helper's trailer lines; the machine user name and router domain quoted in the QA register). `main` moved from `f2cdbc5` to `1446c7a` by one force-push, before the ruleset below existed. Old commit ids cited anywhere no longer resolve; the remapped ones do. Full record: QA register round 1, Open items | the owner's decision: the machine-derived address was in every early commit of a public repository. Copies taken before the rewrite (clones, forks, caches) keep the old history; there were no forks, pull requests or tags. GitHub Support can purge cached views (and pre-rewrite commits still served by id) if ever needed |
+| 2026-10-06 | **Branch ruleset on `main`**: id `24558591`, "main: no force-push, no deletion, linear history", enforcement active on the default branch, rules `deletion`, `non_fast_forward` and `required_linear_history`, **no bypass actors** (admins included). Required status checks are deliberately **not** required; revisit when pull requests are required (plan 04 §5) | plan 04 §5. `main` still takes direct pushes, and a required check would reject a fresh direct push; `docs.yml` is path-filtered, so a required docs check would block pushes it never runs on. Check: `gh api repos/<owner>/<repo>/rulesets/24558591` |
+| 2026-10-06 | Skipped hand-off **"return lineup comparisons separately": closed**, no code change. `comparisons[]` already ships apart from `swaps[]` (QA-1-010); only the internal engine/tool split remains, which fails safe and is held by tests | moving the split changes no output and reopens `lineup.ts` for no user value. Reopen with the next change to `lineup.ts`'s swap/compare construction, or a second caller passing `compare` (QA register round 1, Open items 1) |
+| 2026-10-06 | Skipped hand-off **"server-side git-working-tree guard": deferred** — if built, a **warning only**, never a refusal (§ Deferred designs) | a refusal locks out a home that is itself a dotfiles repository and cannot see bare-repo or yadm setups; Phase 1a stores no credential. Reopen when a credential lands in the config dir, the tool is distributed beyond the owner, league data turns up in a repository, or `~`/`~/.config` becomes a work tree (Open items 2). Its "fix now" part became QA-2-001/002 |
+| 2026-10-06 | Skipped hand-off **"worker thread for E1": deferred to Phase 2** | after QA-1-079's work bound the worst in-bounds E1 call is about 2.0 s unloaded, 2.5 s warm under load — inside the 10 s shutdown ceiling, so plan 10 A-2's trigger is not met. Reopen when a worst-in-bounds analytics case passes 3 s warm and a work budget cannot fix it, a feature needs the loop free (cancellation, progress, HTTP transport, a scheduler), or a sibling call or shutdown waits past its budget (Open items 3) |
+| 2026-10-06 | Skipped hand-off **"crosswalk row in `ff doctor`": closed** | unmatched players are reported by `ff_get_status.crosswalk`, every roster tool's warnings and the Skills (plan 10 A5a/B3); doctor stays a value-free install/runtime check. Reopen when plan 06's `crosswalk rebuild` job stores an unmatched report, a text names doctor/status for the list, a field round shows the warning lost, or a non-chat front end is supported (Open items 4). The analysis also found QA-2-003 |
+| 2026-10-06 | Skipped hand-off **"`quick_check` on every publish": closed** — not for cost (3–150 ms measured) but because it cannot catch anything that can happen | the file is written only through SQLite and fsync'd before the rename; damage after the publish is already caught and repaired by `ff refresh` and doctor row 8. Reopen if a dataset file is ever produced other than by SQLite's own writes, or a `quick_check` failure is traced to a file nothing touched after its publish (Open items 5) |
+| 2026-10-06 | Skipped hand-off **"persist only near-lock projection weeks": closed** | E13 reads only the newest pre-lock row, so far-week rows never displace a better forecast; the Skill path writes none. The real growth term is player row size (item 14 below). Reopen if a real season's store passes plan 01 §5.6's 100 MB after that change with far-week rows over 25 % of projection bytes, or a single-lead-time forecast is needed (read-side cap) (Open items 6) |
+| 2026-10-06 | Skipped hand-off **E5 per-candidate ranges and per-position verdicts: deferred to Phase 2** (E5 for all positions). E5 keeps one `hold_vs_stream` — now labelled with the `position` it describes (QA-2-004, additive) — and no per-candidate Dist in Phase 1a; consumers rank one position per call | under the v1 `position_cv` basis a per-candidate band adds no information, and a full Dist per candidate would push a K-only compact result to the edge of halving. The Phase 2 design is in § Deferred designs. Reopen when Phase 2's E5 work starts, `player_sim` lands, an eval or real use misreads `marginal_value`'s interval, or a Skill ranks K and DEF in one call (Open items 7). The analysis also found QA-2-005 |
 
 ## Stack facts (checked 2026-09-29)
 
@@ -176,6 +194,53 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 - Tools must be registered as `registerTool(name, { inputSchema: deferValidation(schema), … },
   wrapHandler(schema, fn))` — the only pattern that keeps plan 01 §4.3 coded errors under SDK
   2.2.0.
+- **A17 — does the client show the model `structuredContent`?** (plan 10 A17; item 9 below says
+  how to run it). Replace each "not recorded yet" with the line the check prints or the manual
+  step gives:
+  - Claude Code: not recorded yet (`scripts/dev/a17-check.mjs`; on 2026-10-06 it stopped at the
+    login step, exit 3).
+  - Claude Desktop: not recorded yet (manual).
+
+## Deferred designs (recorded 2026-10-06, so they are not re-derived)
+
+Each belongs to a deferred hand-off (§ Decisions made; the QA register round 1, Open items, has the
+reasoning and the reopen triggers). Build one only when its trigger fires.
+
+- **E5 for all positions (Phase 2).** (a) `candidates[].projection`: the candidate's own
+  decision-week Dist, already computed in `kdef.ts` (no extra work); compact form `{ mean, p10,
+  p50, p90, basis }`, about 75 chars, so a K compact result stays near 9.5k chars. (b)
+  `candidates[].vs_starter`: `{ value, p10, p90 } | null`, the Δ against holding, computed with the
+  verdict's combined-σ formula so a candidate's interval and the coin-flip test always agree; null
+  without a starter. `marginal_value` keeps plan 07's meaning. (c) One `hold_vs_stream` entry per
+  requested position, `{ position, streamability, current_starter_delta, verdict: hold | stream |
+  locked }`; a locked starter's position gets `locked` instead of competing on Δ. As an array this
+  is breaking (bump `metadata.tool_contract` 1 → 2 in every Skill); the non-breaking route is a new
+  `hold_vs_stream_by_position[]` beside the labelled `hold_vs_stream` that QA-2-004 shipped. (d)
+  `rec` stays single, so the recommendation log and retro contract do not change. (e) While `rec`
+  is single, check-skills' one-position-per-call rule moves from stream-kdef's block to every
+  Skill's `ff_analyze_waivers` steps. Tests and mutations: `projection.mean` equals the stream
+  signal's value; `vs_starter` straddles 0 exactly when `rec` carries the coin-flip assumption
+  (computing it without the starter's σ must go red); a K-and-DEF call with the kicker locked gives
+  K `locked` and pairs DEF with `rec`; a K-only compact result with every assumption present still
+  fits in 10,000 chars without halving.
+- **Git-working-tree guard (a warning, never a refusal).** `enclosingGitWorkTree(p)` in
+  `src/config/paths.ts`: for the given and the real spelling of the path, walk up with `lstat`
+  looking for a `.git` directory or file (worktree/submodule); never spawn git, never read `.git`.
+  `loadConfig` adds one warning per affected key (`FF_CONFIG_DIR`, `FF_CACHE_DIR`, a non-fixture
+  `FF_LEAGUE_FILE`) that carries no path (serve writes config warnings to the client log), never an
+  issue; this checkout keeps its hard refusal. `ff doctor` rows 4 and 8 report `warn` and name the
+  work-tree root locally; the exit code is unchanged. The onboard Skill then says doctor warns, and
+  cannot see a bare-repository or yadm home. Lock-out regression test: a home that holds `.git`
+  still loads.
+- **E1 pacing (if the worker item reopens).** An async `projectPlayersAsync` that yields
+  (`setImmediate`) when more than about 16 ms have passed, checked between player-weeks, and honours
+  an `AbortSignal` (a `cancelled` error; nothing stored); results bit-identical to the sync path for
+  a fixed seed (each subject-week draws from its own forked stream). E1/E2/E3/E5 await it with the
+  request's signal, and shutdown aborts in-flight calls. A worker thread only if parallel CPU is
+  needed.
+- **Projection sample encoding (item 14).** Each stored player sample line is the expectation
+  times one gamma multiplier, so storing the multiplier instead of the line cuts every player row
+  about 11×, on every path.
 
 ## Confirmation-gate facts (verified 2026-09-29)
 
@@ -207,9 +272,12 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 
 1. Repo visibility is **PUBLIC** with no branch protection and no rulesets.
    Was that intended? (Everything pushed is treated as public regardless.)
+   **Resolved 2026-10-06:** public; `main` is protected by ruleset
+   `24558591` (§ Decisions made).
 2. The checkout is in an iCloud-synced folder. Mitigated by design (no
    secrets in the repo dir), but `node_modules`/build output will churn
-   through iCloud once the build starts.
+   through iCloud once the build starts. **Resolved 2026-10-05:** one
+   checkout, `~/Developer/yahoo-fantasy-football-mcp`, outside iCloud.
 3. License choice — to be recommended in the docs phase.
 4. **Yahoo API access must be applied for** (form at
    sports.yahoo.com/developer/access; read-only by default; write access
@@ -255,13 +323,48 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
    would rather pay for a consensus feed as a baseline/comparator, say so
    (`04` §C, `05` §16 item 12).
 
-9. **A17 needs Chad (manual, ~10 minutes).** The automated half is green: in fixture mode
-   `ff_debug_echo`'s nonce is only in `structuredContent`, and the C10 list tools omit it. The
-   question only a real client answers: does Claude Code, and does Claude Desktop, show the model
-   the `structuredContent` copy as well as the text (two copies per result → plan 07 §5.1's token
-   budgets halve)? Run the server in fixture mode in each client, call `ff_debug_echo`, ask the
-   model whether it can see the nonce; record each answer under "Stack facts" here. Plan 07 §5.1
-   is then re-based on measured tokens per client (its measured chars are already recorded there).
+9. **A17 needs Chad (about 10 minutes for both clients, most of it the Claude Desktop restart).**
+   The automated half is green: in fixture mode `ff_debug_echo`'s nonce is only in
+   `structuredContent`, and the C10 list tools omit it. The question only a real client answers:
+   does Claude Code, and does Claude Desktop, show the model the `structuredContent` copy as well
+   as the text (two copies per result → plan 07 §5.1's token budgets halve)? Record each answer
+   under "Build facts" (A17). Plan 07 §5.1 is then re-based on measured tokens per client (its
+   measured chars are already recorded there). Both halves run the built server in fixture mode
+   through `tests/smoke/fixture-serve.mjs`, which uses its own private temp home, config and cache
+   and never reads `~/.config/fantasy-football-mcp/`. Build first, from the checkout:
+   `scripts/dev/heavy-lock.sh scripts/dev/with-node.sh npm run build`.
+
+   **Claude Code (scripted).** Once: `claude auth login`. Then, from the checkout:
+   `scripts/dev/with-node.sh node scripts/dev/a17-check.mjs`. It runs `claude -p` headlessly
+   in a temp directory against the fixture server, asks the model to repeat the nonce, and decides
+   from Claude Code's own transcript whether the tool result handed to the model holds it. Exit 0
+   prints the verdict and the exact line to add under "Build facts"; exit 3 means Claude Code is not
+   logged in or its login expired (on 2026-10-06 the CLI on this machine stopped there). The other
+   exit codes, `--timeout`, `--save <file>` and `--from <file>` are in the script's header.
+
+   **Claude Desktop (manual).**
+   1. Note two absolute paths: the Node 24 binary
+      (`scripts/dev/with-node.sh node -p process.execPath`) and the checkout (`pwd` in it).
+   2. Quit Claude Desktop. If `~/Library/Application Support/Claude/claude_desktop_config.json`
+      exists, copy it aside (for example to `claude_desktop_config.json.a17-backup` in the same
+      folder).
+   3. Add one entry under `mcpServers`, keeping every existing entry:
+      `"ff-a17": { "command": "<Node 24 path>", "args": ["<checkout>/tests/smoke/fixture-serve.mjs"] }`.
+      Do not use `ff print-config` for this. It does support fixture mode (it copies
+      `FF_FIXTURE_DIR`, `FF_TOOLSET` and the other non-secret `FF_*` settings set in the shell),
+      but its entry is always named `fantasy-football-mcp-server`, the real server's name, so
+      merging it would replace your real entry. Its config and cache would also be whatever
+      `FF_CONFIG_DIR` and `FF_CACHE_DIR` the shell sets, not private temp folders.
+   4. Start Claude Desktop, open a new chat and send: *"This is an automated client check. Call
+      the tool ff_debug_echo exactly once, with no arguments. Then look at everything the tool
+      result shows you. If you can see a 12-character lowercase hexadecimal nonce anywhere in it,
+      reply with exactly one line: NONCE <the nonce>. If you cannot see one, reply with exactly one
+      line: NO NONCE. Never guess or invent a value."* Allow the tool call when asked.
+   5. `NONCE` followed by 12 hex characters means the model saw `structuredContent` (48 random
+      bits cannot be guessed); `NO NONCE` means it did not. Record under "Build facts":
+      `A17 Claude Desktop <version>: structuredContent visible to the model: yes|no (<date>)` (the
+      version is in Claude → About Claude).
+   6. Quit Claude Desktop, remove the `ff-a17` entry (or put the backup back), and start it again.
 10. ~~**A15 reading to confirm.**~~ **Resolved 2026-09-30 (modules gate, fix round 2) — no decision
     needed.** `ff_project_players` for the whole 16-player roster at the default 4000 sims now
     answers in a ≈ 293 ms median over real stdio (was 729–830 ms), so A15 is met as literally
@@ -279,6 +382,11 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 13. **Stored projections keep a 1,000-sample prefix, not all `n_sims` (deviation from plan 08 §5
     wording, recorded as a decision).** Only the retrospective reads them, and it scores at most
     500; storing all 4,000 wrote ~25 MB per roster call into a never-pruned table.
+14. **Projection player rows could be about 11× smaller (not scheduled).** Found while deciding
+    the near-lock hand-off (2026-10-06): each stored player sample line is the expectation times
+    one gamma multiplier, so storing the multiplier instead of the line would shrink every player
+    row about 11× (rows are about 53 KB at 500 samples on the fixture league). It is the larger
+    growth term of the projection table; the near-lock item's reopen trigger is measured after it.
 
 ## Open items
 
@@ -287,10 +395,18 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 - [x] docs-only CI (Mermaid/links, gitleaks + self-test, Dependabot, PR template)
 - [x] README, LICENSE, SECURITY.md, docs indexes
 - [x] executive summary for Chad (above)
-- [ ] **Chad:** submit the Yahoo API application; record the date here
-- [ ] **Chad:** review the package; approve / amend; choose 1a-minimum vs 1a-full
-- [ ] **Chad:** repo visibility + branch ruleset; leaked-credential notification; commercial intent; paid projections
-- [ ] build Phase 0 + Phase 1a — **blocked on the two items above**
+- [x] ~~**Chad:** submit the Yahoo API application~~ — decided 2026-09-30: no application; X1
+  (`ManualLeagueProvider`), Phase 1b deferred
+- [x] **Chad:** review the package; approve; 1a-minimum vs 1a-full — approved 2026-09-30, 1a-full
+- [x] **Chad:** repo visibility + branch ruleset — public; ruleset `24558591` (2026-10-06);
+  commercial intent and paid projections — no to both (2026-09-30)
+- [ ] **Chad:** notify the two repo owners whose credentials are in public git history (item 5;
+  nothing sent)
+- [x] build Phase 0 + Phase 1a — merged to `main` 2026-09-30 (QA/pentest round 1: 80 fixed)
+- [x] history rewrite for the machine-derived commit email (QA-1-095) — 2026-10-06
+- [x] the seven skipped round-1 hand-offs decided — 2026-10-06 (§ Decisions made)
+- [ ] **Chad:** A17 per client (item 9) — record both lines under "Build facts"
+- [ ] QA round 2: per-fix re-verification and the second sweep (`docs/qa/2026-10-06-qa-round2.md`)
 
 ## Log
 
@@ -306,7 +422,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   finalised (`dd54be2`).
 - 2026-09-30 — README/LICENSE/SECURITY/indexes landed (`a7dad60`).
   **Pre-build work complete; waiting on Chad.**
-- 2026-09-30 — **Build approved.** Guard-rails first (`6c27fdc`, `6c27fdc`): secret/identifier
+- 2026-09-30 — **Build approved.** Guard-rails first (`6c27fdc`): secret/identifier
   scanner + pre-commit hook + commit helper, all self-tested.
 - 2026-09-30 — **Foundation stage green**: scaffold (`.npmrc` alone first `1e1c2b5`, Z3
   proven), exact pins, strict TS, ESLint with layer boundaries, coverage gate, zero-dep
@@ -386,3 +502,16 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   least-clutter option: the pre-commit hook refuses conflict-copy names (test-first, mutation-checked),
   the `~/Documents` checkout was moved to the Trash after a final no-unpushed-work check, and the merged
   `build/phase-1a` branch was deleted. `~/Developer/yahoo-fantasy-football-mcp` is the only checkout.
+- 2026-10-06 — **History rewrite and branch ruleset** (QA-1-095; § Decisions made). Contributor
+  rules moved into `CONTRIBUTING.md` (`0fa85e3`). The history was rewritten (312 → 250 commits,
+  no-reply identity throughout, no co-author trailers, no working notes) and the cited commit ids
+  remapped (`1446c7a`); `main` moved from `f2cdbc5` to `1446c7a` in one force-push. Ruleset
+  `24558591` was then created: no force-push, no deletion, linear history, no bypass actors.
+- 2026-10-06 — **QA round 2 started: the deferred-items analysis** (`build/deferred-items`). The
+  seven skipped round-1 hand-offs were decided (four closed, three deferred; designs in § Deferred
+  designs). The analysis found five defects, each fixed with a regression test and mutation-checked
+  on the branch head: QA-2-001 (`8852df5`), QA-2-002 (`3469278`), QA-2-003 (`acdf50e`), QA-2-004
+  (`0d210f4`), QA-2-005 (`ebe095b`); `5302d5c` corrected the README and plan 09 §3.4 for
+  stream-kdef's one position per call. A17's Claude Code half is now a script (`149e05e`, hardened
+  in `b1dcd85` and `c99a067`); run on this machine it stopped at the login step. Next: the
+  per-fix re-verification and the second sweep.
