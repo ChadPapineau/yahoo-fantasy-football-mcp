@@ -22,7 +22,7 @@ import { FORBIDDEN, solveAssignment } from "./assignment.js";
 import { INACTIVES_LEAD_MS, LIMITS, LINEUP, Z90 } from "./constants.js";
 import { AnalyticsError } from "./errors.js";
 import { newestAsOf } from "./inputs.js";
-import { normalDist, round, sigmaOf } from "./math.js";
+import { normalDist, round, sigmaOf, zeroDist } from "./math.js";
 import {
   diffSd,
   lineupMoments,
@@ -411,6 +411,14 @@ interface FlowPair {
   readonly out: LineupPlayer | null;
   readonly in: LineupPlayer;
   readonly slot: string;
+  /** The starters who only change slots on the way from `in`'s seat to `out`'s (the chain). */
+  readonly movers: readonly LineupPlayer[];
+}
+
+/** A starter who leaves with no entrant reaching his seat, and the starters who move into it. */
+interface LeaverChain {
+  readonly leaver: LineupPlayer;
+  readonly movers: readonly LineupPlayer[];
 }
 
 interface Flow {
@@ -421,6 +429,8 @@ interface Flow {
   readonly leavers: LineupPlayer[];
   /** Leavers no entrant's chain reaches (their seat is left empty, e.g. an excluded starter). */
   readonly unpairedLeavers: LineupPlayer[];
+  /** Each unpaired leaver with the slot movers whose chain ends at him. */
+  readonly leaverChains: LeaverChain[];
   /** Starters who stay in the lineup but change slots. */
   readonly slotMovers: LineupPlayer[];
   /** Lineup changes the user makes (entrants + unpaired leavers; slot moves alone count each). */
@@ -473,22 +483,136 @@ function slotFlow(
   const pairs: FlowPair[] = entrants.map((e) => {
     let d = displacedBy.get(e) ?? null;
     const seen = new Set<LineupPlayer>([e]);
+    const movers: LineupPlayer[] = [];
     // follow starters who only moved: the seat they left was taken by … until someone left the lineup
     while (d !== null && recKeys.has(d.player_key) && !seen.has(d)) {
       seen.add(d);
+      movers.push(d);
       d = displacedBy.get(d) ?? null;
     }
     const out = d !== null && !recKeys.has(d.player_key) ? d : null;
     if (out !== null) reached.add(out);
-    return { out, in: e, slot: slotIn(rec, e.player_key) };
+    return { out, in: e, slot: slotIn(rec, e.player_key), movers };
   });
   const unpairedLeavers = leavers.filter((l) => !reached.has(l)).sort(order);
+  // who displaced whom, backwards: the movers whose chain ends at an unpaired leaver's seat
+  const displacer = new Map<LineupPlayer, LineupPlayer>();
+  for (const [x, d] of displacedBy) if (d !== null) displacer.set(d, x);
+  const leaverChains = unpairedLeavers.map((leaver): LeaverChain => {
+    const movers: LineupPlayer[] = [];
+    const seen = new Set<LineupPlayer>([leaver]);
+    for (let x = displacer.get(leaver); x !== undefined && !seen.has(x); x = displacer.get(x)) {
+      seen.add(x);
+      movers.push(x);
+    }
+    return { leaver, movers };
+  });
   const core = entrants.length + unpairedLeavers.length;
   return {
     pairs,
     entrants,
     leavers,
     unpairedLeavers,
+    leaverChains,
+    slotMovers,
+    changes: core > 0 ? core : slotMovers.length,
+  };
+}
+
+// --- the no-move rule, change by change (QA-1-060, QA-1-020/040 reopened, QA-2-038) -------------------
+
+/**
+ * One independent lineup change on the way from the current lineup to the best one: an entrant's
+ * chain (fill or swap, with the starters who only change slots on the way) or an unpaired leaver's.
+ * Changes touch disjoint seats, so any subset of them applied to the current lineup is legal.
+ */
+interface Change {
+  /** The reported swap, or null for a starter benched with no entrant reaching his seat. */
+  readonly pair: FlowPair | null;
+  readonly leaver: LeaverChain | null;
+  /** Everyone whose seat this change moves. */
+  readonly members: readonly LineupPlayer[];
+  /** The Δ-points interval of this change alone (rounded, as reported in `swaps`). */
+  readonly interval: readonly [number, number];
+  /** A `force_start` entrant: the user's instruction, never held. */
+  readonly forced: boolean;
+}
+
+/** A Δ interval that includes 0: the change could lose points (research 05 §14.4; QA-1-060). */
+const straddles = (iv: readonly [number, number]): boolean => iv[0] < 0 && iv[1] > 0;
+
+/**
+ * A change that gains nothing whatever happens — both sides score exactly the same, e.g. a player
+ * who will not play replaced by one on bye (QA-2-038): no move, never a "change".
+ */
+const gainsNothing = (iv: readonly [number, number]): boolean => iv[0] === 0 && iv[1] === 0;
+
+/**
+ * A swap's Δ points (`in` − `out`) and its p10–p90 interval: a fill's Δ is the entrant's own points
+ * (the seat scores 0 now) — his quantiles, exactly; a swap's by the normal approximation with the
+ * pair's same-team correlation.
+ */
+function pairDelta(pr: { readonly out: LineupPlayer | null; readonly in: LineupPlayer }): {
+  de: number;
+  interval: readonly [number, number];
+} {
+  const out = pr.out;
+  if (out === null) {
+    return {
+      de: pr.in.points.mean,
+      interval: [round(pr.in.points.p10), round(pr.in.points.p90)],
+    };
+  }
+  const de = pr.in.points.mean - out.points.mean;
+  const si = sigmaOf(pr.in.points);
+  const so = sigmaOf(out.points);
+  const sd = Math.sqrt(
+    Math.max(0, si * si + so * so - 2 * rho(member(pr.in), member(out)) * si * so),
+  );
+  return { de, interval: [round(de - Z90 * sd), round(de + Z90 * sd)] };
+}
+
+/** The changes a flow is made of, each with its own Δ (the swap's, as reported in `swaps`). */
+function changesOf(flow: Flow, force: ReadonlySet<PlayerKey>): Change[] {
+  const out: Change[] = flow.pairs.map((pr) => {
+    return {
+      pair: pr,
+      leaver: null,
+      members: [pr.in, ...pr.movers, ...(pr.out === null ? [] : [pr.out])],
+      interval: pairDelta(pr).interval,
+      forced: force.has(pr.in.player_key),
+    };
+  });
+  for (const lc of flow.leaverChains) {
+    // benched with nobody reaching his seat: Δ is minus his own points (his quantiles, exactly)
+    const pts = lc.leaver.points;
+    out.push({
+      pair: null,
+      leaver: lc,
+      members: [...lc.movers, lc.leaver],
+      interval: [round(-pts.p90), round(-pts.p10)],
+      forced: false,
+    });
+  }
+  return out;
+}
+
+/** The flow of only the `applied` changes (each change's pair / chain, exactly as in `flow`). */
+function appliedFlow(flow: Flow, applied: readonly Change[]): Flow {
+  if (applied.length === flow.pairs.length + flow.leaverChains.length) return flow;
+  const pairs = applied.flatMap((c) => (c.pair === null ? [] : [c.pair]));
+  const chains = applied.flatMap((c) => (c.leaver === null ? [] : [c.leaver]));
+  const unpairedLeavers = chains.map((c) => c.leaver);
+  const entrants = pairs.map((p) => p.in);
+  const leavers = [...pairs.flatMap((p) => (p.out === null ? [] : [p.out])), ...unpairedLeavers];
+  const slotMovers = [...pairs.flatMap((p) => p.movers), ...chains.flatMap((c) => c.movers)];
+  const core = entrants.length + unpairedLeavers.length;
+  return {
+    pairs,
+    entrants,
+    leavers,
+    unpairedLeavers,
+    leaverChains: chains,
     slotMovers,
     changes: core > 0 ? core : slotMovers.length,
   };
@@ -498,10 +622,11 @@ const plural = (n: number, one: string, many: string): string =>
   `${String(n)} ${n === 1 ? one : many}`;
 
 /**
- * The action in words: "make N lineup changes" counts exactly the swaps listed (QA-1-080's contract);
+ * The action in words: "make N lineup changes" counts exactly the swaps listed that are made, and
+ * "hold M coin flips" the listed swaps that are not (QA-1-080's contract: N + M = the swaps listed);
  * fills not listed as swaps, starters benched with no replacement, and slot-only moves are named.
  */
-function actionText(flow: Flow, fillsListed: boolean): string {
+function actionText(flow: Flow, fillsListed: boolean, heldListed: number): string {
   const fills = flow.pairs.filter((p) => p.out === null).length;
   const listed = fillsListed ? flow.pairs.length : flow.pairs.length - fills;
   const unlistedFills = fillsListed ? 0 : fills;
@@ -513,6 +638,7 @@ function actionText(flow: Flow, fillsListed: boolean): string {
     parts.push(`bench ${plural(flow.unpairedLeavers.length, "starter", "starters")}`);
   if (parts.length === 0 && flow.slotMovers.length > 0)
     parts.push(`move ${plural(flow.slotMovers.length, "starter", "starters")} between slots`);
+  if (heldListed > 0) parts.push(`hold ${plural(heldListed, "coin flip", "coin flips")}`);
   return parts.join(" and ");
 }
 
@@ -556,7 +682,13 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   const objective: Objective = opponent === null ? "mean" : (req.objective ?? "mean");
   const exclude = new Set(req.exclude ?? []);
   const force = new Set(req.force_start ?? []);
-  const basis = basisOf(req.players);
+  // QA-2-038: `exclude` says the player will not play, so he scores 0 this week — in the current
+  // lineup every swap, interval and the no-move rule are measured against, exactly as a `status: O`
+  // player does (his full projection there made his replacement look like a loss)
+  const players = req.players.map((p) =>
+    exclude.has(p.player_key) ? { ...p, points: zeroDist(p.points.basis), p_active: 0 } : p,
+  );
+  const basis = basisOf(players);
   const assumptions: Assumption[] = [
     A(
       "each player's spread is read from his p10–p90 (normal approximation); same-team correlations from the research 05 §3.3 table",
@@ -581,13 +713,13 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
 
   const meanA = solve({
     slots,
-    players: req.players,
+    players,
     value: (p) => p.points.mean,
     nowMs,
     exclude,
     force,
   });
-  const meanStarters = startersOf(meanA, req.players, slots);
+  const meanStarters = startersOf(meanA, players, slots);
   const meanM = lineupMoments(meanStarters.map(member));
   const moments = (st: readonly LineupPlayer[]): PairMoments => {
     const mem = st.map(member);
@@ -612,7 +744,7 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
     );
   }
   const evaluate = (a: Assignment): Evaluated => {
-    const starters = startersOf(a, req.players, slots);
+    const starters = startersOf(a, players, slots);
     const mo = moments(starters);
     return { a, starters, moments: mo, pwin: pWinNormal(mo) };
   };
@@ -626,13 +758,13 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
         if (lam === 0 && sign === -1) continue;
         const a = solve({
           slots,
-          players: req.players,
+          players,
           value: (p) => p.points.mean + sign * lam * sigmaOf(p.points) ** 2,
           nowMs,
           exclude,
           force,
         });
-        const id = lineupId(a, startersOf(a, req.players, slots));
+        const id = lineupId(a, startersOf(a, players, slots));
         if (!seen.has(id)) seen.set(id, evaluate(a));
       }
     }
@@ -682,14 +814,14 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
         };
 
   // current lineup and swaps
-  const curA = currentAssignment(req.players);
+  const curA = currentAssignment(players);
   const curEval = evaluate(curA);
   const curStarters = curEval.starters;
   const recStarters = chosen.starters;
   const recKeys = new Set(recStarters.map((p) => p.player_key));
   const flow = slotFlow(curA, chosen.a, curStarters, recStarters, slots);
   const pairs = flow.pairs;
-  const byKey = new Map(req.players.map((p) => [p.player_key, p]));
+  const byKey = new Map(players.map((p) => [p.player_key, p]));
   const comparePairs: { out: LineupPlayer; in: LineupPlayer; slot: string }[] = [];
   for (const c of (req.compare ?? []).slice(0, 5)) {
     const o = byKey.get(c.out);
@@ -699,28 +831,13 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
     comparePairs.push({ out: o, in: i, slot: o.slot });
   }
 
-  const recMembers = recStarters.map(member);
   const reported = req.fills_in_swaps === true ? pairs : pairs.filter((pr) => pr.out !== null);
   const swapRaw = [...reported, ...comparePairs].map((pr) => {
     const out = pr.out;
     const after = curStarters.filter((p) => p !== out);
     if (!after.includes(pr.in)) after.push(pr.in);
     const dp = pWinNormal(moments(after)) - curEval.pwin;
-    let de: number;
-    let interval: readonly [number, number];
-    if (out === null) {
-      // a fill: Δ is the entrant's own points (the seat scores 0 now) — his quantiles, exactly
-      de = pr.in.points.mean;
-      interval = [round(pr.in.points.p10), round(pr.in.points.p90)];
-    } else {
-      de = pr.in.points.mean - out.points.mean;
-      const si = sigmaOf(pr.in.points);
-      const so2 = sigmaOf(out.points);
-      const sd = Math.sqrt(
-        Math.max(0, si * si + so2 * so2 - 2 * rho(member(pr.in), member(out)) * si * so2),
-      );
-      interval = [round(de - Z90 * sd), round(de + Z90 * sd)];
-    }
+    const { de, interval } = pairDelta(pr);
     return {
       out: out === null ? null : out.player_key,
       in: pr.in.player_key,
@@ -732,13 +849,7 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
       option_value:
         out === null
           ? null
-          : optionValue(
-              { out, in: pr.in, slot: pr.slot },
-              recStarters,
-              req.players,
-              slots,
-              chosen.a,
-            ),
+          : optionValue({ out, in: pr.in, slot: pr.slot }, recStarters, players, slots, chosen.a),
     };
   });
 
@@ -753,7 +864,7 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
     const slotName = slotIn(chosen.a, x.player_key);
     const slot = slotOf(slots, slotName);
     if (slot === undefined) continue;
-    const alt = req.players
+    const alt = players
       .filter(
         (y) =>
           !recKeys.has(y.player_key) &&
@@ -797,90 +908,113 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   }
   stackFlags.sort((a, b) => cmpStr(a.players.join(","), b.players.join(",")));
 
-  const schedule = lockGroups(req.players);
+  const schedule = lockGroups(players);
   const latest = latestExecutionTime(schedule, nowMs);
-  const movers = new Set<LineupPlayer>([...flow.entrants, ...flow.leavers, ...flow.slotMovers]);
-  const recLatest = latestExecutionTime(lockGroups([...movers]), nowMs);
-  const changes = flow.changes;
   const inputs = [...(req.inputs ?? [])];
 
-  // the Rec. Δ = recommended − current lineup: the swapped part by the normal approximation (with the
+  // Δ of a lineup against the current one: the swapped part by the normal approximation (with the
   // same-team covariances), each fill (a seat that scores 0 now) by its entrant's own quantiles — a
   // fill cannot lose points, so its p10 is never pushed below 0 by a symmetric approximation
-  const recM = lineupMoments(recMembers);
   const curMembers = curStarters.map(member);
   const curM = lineupMoments(curMembers);
-  const fills = flow.pairs.filter((pr) => pr.out === null).map((pr) => pr.in);
-  const swappedMembers = recStarters.filter((p) => !fills.includes(p)).map(member);
-  const swappedM = lineupMoments(swappedMembers);
-  const covSC = lineupCov(swappedMembers, curMembers);
-  const sdSwapped = Math.sqrt(Math.max(0, swappedM.v + curM.v - 2 * covSC));
-  const dMuSwapped = swappedM.mu - curM.mu;
-  const fillSum = (q: (d: Dist) => number): number => fills.reduce((x, p) => x + q(p.points), 0);
-  const dMu = recM.mu - curM.mu;
-  const delta = {
-    value: round(dMu),
-    p10: round(dMuSwapped - Z90 * sdSwapped + fillSum((d) => d.p10)),
-    p90: round(dMuSwapped + Z90 * sdSwapped + fillSum((d) => d.p90)),
+  const deltaOf = (
+    starters: readonly LineupPlayer[],
+    f: Flow,
+  ): { value: number; p10: number; p90: number } => {
+    const fills = f.pairs.filter((pr) => pr.out === null).map((pr) => pr.in);
+    const swappedMembers = starters.filter((p) => !fills.includes(p)).map(member);
+    const swappedM = lineupMoments(swappedMembers);
+    const covSC = lineupCov(swappedMembers, curMembers);
+    const sdSwapped = Math.sqrt(Math.max(0, swappedM.v + curM.v - 2 * covSC));
+    const dMuSwapped = swappedM.mu - curM.mu;
+    const fillSum = (q: (d: Dist) => number): number => fills.reduce((x, p) => x + q(p.points), 0);
+    return {
+      value: round(lineupMoments(starters.map(member)).mu - curM.mu),
+      p10: round(dMuSwapped - Z90 * sdSwapped + fillSum((d) => d.p10)),
+      p90: round(dMuSwapped + Z90 * sdSwapped + fillSum((d) => d.p90)),
+    };
   };
-  // research 05 §14.4 (the no-op baseline): a change whose Δ interval includes 0 — it could lose
-  // points (p10 < 0 < p90) — is reported as no move; the swaps still show it, coin_flip set (QA-1-060)
-  const coinFlip = changes > 0 && delta.p10 < 0 && delta.p90 > 0;
-  const noMove = changes === 0 || coinFlip;
-  if (coinFlip) {
-    assumptions.push(
-      A(
-        `the best lineup change is a coin flip: its Δ interval (${String(round(delta.p10, 1))} to ${String(round(delta.p90, 1))} points) includes 0, so the call is no move (research 05 §14.4)`,
-        "a status or projection change moves the interval off 0",
-      ),
-    );
-  }
-  // subjects: the paired entrants first, in pair order, then the fills and the other starters; the
-  // sits in the same pair order — so the retrospective's k-th start ↔ k-th sit pairing holds
-  const subjects: RecSubject[] = [];
-  const keepSubjects = (): RecSubject[] =>
-    curStarters.map((p) => ({
-      player_key: p.player_key,
-      gsis_id: p.gsis_id ?? null,
-      nfl_team: p.positions.includes("DEF") ? p.nfl_team : null,
-      role: "start",
-      slot: slotIn(curA, p.player_key),
-    }));
-  const paired = pairs.filter(
-    (pr): pr is { out: LineupPlayer; in: LineupPlayer; slot: string } => pr.out !== null,
-  );
-  const startOrder = [
-    ...paired.map((pr) => pr.in),
-    ...recStarters.filter((p) => !paired.some((pr) => pr.in === p)),
-  ];
-  for (const p of startOrder) {
-    subjects.push({
-      player_key: p.player_key,
-      gsis_id: p.gsis_id ?? null,
-      nfl_team: p.positions.includes("DEF") ? p.nfl_team : null,
-      role: "start",
-      slot: slotIn(chosen.a, p.player_key),
-    });
-  }
-  const sitOrder = [...paired.map((pr) => pr.out), ...flow.unpairedLeavers];
-  for (const o of sitOrder) {
-    subjects.push({
-      player_key: o.player_key,
-      gsis_id: o.gsis_id ?? null,
-      nfl_team: o.positions.includes("DEF") ? o.nfl_team : null,
-      role: "sit",
-      slot: slotIn(curA, o.player_key),
-    });
-  }
 
-  // no move: the rec is the current lineup (what the user keeps; what the retrospective checks)
-  const keptA = noMove ? curA : chosen.a;
-  const keptStarters = noMove ? curStarters : recStarters;
-  const keptM = noMove ? curM : recM;
+  // research 05 §14.4 (the no-op baseline), change by change: the best lineup's changes are made
+  // when their Δ interval excludes 0; when it includes 0 (p10 < 0 < p90) only the changes whose own
+  // interval excludes 0 are made — a coin-flip swap never holds back a fill that cannot lose points
+  // (QA-1-020/040 reopened). A change that gains nothing (Δ ≡ 0) is never a move (QA-2-038); a
+  // forced start always is. Held changes stay listed in `swaps`, coin_flip set (QA-1-060).
+  const all = changesOf(flow, force);
+  const holdable = (c: Change, coin: boolean): boolean =>
+    !c.forced && (gainsNothing(c.interval) || (coin && straddles(c.interval)));
+  const keptOf = (held: ReadonlySet<Change>) => {
+    const applied = all.filter((c) => !held.has(c));
+    const f = appliedFlow(flow, applied);
+    if (f === flow) return { f, a: chosen.a, starters: recStarters };
+    const a = new Map(curA);
+    for (const c of applied)
+      for (const p of c.members) a.set(p.player_key, slotIn(chosen.a, p.player_key));
+    return { f, a: a as Assignment, starters: startersOf(a, players, slots) };
+  };
+  let held = new Set(all.filter((c) => holdable(c, false)));
+  let kept = keptOf(held);
+  let keptDelta = deltaOf(kept.starters, kept.f);
+  if (straddles([keptDelta.p10, keptDelta.p90])) {
+    held = new Set(all.filter((c) => holdable(c, true)));
+    kept = keptOf(held);
+    keptDelta = deltaOf(kept.starters, kept.f);
+  }
+  const changes = kept.f.changes;
+  const noMove = changes === 0;
+  const heldListed = [...held].filter(
+    (c) => c.pair !== null && (req.fills_in_swaps === true || c.pair.out !== null),
+  ).length;
+  // no move: Δ of the best lineup, the change that was not made (0 when it is the current one)
+  const delta = noMove ? deltaOf(recStarters, flow) : keptDelta;
+  if (held.size > 0) {
+    const zeroOnly = [...held].every((c) => gainsNothing(c.interval));
+    const text = noMove
+      ? zeroOnly
+        ? "the best lineup change gains nothing: its Δ is 0 whatever happens (a player who will not play for one who scores 0), so the call is no move (research 05 §14.4)"
+        : `the best lineup change is a coin flip: its Δ interval (${String(round(delta.p10, 1))} to ${String(round(delta.p90, 1))} points) includes 0, so the call is no move (research 05 §14.4)`
+      : `${plural(held.size, "change", "changes")} of the best lineup held: each one's own Δ interval includes 0 (research 05 §14.4); the changes made exclude 0`;
+    assumptions.push(A(text, "a status or projection change moves the interval off 0"));
+  }
+  const movers = new Set<LineupPlayer>([
+    ...kept.f.entrants,
+    ...kept.f.leavers,
+    ...kept.f.slotMovers,
+  ]);
+  const recLatest = latestExecutionTime(lockGroups([...movers]), nowMs);
+
+  // subjects: the paired entrants first, in pair order, then the fills and the other starters; the
+  // sits in the same pair order — so the retrospective's k-th start ↔ k-th sit pairing holds. No
+  // move: the current starters (what the user keeps; what the retrospective checks)
+  const keptA: Assignment = noMove ? curA : kept.a;
+  const keptStarters = noMove ? curStarters : kept.starters;
+  const subjectOf = (p: LineupPlayer, role: "start" | "sit", a: Assignment): RecSubject => ({
+    player_key: p.player_key,
+    gsis_id: p.gsis_id ?? null,
+    nfl_team: p.positions.includes("DEF") ? p.nfl_team : null,
+    role,
+    slot: slotIn(a, p.player_key),
+  });
+  const paired = noMove
+    ? []
+    : kept.f.pairs.filter((pr): pr is FlowPair & { out: LineupPlayer } => pr.out !== null);
+  const subjects: RecSubject[] = [
+    ...[
+      ...paired.map((pr) => pr.in),
+      ...keptStarters.filter((p) => !paired.some((pr) => pr.in === p)),
+    ].map((p) => subjectOf(p, "start", keptA)),
+    ...(noMove ? [] : [...paired.map((pr) => pr.out), ...kept.f.unpairedLeavers]).map((o) =>
+      subjectOf(o, "sit", curA),
+    ),
+  ];
+
+  const keptM = lineupMoments(keptStarters.map(member));
   const roleGames = keptStarters.map((p) => p.role_games ?? 0);
   const rec: Rec = {
-    action: noMove ? "keep the current lineup" : actionText(flow, req.fills_in_swaps === true),
-    subjects: coinFlip ? keepSubjects() : subjects,
+    action: noMove
+      ? "keep the current lineup"
+      : actionText(kept.f, req.fills_in_swaps === true, heldListed),
+    subjects,
     lineup: assignments(keptA, keptStarters, slots).map((s) => ({
       slot: s.slot,
       player_key: s.player_key,
@@ -905,7 +1039,7 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   };
 
   const view = (a: Assignment): LineupSlotAssignment[] => {
-    const all = assignments(a, req.players, slots);
+    const all = assignments(a, players, slots);
     return req.only_unlocked === true ? all.filter((s) => !isLocked(s.lock_at, nowMs)) : all;
   };
   const hasOpp = opponent !== null;

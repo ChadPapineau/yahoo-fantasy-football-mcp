@@ -32,9 +32,14 @@ function expectFits(text: string, isError: boolean | undefined, detail: string, 
   expect(isError, `${label}: ${text.slice(0, 300)}`).not.toBe(true);
   expect(text.length, label).toBeLessThanOrEqual(ANALYTICS_BUDGET_CHARS);
   const b = JSON.parse(text) as E2;
-  // the swaps are the advice: rec.action's count is exactly what is shown
+  // the swaps are the advice: rec.action counts exactly what is shown — the swaps made plus the
+  // coin flips held (QA-1-020/040 reopened: the no-move rule is applied change by change)
   const m = /make (\d+) lineup change/.exec(b.data.rec.action);
-  if (m !== null) expect(b.data.swaps.length, `${label}: ${b.data.rec.action}`).toBe(Number(m[1]));
+  const held = /hold (\d+) coin flip/.exec(b.data.rec.action);
+  if (m !== null)
+    expect(b.data.swaps.length, `${label}: ${b.data.rec.action}`).toBe(
+      Number(m[1]) + Number(held?.[1] ?? 0),
+    );
   // every recommended starter is shown
   const starters = b.data.recommended_lineup.filter((r) => STARTING(r.slot));
   for (const s of b.data.swaps)

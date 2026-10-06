@@ -3,6 +3,8 @@
 // change when the recommendation fills it: no_move false, the fill reported as a swap with `out: null`
 // and its own deadline. Every entrant is reported, paired with the starter he actually replaces —
 // following the chain of starters who only change slots — never with whoever is first in a list.
+// Reopened in round 2: the no-move rule (QA-1-060) is applied change by change, so a coin-flip swap
+// elsewhere in the lineup never holds back a fill (or any change) whose own Δ interval excludes 0.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { analyzeLineup, type LineupPlayer } from "../../../src/domain/analytics/lineup.js";
@@ -124,6 +126,8 @@ describe("QA-1-020/040 — filling an empty starting seat is a move", () => {
             pos: fc.constantFrom(...POS),
             mean: fc.integer({ min: 1, max: 30 }),
             slot: fc.constantFrom(...SLOTS),
+            // tight and wide spreads: coin-flip swaps next to decisive ones
+            w: fc.constantFrom(0.2, 0.2, 0.9),
           }),
           { minLength: 1, maxLength: 14 },
         ),
@@ -145,7 +149,10 @@ describe("QA-1-020/040 — filling an empty starting seat is a move", () => {
               (used.get(s.slot) ?? 0) < (cap[s.slot] ?? 0) &&
               (s.slot === s.pos || (s.slot === "W/R/T" && ["WR", "RB", "TE"].includes(s.pos)));
             if (ok) used.set(s.slot, (used.get(s.slot) ?? 0) + 1);
-            return player(s.pos, s.mean, { slot: ok ? s.slot : "BN", points: tight(s.mean) });
+            return player(s.pos, s.mean, {
+              slot: ok ? s.slot : "BN",
+              points: dist(s.mean, s.mean * s.w),
+            });
           });
           const r = analyzeLineup({
             slots: LEAGUE_SLOTS,
@@ -167,16 +174,76 @@ describe("QA-1-020/040 — filling an empty starting seat is a move", () => {
           expect(ins).toEqual(entrants);
           const same = cur.size === rec.size && [...cur].every(([k, v]) => rec.get(k) === v);
           if (same) expect(r.no_move).toBe(true);
-          // a change is reported unless its Δ interval straddles 0 (QA-1-060's no-move rule)
-          const d = r.rec.delta_vs_next;
-          if (entrants.length > 0 && !(d.p10 < 0 && d.p90 > 0))
-            expect(r.rec.action).not.toBe("keep the current lineup");
           for (const s of r.swaps) {
             if (s.out !== null) expect(cur.has(s.out) && !rec.has(s.out)).toBe(true);
           }
+          // change by change (QA-1-020/040 reopened): every listed swap whose own Δ interval lies
+          // above 0 is made in the rec, whatever coin flips sit next to it
+          const kept = startOf(r.rec.lineup ?? []);
+          for (const s of r.swaps) {
+            if (s.interval[0] < 0 || s.delta_e <= 0) continue;
+            expect(kept.has(s.in), `${s.in} is started`).toBe(true);
+            if (s.out !== null) expect(kept.has(s.out), `${s.out} is benched`).toBe(false);
+          }
+          // no move ⇔ the rec keeps the current seats
+          const keepsSeats =
+            cur.size === kept.size && [...cur].every(([k, v]) => kept.get(k) === v);
+          expect(r.rec.no_move).toBe(keepsSeats);
+          expect(r.no_move).toBe(r.rec.no_move);
+          // rec.action counts the listed swaps: made + held = listed (QA-1-080's contract)
+          const made = /make (\d+) lineup change/.exec(r.rec.action);
+          const held = /hold (\d+) coin flip/.exec(r.rec.action);
+          if (made !== null) expect(Number(made[1]) + Number(held?.[1] ?? 0)).toBe(r.swaps.length);
+          // a move's own Δ interval never straddles 0 (QA-1-060)
+          const d = r.rec.delta_vs_next;
+          if (!r.rec.no_move) expect(d.p10 < 0 && d.p90 > 0).toBe(false);
         },
       ),
       { numRuns: 300 },
     );
+  });
+  it("an empty RB seat next to a coin-flip WR swap: the fill is made, only the coin flip held", () => {
+    const slots = slotsOf([
+      { name: "QB", count: 1 },
+      { name: "WR", count: 1 },
+      { name: "RB", count: 1 },
+      { name: "BN", count: 4 },
+    ]);
+    const qb = player("QB", 20, { slot: "QB", points: tight(20) });
+    const wr = player("WR", 10, { slot: "WR", points: dist(10, 2) });
+    const wrBench = player("WR", 10.5, { slot: "BN", points: dist(10.5, 9) });
+    const rb = player("RB", 6, { slot: "BN", points: dist(6, 2), lock_at: SUN_425 });
+    for (const fills of [true, false]) {
+      const r = analyzeLineup({
+        slots,
+        players: [qb, wr, wrBench, rb],
+        opponent: null,
+        clock,
+        fills_in_swaps: fills,
+      });
+      const label = `fills_in_swaps ${String(fills)}`;
+      expect(r.no_move, label).toBe(false);
+      expect(r.rec.no_move, label).toBe(false);
+      expect(r.rec.action, label).toBe(
+        fills
+          ? "make 1 lineup change and hold 1 coin flip"
+          : "fill 1 empty starting slot and hold 1 coin flip",
+      );
+      expect(r.rec.lineup, label).toEqual([
+        { slot: "QB", player_key: qb.player_key },
+        { slot: "WR", player_key: wr.player_key },
+        { slot: "RB", player_key: rb.player_key },
+      ]);
+      expect(r.rec.latest_execution_time, label).toBe(SUN_425);
+      expect(r.rec.delta_vs_next, label).toEqual({ value: 6, p10: 4, p90: 8 });
+      // the coin flip is still shown, flagged
+      expect(r.swaps, label).toContainEqual(
+        expect.objectContaining({ out: wr.player_key, in: wrBench.player_key, coin_flip: true }),
+      );
+      expect(
+        r.rec.assumptions.some((a) => a.text.startsWith("1 change of the best lineup held")),
+        label,
+      ).toBe(true);
+    }
   });
 });
