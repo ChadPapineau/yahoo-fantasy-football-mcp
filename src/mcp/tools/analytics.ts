@@ -39,10 +39,13 @@ import {
   addsRemainingSchema,
   faabBudgetSchema,
 } from "../bounds.js";
-import { defineTool, type ToolContext } from "../define.js";
+import { defineTool, roundDeep, truncationHint, type ToolContext } from "../define.js";
 import {
   ANALYTICS_BUDGET_CHARS,
+  REC_LIMITS,
   bareUntrusted,
+  buildEnvelope,
+  fitToBudget,
   recSchema,
   type BudgetTrim,
   type InputStamp,
@@ -827,6 +830,60 @@ function lineupTrims(slots: RosterSlots, original: E2Data): BudgetTrim[] {
   ];
 }
 
+/** E2's refusal hint for a lineup too deep for one result (QA-1-080, interim). */
+export const LINEUP_TOO_DEEP_HINT =
+  "This lineup is too deep for one ff_analyze_lineup result (more than about 14 starting seats with a full bench); deep lineups are not supported yet. Use ff_project_players for your starters' projections meanwhile.";
+
+/**
+ * QA-1-080, interim — until E2's truncation contract for deep lineups and what `rec.subjects` does
+ * past REC_LIMITS are decided (deferred: plan 07 E2, `src/mcp/envelope.ts`): a schema-legal lineup
+ * whose result cannot fit — over the analytics budget after every trim the contract allows, or a rec
+ * with more entries than REC_LIMITS — is refused with VALIDATION (`lineup_too_deep`) and a hint,
+ * never INTERNAL with nothing to act on. The fit is the server's own: the same envelope, budget,
+ * list and trims `runTool` applies, so a result that fits is never refused.
+ */
+export function refuseTooDeep(
+  ctx: ToolContext,
+  detail: unknown,
+  result: {
+    readonly data: E2Data;
+    readonly inputs: readonly InputStamp[];
+    readonly warnings: readonly string[];
+    readonly bareFields: readonly UntrustedField[];
+    readonly trims: readonly BudgetTrim[];
+  },
+): void {
+  const rec = result.data.rec;
+  const over =
+    rec.subjects.length > REC_LIMITS.subjects ||
+    rec.drivers.length > REC_LIMITS.drivers ||
+    rec.assumptions.length > REC_LIMITS.assumptions ||
+    (rec.lineup?.length ?? 0) > REC_LIMITS.lineup;
+  const fit = over
+    ? null
+    : fitToBudget(
+        buildEnvelope({
+          data: roundDeep(result.data),
+          requestId: ctx.requestId,
+          nowMs: ctx.nowMs,
+          inputs: result.inputs,
+          extraSources: ["engine"],
+          estimate: true,
+          bareFields: result.bareFields,
+          warnings: result.warnings,
+        }),
+        ANALYTICS_BUDGET_CHARS,
+        "swaps",
+        {
+          pageable: false,
+          hint: truncationHint({ budget: "analytics" }, { detail }),
+          trims: result.trims,
+        },
+      );
+  if (fit?.ok !== true)
+    throw new FfError("VALIDATION", { reason: "lineup_too_deep", hint: LINEUP_TOO_DEEP_HINT });
+}
+
 export const analyzeLineupTool = defineTool({
   name: "ff_analyze_lineup",
   family: "analytics",
@@ -915,17 +972,20 @@ export const analyzeLineupTool = defineTool({
       inputs: rec.inputs.slice(0, 25).map((i) => ({ ...i })),
     };
     const out = JSON.parse(JSON.stringify(data)) as E2Data;
+    const bareFields = [
+      ...(args.detail === "full" ? nameFields("data.current_lineup[].name", mine.targets) : []),
+      ...nameFields("data.recommended_lineup[].name", mine.targets),
+    ];
+    const trims = lineupTrims(slots, out);
+    refuseTooDeep(ctx, args.detail, { data: out, inputs, warnings, bareFields, trims });
     return {
       data: out,
       inputs,
       warnings,
-      bareFields: [
-        ...(args.detail === "full" ? nameFields("data.current_lineup[].name", mine.targets) : []),
-        ...nameFields("data.recommended_lineup[].name", mine.targets),
-      ],
+      bareFields,
       extraSources: ["engine"],
       estimate: true,
-      trims: lineupTrims(slots, out),
+      trims,
       listKey: "swaps",
       week: w,
     };
