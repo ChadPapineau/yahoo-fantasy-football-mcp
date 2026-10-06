@@ -69,11 +69,16 @@ export const JOBS: readonly LaunchdJob[] = Object.freeze([
     sources: ["nflverse:schedules"],
   },
   {
+    // Every 6 h, every day (QA-2-035): plan 06's "daily 10:30 + 16:30 Wed–Sat" left 18–24 h gaps
+    // against the 12 h injuries TTL (plan 01 §5.2: "2×/day + Wed–Sat afternoons"), so injuries read
+    // stale ~60 h a week with a healthy job, and one failed run passed the 36 h hard limit (STALE_ONLY).
+    // A 6 h cadence keeps the TTL and hard limit as planned, includes the 10:30 morning run and the
+    // 16:30 practice-report run every day, and holds the TTL through one missed run.
     name: "nflverse-daily",
     argv: ["refresh", "nflverse:daily", "--notify"],
     description:
-      "refresh injuries + roster_weekly — daily 10:30, again 16:30 Wed–Sat (practice reports)",
-    calendar: [at(10, 30), ...[WED, THU, FRI, SAT].map((d) => at(16, 30, d))],
+      "refresh injuries + roster_weekly — every 6 h (04:30, 10:30, 16:30, 22:30), within the 12 h injuries TTL",
+    calendar: [at(4, 30), at(10, 30), at(16, 30), at(22, 30)],
     sources: ["nflverse:injuries", "nflverse:roster_weekly"],
   },
   {
