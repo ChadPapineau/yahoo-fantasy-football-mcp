@@ -2,7 +2,8 @@
 // §8), so a decision-week game without a betting line (not published yet, taken off the board, or
 // omitted as stale) is a missing driver. Plan 07 §2: it is named in rec.assumptions, never silently
 // omitted, and the ranking — trailing points only — is never presented as a decisive stream over a
-// current starter. An empty slot is still filled.
+// starter who plays. A starter who cannot score this week (a bye, ruled out) is an empty slot: it
+// is filled either way, with the missing lines named.
 import fc from "fast-check";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
@@ -11,14 +12,12 @@ import {
   type KdefPosition,
 } from "../../../src/domain/analytics/kdef.js";
 import type { ProjectionReaders } from "../../../src/domain/analytics/projection.js";
-import type { NflGame, WaiverAnalysis } from "../../../src/domain/analytics/types.js";
+import type { InjuryReport, NflGame, WaiverAnalysis } from "../../../src/domain/analytics/types.js";
 import { fixedClock, seededRng } from "../../../src/domain/clock.js";
-import type { NflRosterPlayer } from "../../../src/domain/crosswalk/types.js";
 import type { ScoringSettings } from "../../../src/domain/scoring/types.js";
 import {
   type FixtureData,
   fixtureReaders,
-  fixtureStamp,
   loadFixtureData,
 } from "../../backtest/helpers/fixture.js";
 import { fixtureLeague, kdefUniverse } from "../../backtest/helpers/league.js";
@@ -39,57 +38,49 @@ interface Case {
   readonly position: KdefPosition;
   readonly week: number;
   readonly now: string;
-  /** My starter, whom streaming over is decisive while the lines are there. */
+  /** My starter: he plays, yet streaming over him is decisive while the lines are there. */
   readonly starter: () => KdefCandidateInput;
 }
 
-const BOSWELL = "manual.p.00-0031136";
 const CASES: readonly Case[] = [
   {
-    // Boswell (PIT) on a reserve list: zero points, so any stream beats him
+    // Boswell (PIT) is Doubtful on the week-4 report: a few tenths of a point
     label: "K, week 4",
     position: "K",
     week: 4,
     now: "2026-09-30T12:00:00.000Z",
-    starter: () => mine((u) => u.player_key === BOSWELL),
+    starter: () => mine("K", "PIT"),
   },
   {
-    // KC is on bye in week 5
+    // MIA's defence hosts CIN with CIN's implied total set to 48
     label: "DEF, week 5",
     position: "DEF",
     week: 5,
     now: "2026-10-06T12:00:00.000Z",
-    starter: () => mine((u) => u.position === "DEF" && u.nfl_team === "KC"),
+    starter: () => mine("DEF", "MIA"),
   },
 ];
 
-function mine(pred: (u: KdefCandidateInput) => boolean): KdefCandidateInput {
-  const u = universe.find(pred);
+function mine(position: KdefPosition, team: string): KdefCandidateInput {
+  const u = universe.find((x) => x.position === position && x.nfl_team === team);
   if (u === undefined) throw new Error("fixture: starter not found");
   return { ...u, availability: "T", slot_class: "starter" };
 }
 
 /**
  * Fresh fixture readers (the schedules release checked an hour before `now`) whose games in
- * `dropLines` have no betting line; Boswell is on a reserve list.
+ * `dropLines` have no betting line; Boswell is Doubtful in week 4 and CIN's week-5 implied total
+ * at MIA is 48.
  */
 function readers(now: string, dropLines: ReadonlySet<string>): ProjectionReaders {
   const r = fixtureReaders(data);
   const at = new Date(Date.parse(now) - 3600 * 1000).toISOString();
-  const strip = (g: NflGame): NflGame => (dropLines.has(g.game_id) ? { ...g, lines: null } : g);
-  const boswell: NflRosterPlayer = {
-    gsis_id: "00-0031136",
-    season: 2026,
-    week: 4,
-    full_name: "Chris Boswell",
-    team: "PIT",
-    position: "K",
-    jersey_number: 9,
-    yahoo_id: null,
-    sleeper_id: null,
-    espn_id: null,
-    pfr_id: null,
-    status: "RES",
+  const edit = (g: NflGame): NflGame => {
+    if (dropLines.has(g.game_id)) return { ...g, lines: null };
+    if (g.week === 5 && g.home === "MIA" && g.lines !== null) {
+      return { ...g, lines: { ...g.lines, implied: { away: 48, home: 10 } } };
+    }
+    return g;
   };
   return {
     ...r,
@@ -99,17 +90,27 @@ function readers(now: string, dropLines: ReadonlySet<string>): ProjectionReaders
         const g = r.schedules.games(season, weeks);
         return g.stamp === null
           ? g
-          : {
-              rows: g.rows.map(strip),
-              stamp: { ...g.stamp, fetched_at: at, checked_at: at },
-            };
+          : { rows: g.rows.map(edit), stamp: { ...g.stamp, fetched_at: at, checked_at: at } };
       },
     },
-    rosters: {
-      latest: () => ({
-        rows: [boswell],
-        stamp: fixtureStamp("nflverse:roster_weekly", "2026-09-30T10:00:00.000Z"),
-      }),
+    injuries: {
+      reports: (season, week, ids) => {
+        const g = r.injuries.reports(season, week, ids);
+        if (g.stamp === null || season !== 2026 || week !== 4) return g;
+        const doubtful: InjuryReport = {
+          gsis_id: "00-0031136",
+          season: 2026,
+          week: 4,
+          nfl_team: "PIT",
+          report_status: "Doubtful",
+          practice: [],
+          primary_injury: "Hip",
+          secondary_injury: null,
+          as_of: g.stamp.as_of,
+        };
+        const want = ids === null || ids.includes(doubtful.gsis_id);
+        return { rows: want ? [...g.rows, doubtful] : g.rows, stamp: g.stamp };
+      },
     },
   };
 }
@@ -162,6 +163,7 @@ describe("QA-2-044 — no betting lines for the decision week", () => {
       const a = run(c, all);
       expect(a.rec.no_move, c.label).toBe(true);
       expect(a.rec.subjects.every((s) => s.role === "start")).toBe(true);
+      expect(a.rec.point_estimate, `${c.label}: the starter plays`).toBeGreaterThan(0);
       expect(
         texts(a).some((t) => t.startsWith(`no betting lines for week ${String(c.week)}`)),
       ).toBe(true);
@@ -170,6 +172,36 @@ describe("QA-2-044 — no betting lines for the decision week", () => {
       for (const cand of a.candidates) expect(market(a, cand.player_key, c.position)).toBeNull();
       expect(recTextsFit(a.rec)).toBe(true);
     }
+  });
+
+  it("a starter who cannot score is an empty slot: filled without lines (absent or stale), named", () => {
+    const def5 = CASES.find((c) => c.position === "DEF");
+    if (def5 === undefined) throw new Error("no DEF case");
+    const bye: Case = { ...def5, starter: () => mine("DEF", "KC") }; // KC: week-5 bye
+    const all = new Set(weekGames(5).map((g) => g.game_id));
+    const a = run(bye, all);
+    expect(a.rec.no_move).toBe(false);
+    expect(a.rec.subjects.map((s) => s.role)).toEqual(["stream", "drop"]);
+    expect(texts(a).some((t) => t.startsWith("no betting lines for week 5"))).toBe(true);
+    // the same with lines omitted as stale (the release last checked a week earlier, QA-1-004)
+    const stale = analyzeKdef({
+      positions: ["DEF"],
+      season: 2026,
+      week: 5,
+      look_ahead: 0,
+      universe,
+      current: [mine("DEF", "KC")],
+      availability_known: false,
+      settings,
+      readers: fixtureReaders(data),
+      clock: fixedClock(bye.now),
+      rng: seededRng(1),
+    }).analysis;
+    expect(stale.rec.no_move).toBe(false);
+    expect(stale.rec.assumptions.some((x) => x.text.startsWith("betting lines omitted"))).toBe(
+      true,
+    );
+    expect(texts(stale).some((t) => t.startsWith("no betting lines for week 5"))).toBe(true);
   });
 
   it("an empty slot is still filled, with the missing lines named", () => {

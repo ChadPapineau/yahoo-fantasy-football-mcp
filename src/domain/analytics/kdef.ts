@@ -274,7 +274,7 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
   // the market driver (QA-2-044; plan 07 §2: a missing driver is named, never silently omitted): a
   // decision-week game without a betting line — not published yet, off the board, or omitted as
   // stale — ranks its K/DEF on trailing points only, and such a K/DEF is never called as a stream
-  // over a starter
+  // over a starter who plays (a starter who cannot score this week is an empty slot)
   const linesOmitted = out.lines_omitted || first.lines_omitted;
   const unpricedGames = weekGames.filter(
     (g) => g.season === req.season && g.week === req.week && (linesOmitted || g.lines === null),
@@ -285,7 +285,7 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
   const assumptions: Assumption[] = [
     unpricedGames.length > 0 && unpricedGames.length === nGames
       ? A(
-          `no betting lines for week ${wk}: K/DEF are dominated by the implied totals, so this ranking is trailing points only and no stream is called over a current starter`,
+          `no betting lines for week ${wk}: K/DEF are dominated by the implied totals, so this ranking is trailing points only and no stream is called over a starter who plays this week`,
           `week ${wk}'s lines are published (ff refresh nflverse)`,
         )
       : A(
@@ -303,7 +303,7 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
     const more = unpricedTeams.length - shown.length;
     assumptions.push(
       A(
-        `no betting line for ${String(unpricedGames.length)} of week ${wk}'s ${String(nGames)} games (${shown.join(", ")}${more > 0 ? ` and ${String(more)} more` : ""}): their K/DEF rank on trailing points only and are not called as a stream`,
+        `no betting line for ${String(unpricedGames.length)} of week ${wk}'s ${String(nGames)} games (${shown.join(", ")}${more > 0 ? ` and ${String(more)} more` : ""}): their K/DEF rank on trailing points only, never a stream over a starter who plays`,
         `week ${wk}'s lines for those games are published`,
       ),
     );
@@ -439,8 +439,9 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
   const beatsHold = (x: Scored): boolean => x.delta === null || x.delta > KDEF.holdMargin;
   // executable: the candidate has a known lock still ahead (an unknown kickoff has no deadline)
   const executable = (x: Scored): boolean => lockOf(x.p.target.nfl_team) !== null;
-  // priced: its decision-week game has a betting line — a stream over a starter needs the market
-  // driver (QA-2-044); an empty slot is filled either way
+  // priced: its decision-week game has a betting line — a stream over a starter who plays needs the
+  // market driver (QA-2-044); an empty slot, or a starter who cannot score (a bye, ruled out), is
+  // filled either way
   const priced = (x: Scored): boolean => {
     const w0 = at(x.p.weeks, 0);
     return w0.game === null || w0.implied_total !== null;
@@ -448,7 +449,10 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
   const pick =
     order.find(
       (x) =>
-        beatsHold(x) && !straddles(vsHold(x)) && executable(x) && (x.cur === null || priced(x)),
+        beatsHold(x) &&
+        !straddles(vsHold(x)) &&
+        executable(x) &&
+        (x.cur === null || meanOf(x.cur, 0) <= 0 || priced(x)),
     ) ?? null;
   const streamIt = pick !== null;
   if (!streamIt && top?.cur != null && beatsHold(top)) {
