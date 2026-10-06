@@ -46,7 +46,7 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.2.0",
-    "@types/node": "24.19.0",
+    "@types/node": "26.6.4",
     "@vitest/coverage-v8": "5.0.3",
     "eslint": "10.11.0",
     "eslint-plugin-import-x": "4.17.1",
