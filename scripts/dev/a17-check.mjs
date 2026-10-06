@@ -8,14 +8,20 @@
 // nonce. Zero dependencies (Node built-ins only), like scan-secrets.mjs.
 //
 // What it runs (argument array, never a shell string; stdin closed; hard timeout; cwd = a fresh
-// temp dir, so no project instructions load):
+// temp dir, so no project files or project instructions load):
 //   claude -p "<prompt>" --mcp-config <tmp>/mcp.json --strict-mcp-config
 //     --allowedTools mcp__ffx__ff_debug_echo --max-turns 4 --output-format stream-json --verbose
+//     --no-session-persistence
+// --allowedTools pre-approves the one tool; it does not remove Claude Code's built-in tools.
+// User-level configuration still applies (~/.claude/settings.json, its hooks and plugins,
+// ~/.claude/CLAUDE.md). --no-session-persistence keeps the session record out of
+// ~/.claude/projects, which the temp-dir cleanup would not reach.
 // where <tmp>/mcp.json is {"mcpServers":{"ffx":{"command":<this node>,"args":[<repo>/tests/smoke/fixture-serve.mjs]}}}.
 // fixture-serve.mjs starts the BUILT server (dist/cli.js serve) in fixture mode over its own
 // private temp home, config and cache dirs — this script never reads the owner's league config,
 // and nothing it starts does. Claude Code and the server run in their own process group, which is
-// killed on timeout, on Ctrl-C and after the run (no orphaned server).
+// stopped on timeout, on Ctrl-C/SIGTERM/SIGHUP and after the run: SIGTERM, then SIGKILL 3 s later
+// for anything still holding the output pipes (no orphaned server).
 //
 // The decision (analyseRun, pure and unit-tested): only the `tool_result` blocks of
 // `message.content` count — that is what the client hands the model. The `tool_use_result` field
@@ -24,17 +30,19 @@
 // model's answer, never as evidence of visibility.
 //
 // Usage:
-//   node scripts/dev/a17-check.mjs [--timeout <seconds>] [--claude <path>] [--save <file>]
-//   node scripts/dev/a17-check.mjs --from <file>     re-analyse a saved transcript; runs nothing
+//   scripts/dev/with-node.sh node scripts/dev/a17-check.mjs [--timeout <seconds>] [--claude <path>] [--save <file>]
+//   scripts/dev/with-node.sh node scripts/dev/a17-check.mjs --from <file>   re-analyse a saved transcript; runs nothing
 //     --timeout   hard limit for the whole run (default 180 s)
 //     --claude    the Claude Code CLI to run (default: `claude` on PATH)
-//     --save      also write Claude Code's raw stream-json output to <file> (mode 0600)
+//     --save      also write Claude Code's raw stream-json output to <file> (mode 0600, set even on
+//                 an existing file); a file that cannot be opened is refused before anything runs
 // Needs a build first (dist/cli.js) and a logged-in Claude Code (`claude auth login`).
 //
 // Output: on a verdict, one line on stdout plus the exact line to record in docs/HANDOFF.md
 // "Build facts", e.g.  A17 Claude Code 2.1.0: structuredContent visible to the model: no (2026-10-06)
 // Exit: 0 verdict reached (yes OR no — the printed line says which) · 1 unexpected internal error ·
-// 2 setup/usage (bad option, dist/cli.js missing, the claude CLI not found, unreadable --from file) ·
+// 2 setup/usage (bad option, dist/cli.js missing, the claude CLI not found, unreadable --from file,
+// unwritable --save file) ·
 // 3 Claude Code not logged in or its login expired (run `claude auth login`, then rerun) ·
 // 4 the MCP server failed to connect, or does not list ff_debug_echo · 5 the tool was never called,
 // or its call failed · 6 timeout · 7 malformed or inconclusive output · 130 interrupted (Ctrl-C,
@@ -42,9 +50,12 @@
 import { execFile, spawn } from "node:child_process";
 import {
   chmodSync,
+  closeSync,
   existsSync,
+  fchmodSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -143,6 +154,7 @@ export function buildClaudeArgs(o) {
     "--output-format",
     "stream-json",
     "--verbose",
+    "--no-session-persistence",
   ];
 }
 
@@ -462,7 +474,10 @@ export function analyseRun(input) {
       notes.push("the model did not repeat the nonce it was shown; the verdict rests on the tool result");
     if (!visible && modelTokens.length > 0)
       notes.push(`the model's answer holds ${modelTokens.join(", ")}, which no tool result showed it (an invented value)`);
-    if (resultIsError) notes.push(`the run ended with an error after the tool call: ${oneLine(resultText ?? String(result.subtype))}`);
+    if (resultIsError)
+      notes.push(
+        `the run ended with an error after the tool call: ${oneLine(resultText !== null && resultText.trim() !== "" ? resultText : String(result.subtype))}`,
+      );
     return visible
       ? done("visible", `the tool result Claude Code handed the model holds the nonce${modelRepeated ? ", and the model repeated it" : ""}`, true)
       : done("not-visible", "the tool result Claude Code handed the model holds no nonce (only the text block)", false);
@@ -586,9 +601,11 @@ const STOP_SIGNALS = /** @type {const} */ (["SIGINT", "SIGTERM", "SIGHUP"]);
 
 /**
  * Runs the CLI with stdin closed, in its own process group, under a hard timeout. At the limit,
- * or on SIGINT/SIGTERM/SIGHUP to this script, the group gets SIGTERM (the server shuts down
- * cleanly on it) and SIGKILL 3 s later; when the CLI exits the group gets SIGTERM too, so nothing
- * it started outlives the check.
+ * on SIGINT/SIGTERM/SIGHUP to this script, and when the CLI exits, the group gets SIGTERM (the
+ * server shuts down cleanly on it) and SIGKILL 3 s later unless every process holding the output
+ * pipes is gone by then. So nothing that holds the pipes outlives the check, and a completed run
+ * whose leftover child ignores SIGTERM still gets its verdict about 3 s after the CLI exits, not
+ * at the limit. A process that closes the pipes and ignores SIGTERM is not waited for.
  * @param {{ bin: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number }} o
  * @returns {Promise<RunResult>}
  */
@@ -600,6 +617,7 @@ export function runClaude(o) {
     let stderr = "";
     let timedOut = false;
     let interrupted = false;
+    let exited = false;
     let settled = false;
     /** @type {ReturnType<typeof setTimeout> | undefined} */
     let hardKill;
@@ -630,6 +648,8 @@ export function runClaude(o) {
       stop();
     };
     const timer = setTimeout(() => {
+      // a CLI that already exited finished its run: a leftover child being stopped is no timeout
+      if (exited) return;
       timedOut = true;
       stop();
     }, o.timeoutMs);
@@ -656,10 +676,12 @@ export function runClaude(o) {
       if (child.pid === undefined)
         finish({ stdout: "", stderr, exitCode: null, timedOut: false, interrupted, spawnError: e.message });
     });
-    // the CLI is gone: whatever it started (the MCP server) gets SIGTERM now rather than holding
-    // the pipes open until the time limit; 'close' follows once every holder has exited
+    // the CLI is gone: whatever it started (the MCP server) gets SIGTERM now, and SIGKILL 3 s
+    // later, rather than holding the pipes open until the time limit; 'close' follows once every
+    // holder has exited
     child.on("exit", () => {
-      killGroup("SIGTERM");
+      exited = true;
+      stop();
     });
     child.on("close", (code) => {
       finish({ stdout: Buffer.concat(out).toString("utf8"), stderr, exitCode: code, timedOut, interrupted });
@@ -681,8 +703,8 @@ function cliVersion(bin, env) {
   });
 }
 
-const USAGE = `usage: node scripts/dev/a17-check.mjs [--timeout <seconds>] [--claude <path>] [--save <file>]
-       node scripts/dev/a17-check.mjs --from <file>
+const USAGE = `usage: scripts/dev/with-node.sh node scripts/dev/a17-check.mjs [--timeout <seconds>] [--claude <path>] [--save <file>]
+       scripts/dev/with-node.sh node scripts/dev/a17-check.mjs --from <file>
 Runs Claude Code headlessly against the fixture-mode server and reports whether it shows the model
 a tool result's structuredContent (plan 10 A17). Needs dist/cli.js (build first) and a logged-in
 Claude Code (claude auth login). Exit codes: see the header of this file.
@@ -776,6 +798,20 @@ export async function main(argv, deps = {}) {
         err(`a17-check: ${rel} is missing: ${fix}\n`);
         return EXIT.SETUP;
       }
+    // --save is opened before the run, so a bad path costs nothing; the mode is set on the open
+    // file, so an existing file becomes 0600 too
+    /** @type {number | undefined} */
+    let saveFd;
+    if (opts.save !== undefined) {
+      try {
+        saveFd = openSync(opts.save, "w", 0o600);
+        fchmodSync(saveFd, 0o600);
+      } catch (e) {
+        if (saveFd !== undefined) closeSync(saveFd);
+        err(`a17-check: cannot write --save ${opts.save}: ${e instanceof Error ? e.message : String(e)}\n`);
+        return EXIT.SETUP;
+      }
+    }
     const tmp = realpathSync(mkdtempSync(path.join(tmpdir(), "ff-a17-")));
     try {
       chmodSync(tmp, 0o700);
@@ -791,16 +827,24 @@ export async function main(argv, deps = {}) {
         env,
         timeoutMs: opts.timeoutS * 1000,
       });
+      if (saveFd !== undefined) {
+        // a failed save is reported, never allowed to cost the verdict
+        try {
+          writeFileSync(saveFd, run.stdout);
+        } catch (e) {
+          err(`a17-check: could not save the transcript to ${String(opts.save)}: ${e instanceof Error ? e.message : String(e)}\n`);
+        }
+      }
       if (run.interrupted) {
         err("a17-check: interrupted\n");
         return EXIT.INTERRUPTED;
       }
-      if (opts.save !== undefined) writeFileSync(opts.save, run.stdout, { mode: 0o600 });
       analysis = analyseRun({ ...run, timeoutS: opts.timeoutS });
       // a verdict without an init event still needs a version for the HANDOFF line
       if (analysis.visible !== null && analysis.version === null)
         analysis.version = await cliVersion(opts.claude, env);
     } finally {
+      if (saveFd !== undefined) closeSync(saveFd);
       rmSync(tmp, { recursive: true, force: true });
     }
   }
