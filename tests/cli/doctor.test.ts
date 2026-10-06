@@ -4,6 +4,7 @@
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   rmSync,
   symlinkSync,
@@ -562,6 +563,142 @@ describe("rows 8–10 — store, datasets, journal", () => {
     ] as const)
       expect(checkDatasets(makeIo(s, { clock }), c, ex).status).toBe("skip");
   });
+
+  // Real write-protected files and directories, not a synthetic error: node:sqlite opens a 0400
+  // store read-only WITHOUT an error, so only a check of the files themselves can see it.
+  const asRoot = typeof process.getuid === "function" && process.getuid() === 0;
+  const WRITTEN: readonly { readonly rel: string; readonly dir: boolean }[] = [
+    { rel: "store.sqlite", dir: false },
+    { rel: "ds", dir: true },
+    { rel: "backups", dir: true },
+    { rel: "tmp", dir: true },
+  ];
+  /** Makes every path `refresh` writes exist, as a refresh + backup + an interrupted run leave them. */
+  function everyWrittenPath(s: Sandbox): void {
+    for (const w of WRITTEN) {
+      const p = path.join(s.cacheDir, w.rel);
+      if (w.dir) mkdirSync(p, { recursive: true, mode: 0o700 });
+      else if (!existsSync(p)) writeFileSync(p, "", { mode: 0o600 });
+    }
+  }
+  it.skipIf(asRoot)(
+    "row 8: any read-only store file or written subdirectory fails with its name and a chmod remedy, never 'pass quick_check' [QA-1-053]",
+    () => {
+      for (const w of WRITTEN) {
+        for (const mode of w.dir ? [0o500, 0o555, 0o100] : [0o400, 0o444, 0o500]) {
+          const s = refreshed();
+          everyWrittenPath(s);
+          const c = cfg(s);
+          const target = path.join(s.cacheDir, w.rel);
+          chmodSync(target, mode);
+          try {
+            const ex = openExistingStore(c, fixedClock(REFRESHED_AT), log(s));
+            try {
+              const r8 = checkStore(c, ex);
+              const label = `${w.rel} ${mode.toString(8)}`;
+              expect(r8.status, label).toBe("fail");
+              expect(r8.message, label).not.toContain("pass quick_check");
+              expect(`${r8.message}\n${r8.details.join("\n")}`, label).toContain(target);
+              expect(r8.fix, label).toMatch(/ff doctor --fix --yes/);
+              expect(r8.fix, label).not.toMatch(/move it aside|refresh all/);
+            } finally {
+              if (ex.kind === "open") ex.store.close();
+            }
+          } finally {
+            chmodSync(target, w.dir ? 0o700 : 0o600);
+            sb?.cleanup();
+            sb = undefined;
+          }
+        }
+      }
+    },
+  );
+
+  it.skipIf(asRoot)(
+    "control: the same layout at 0600/0700 passes row 8; --fix --yes repairs a read-only store and ds/ [QA-1-053]",
+    async () => {
+      const s = refreshed();
+      everyWrittenPath(s);
+      const c = cfg(s);
+      const ex = openExistingStore(c, fixedClock(REFRESHED_AT), log(s));
+      try {
+        expect(checkStore(c, ex).status).toBe("ok");
+      } finally {
+        if (ex.kind === "open") ex.store.close();
+      }
+      chmodSync(storePath(s.cacheDir), 0o400);
+      chmodSync(path.join(s.cacheDir, "ds"), 0o500);
+      const io = makeIo(s, { env: fixtureEnv(), clock: fixedClock("2026-09-30T18:10:00.000Z") });
+      const r = await runDoctor(io, { json: true, online: false, fix: true, yes: true });
+      expect(io.err.text).toContain(`fixed: chmod 600 ${storePath(s.cacheDir)}`);
+      expect(io.err.text).toContain(`fixed: chmod 700 ${path.join(s.cacheDir, "ds")}`);
+      expect(byId(r.rows, "store").status).toBe("ok");
+    },
+  );
+
+  it.skipIf(asRoot)(
+    "end to end: whenever a refresh or backup cannot write, doctor row 8 has already failed; a read-only -wal/-shm heals itself [QA-1-053]",
+    async () => {
+      const at = fixedClock("2026-09-30T18:10:00.000Z");
+      const cases: readonly { rel: string; mode: number; run: string[] }[] = [
+        {
+          rel: "store.sqlite",
+          mode: 0o400,
+          run: ["refresh", "nflverse:injuries", "--seasons", "2026", "--force"],
+        },
+        {
+          rel: "ds",
+          mode: 0o500,
+          run: ["refresh", "nflverse:injuries", "--seasons", "2026", "--force"],
+        },
+        {
+          rel: "tmp",
+          mode: 0o500,
+          run: ["refresh", "nflverse:injuries", "--seasons", "2026", "--force"],
+        },
+        { rel: "backups", mode: 0o500, run: ["backup"] },
+        {
+          rel: "store.sqlite-wal",
+          mode: 0o400,
+          run: ["refresh", "nflverse:injuries", "--seasons", "2026", "--force"],
+        },
+        {
+          rel: "store.sqlite-shm",
+          mode: 0o400,
+          run: ["refresh", "nflverse:injuries", "--seasons", "2026", "--force"],
+        },
+      ];
+      for (const k of cases) {
+        const s = refreshed();
+        everyWrittenPath(s);
+        for (const f of ["store.sqlite-wal", "store.sqlite-shm"]) {
+          const p = path.join(s.cacheDir, f);
+          if (!existsSync(p)) writeFileSync(p, "", { mode: 0o600 });
+        }
+        const target = path.join(s.cacheDir, k.rel);
+        chmodSync(target, k.mode);
+        try {
+          const r = await runDoctor(makeIo(s, { env: fixtureEnv(), clock: at }), {
+            json: true,
+            online: false,
+            fix: false,
+            yes: false,
+          });
+          const r8 = byId(r.rows, "store");
+          const rc = await main(k.run, makeIo(s, { env: fixtureEnv(), clock: at }));
+          // the property: a write that fails was announced by row 8, and row 8 never cries wolf
+          expect(r8.status === "fail", `${k.rel} ${k.mode.toString(8)} rc=${String(rc)}`).toBe(
+            rc !== EXIT.OK,
+          );
+          if (k.rel === "store.sqlite") expect(r8.message).toMatch(/read-only/);
+        } finally {
+          if (existsSync(target)) chmodSync(target, k.rel.includes(".") ? 0o600 : 0o700);
+          sb?.cleanup();
+          sb = undefined;
+        }
+      }
+    },
+  );
 
   it("--fix --yes restores 0700 (u+w) on our own unwritable cache dir [QA-1-053]", async () => {
     const s = refreshed();
