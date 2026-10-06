@@ -8,15 +8,7 @@
 // sh script) that records what it was handed and replays a transcript.
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import {
-  chmodSync,
-  existsSync,
-  globSync,
-  mkdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import fc from "fast-check";
@@ -499,6 +491,23 @@ describe("analyseRun — failures are classified, never a verdict", () => {
     expect(deniedOther.notes.join(" ")).toContain("ToolSearch");
   });
 
+  it("a result subtype other than success is an error even when is_error is false [QA-2-018]", () => {
+    const sub = { subtype: "error_max_turns", is_error: false };
+    const before = analyseRun({ stdout: jsonl(init(), result("", sub)) });
+    expect(before.outcome).toBe("no-tool-call");
+    expect(before.detail).toContain(
+      "ended with an error (error_max_turns) before the tool was called",
+    );
+    const n = hex12();
+    const after = analyseRun({
+      stdout: jsonl(init(), call(), toolResult(withStructured(n)), result("", sub)),
+    });
+    expect(after.outcome).toBe("visible");
+    expect(after.notes.join(" ")).toContain(
+      "the run ended with an error after the tool call: error_max_turns",
+    );
+  });
+
   it("timeout (exit 6) wins over partial evidence, which is kept as a note", () => {
     const n = hex12();
     const stdout = jsonl(init(), call(), toolResult(withStructured(n)));
@@ -603,7 +612,7 @@ describe("the MCP config, the command and the report", () => {
     expect(existsSync(path.join(ROOT, "tests", "smoke", "fixture-serve.mjs"))).toBe(true);
   });
 
-  it("the claude command: print mode, strict MCP config, only ff_debug_echo allowed, stream-json", () => {
+  it("the claude command: print mode, strict MCP config, only ff_debug_echo pre-approved, stream-json, no session record", () => {
     const args = buildClaudeArgs({ configPath: "/tmp/x/mcp.json" });
     expect(args).toEqual([
       "-p",
@@ -618,6 +627,8 @@ describe("the MCP config, the command and the report", () => {
       "--output-format",
       "stream-json",
       "--verbose",
+      // the session record would land in ~/.claude/projects, outside the temp dir (QA-2-016)
+      "--no-session-persistence",
     ]);
     // the CLI's --mcp-config and --allowedTools are variadic: each must be followed by an option
     for (const opt of ["--mcp-config", "--allowedTools"]) {
@@ -705,21 +716,24 @@ describe("the MCP config, the command and the report", () => {
 const STUB = `#!/bin/sh
 rec="$A17_STUB_DIR"
 if [ "$1" = "--version" ]; then echo "${VERSION} (Claude Code)"; exit 0; fi
-if [ "$A17_STUB_MODE" = "hang" ]; then
-  # a grandchild in the same process group, started first so a loaded machine cannot race it
-  sleep 60 &
-  echo $! > "$rec/child.pid.tmp" && mv "$rec/child.pid.tmp" "$rec/child.pid"
-  wait
-  exit 0
-fi
-if [ "$A17_STUB_MODE" = "linger" ]; then
-  # exits normally but leaves a grandchild holding the output pipes (a server that outlives it)
-  sleep 60 &
-  echo $! > "$rec/child.pid.tmp" && mv "$rec/child.pid.tmp" "$rec/child.pid"
-  cat "$rec/transcript.jsonl"
-  exit 0
-fi
 pwd -P > "$rec/cwd.txt"
+echo $$ > "$rec/stub.pid"
+case "$A17_STUB_MODE" in
+  hang|linger)
+    # a grandchild in the same process group, holding the output pipes; started first so a
+    # loaded machine cannot race it
+    sleep 60 &
+    echo $! > "$rec/child.pid.tmp" && mv "$rec/child.pid.tmp" "$rec/child.pid" ;;
+  hang-hard|linger-hard)
+    # the same, but it ignores SIGTERM (a server slow to shut down): only SIGKILL ends it
+    ( trap '' TERM; exec sleep 20 ) &
+    echo $! > "$rec/child.pid.tmp" && mv "$rec/child.pid.tmp" "$rec/child.pid" ;;
+esac
+case "$A17_STUB_MODE" in
+  hang|hang-hard) wait; exit 0 ;;
+  # exits normally, leaving the grandchild behind (a server that outlives the CLI)
+  linger|linger-hard) cat "$rec/transcript.jsonl"; exit 0 ;;
+esac
 for a in "$@"; do printf '%s\\n' "$a"; done > "$rec/args.txt"
 prev=""
 for a in "$@"; do
@@ -775,6 +789,20 @@ function alive(pid: number): boolean {
   const r = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" });
   const stat = r.stdout.trim();
   return stat !== "" && !stat.startsWith("Z");
+}
+
+/** The pid the stub recorded in `<rec>/<file>`. */
+function pidIn(rec: string, file: string): number {
+  const pid = Number(readFileSync(path.join(rec, file), "utf8").trim());
+  if (!Number.isInteger(pid) || pid <= 1) throw new Error(`bad pid in ${file}`);
+  return pid;
+}
+
+/** Whether `pid` is gone within `ms` (a killed process may take a moment to be reaped). */
+async function gone(pid: number, ms = 5000): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  while (alive(pid) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+  return !alive(pid);
 }
 
 describe("main() end to end with a stub claude (the real CLI is never run)", () => {
@@ -881,28 +909,82 @@ describe("main() end to end with a stub claude (the real CLI is never run)", () 
     expect(alive(pid)).toBe(false);
   });
 
-  it("interrupted (SIGHUP here; SIGINT and SIGTERM alike): exit 130, the group stopped, the temp dir removed", async () => {
+  it("a child that ignores SIGTERM after the CLI exits gets SIGKILL: the verdict comes well before the limit [QA-2-014]", async () => {
     const h = harness();
-    const before = process.listenerCount("SIGHUP");
-    const tmpCount = () =>
-      globSync("ff-a17-*", { cwd: tmpdir() }).filter((d) => !d.startsWith("ff-a17-test-")).length;
-    const dirsBefore = tmpCount();
-    const pidFile = path.join(h.rec, "child.pid");
-    const pending = h.go(["--timeout", "60"], { A17_STUB_MODE: "hang" });
-    const deadline = Date.now() + 10_000;
-    while (!existsSync(pidFile) && Date.now() < deadline)
-      await new Promise((r) => setTimeout(r, 20));
-    expect(process.listenerCount("SIGHUP")).toBe(before + 1);
-    process.emit("SIGHUP"); // runs the listeners only; no real signal reaches the test worker
-    expect(await pending).toBe(EXIT.INTERRUPTED);
-    expect(h.err.join("")).toContain("interrupted");
-    expect(process.listenerCount("SIGHUP")).toBe(before);
-    expect(tmpCount()).toBe(dirsBefore);
-    const pid = Number(readFileSync(pidFile, "utf8").trim());
-    const gone = Date.now() + 5000;
-    while (alive(pid) && Date.now() < gone) await new Promise((r) => setTimeout(r, 50));
-    expect(alive(pid)).toBe(false);
+    const n = hex12();
+    h.transcript(run(TEXT_ONLY, "NO NONCE", record(n)));
+    const t0 = Date.now();
+    const code = await h.go(["--timeout", "20"], { A17_STUB_MODE: "linger-hard" });
+    expect(code).toBe(EXIT.ANSWERED);
+    expect(Date.now() - t0).toBeLessThan(12_000);
+    expect(await gone(pidIn(h.rec, "child.pid"))).toBe(true);
   });
+
+  it("a completed run is not a timeout when the limit passes while its leftover child is being stopped [QA-2-014]", async () => {
+    const h = harness();
+    const n = hex12();
+    h.transcript(run(TEXT_ONLY, "NO NONCE", record(n)));
+    // the CLI exits at once; the SIGTERM-ignoring child holds the pipes ~3 s, past the 2 s limit
+    const code = await h.go(["--timeout", "2"], { A17_STUB_MODE: "linger-hard" });
+    expect(code).toBe(EXIT.ANSWERED);
+    expect(h.out.join("")).toContain("structuredContent visible to the model: no");
+    expect(await gone(pidIn(h.rec, "child.pid"))).toBe(true);
+  });
+
+  it("a hung run whose child ignores SIGTERM ends about 3 s after the limit, the child killed [QA-2-014]", async () => {
+    const h = harness();
+    const t0 = Date.now();
+    const code = await h.go(["--timeout", "2"], { A17_STUB_MODE: "hang-hard" });
+    expect(code).toBe(EXIT.TIMEOUT);
+    expect(Date.now() - t0).toBeLessThan(2_000 + 3_000 + 4_000);
+    expect(await gone(pidIn(h.rec, "child.pid"))).toBe(true);
+  });
+
+  it.each(["SIGINT", "SIGTERM", "SIGHUP"] as const)(
+    "interrupted by %s: exit 130, the group stopped, this run's temp dir removed, the listeners gone [QA-2-012, QA-2-013]",
+    async (sig) => {
+      const h = harness();
+      const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+      const before = new Map(signals.map((s) => [s, process.listeners(s)]));
+      const state = { settled: false }; // set by the promise, so not narrowed to its initial value
+      const pending = h.go(["--timeout", "60"], { A17_STUB_MODE: "hang" }).finally(() => {
+        state.settled = true;
+      });
+      try {
+        const pidFile = path.join(h.rec, "child.pid");
+        const deadline = Date.now() + 10_000;
+        while (!existsSync(pidFile) && Date.now() < deadline)
+          await new Promise((r) => setTimeout(r, 20));
+        // every stop signal is handled while the CLI runs, each by exactly one new listener
+        for (const s of signals)
+          expect(process.listenerCount(s), s).toBe((before.get(s) ?? []).length + 1);
+        const added = process.listeners(sig).filter((l) => !(before.get(sig) ?? []).includes(l));
+        expect(added).toHaveLength(1);
+        // only the check's own listener runs: no real signal, and no other handler in this worker
+        (added[0] as (s: NodeJS.Signals) => void)(sig);
+        expect(await pending).toBe(EXIT.INTERRUPTED);
+        expect(h.err.join("")).toContain("interrupted");
+        for (const s of signals)
+          expect(process.listenerCount(s), s).toBe((before.get(s) ?? []).length);
+        // this run's own temp dir (the stub's cwd is <tmp>/work), not a count of every ff-a17-* dir
+        const cwd = readFileSync(path.join(h.rec, "cwd.txt"), "utf8").trim();
+        expect(path.basename(path.dirname(cwd))).toMatch(/^ff-a17-/);
+        expect(existsSync(path.dirname(cwd))).toBe(false);
+        expect(await gone(pidIn(h.rec, "child.pid"))).toBe(true);
+        expect(await gone(pidIn(h.rec, "stub.pid"))).toBe(true);
+      } finally {
+        // a failed assertion must not leave the run behind: end the stub's group, then wait for it
+        if (!state.settled) {
+          try {
+            process.kill(-pidIn(h.rec, "stub.pid"), "SIGKILL");
+          } catch {
+            // already gone
+          }
+          await pending.catch(() => undefined);
+        }
+      }
+    },
+  );
 
   it("--save writes the raw transcript (0600); --from re-analyses it without starting anything", async () => {
     const h = harness();
@@ -919,6 +1001,29 @@ describe("main() end to end with a stub claude (the real CLI is never run)", () 
     expect(again.out.join("")).toContain("visible to the model: yes (2026-10-06)");
     expect(existsSync(path.join(again.rec, "args.txt"))).toBe(false);
     expect(await again.go(["--from", path.join(again.dir, "missing.jsonl")])).toBe(EXIT.SETUP);
+  });
+
+  it("--save into a missing directory is refused before the CLI starts (exit 2) [QA-2-015]", async () => {
+    const h = harness();
+    h.transcript(run(TEXT_ONLY, "NO NONCE"));
+    const target = path.join(h.dir, "no-such-dir", "t.jsonl");
+    expect(await h.go(["--save", target])).toBe(EXIT.SETUP);
+    expect(h.err.join("")).toContain("cannot write --save");
+    expect(existsSync(path.join(h.rec, "args.txt"))).toBe(false);
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("--save onto an existing 0644 file leaves it 0600 with the transcript [QA-2-015]", async () => {
+    const h = harness();
+    const n = hex12();
+    const text = run(withStructured(n), `NONCE ${n}`);
+    h.transcript(text);
+    const saved = path.join(h.dir, "existing.jsonl");
+    writeFileSync(saved, "old contents\n", { mode: 0o644 });
+    chmodSync(saved, 0o644);
+    expect(await h.go(["--save", saved])).toBe(EXIT.ANSWERED);
+    expect(readFileSync(saved, "utf8")).toBe(text);
+    expect(statSync(saved).mode & 0o777).toBe(0o600);
   });
 
   it("a missing CLI is a setup error (exit 2), and a bad option prints the usage", async () => {
