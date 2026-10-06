@@ -242,6 +242,7 @@ Every tool below carries **decision · why · alternative · what would change i
 - Output `data`: `{ p_win, interval: [lo, hi], mu_m, sigma_m, mu_o, sigma_o, cov, method, live: { players_final[], players_live[]: { player_key, points_so_far, fraction_remaining }, players_pending[], points_so_far: { me, opp } } | null, yahoo_cross_check: { win_probability, team_projected_points: { me, opp } }, actionable_slots[]: { slot, lock_at }, season: { p_playoffs, p_bye: number|null, p_alive_by_week[]: { week, p }, seed_distribution[], tiebreak_note } | null, rec: Rec }` + `meta.provisional`.
 - Method: 05 §11.1–11.4 (normal vs MC, live conditioning, season sim ≥ 10 000 paths), §14.5. Data: A4, B1 (both), E1, A3 + D3 (season).
 - **Points-only leagues (QA-2-043, 2026-10-06).** A league whose `scoring_type` is not head-to-head has no opponent to beat: E3 answers `NOT_FOUND` with a hint that says so.
+- **My unmatched starter (QA-2-046, 2026-10-06).** When one of my starting seats is held by a player the crosswalk cannot match, my total is unknown: E3 answers `NOT_FOUND` with a hint naming the fix (the line's name, team or `gsis_id`; `ff_get_status` lists the unmatched players) rather than scoring the seat 0, as E2 withholds P(win) for the same seat (QA-2-039) and as an incomplete opponent is refused (QA-1-043).
 - Token: 3 000 / 6 000.
 - D/W/A/C: one tool, three modes · the three share the same simulator and correlation table · three tools · median-score leagues (`uses_median_score`) add a second "opponent" — a field, not a new tool.
 

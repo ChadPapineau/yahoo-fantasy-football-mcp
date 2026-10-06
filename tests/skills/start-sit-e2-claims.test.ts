@@ -120,9 +120,10 @@ describe("E3 in a league without head-to-head matchups (QA-2-043)", () => {
   });
 });
 
-describe("E2 with a starter the NFL data does not match (QA-2-039)", () => {
+describe("E2 and E3 with a starter the NFL data does not match (QA-2-039, QA-2-046)", () => {
   let sw: SkillWorld;
   let e2: Json;
+  let e3: Called;
   beforeAll(async () => {
     // week 3 has an opponent in the fixture, so only the unmatched seat can withhold P(win)
     sw = await skillWorld(T0, [
@@ -132,6 +133,7 @@ describe("E2 with a starter the NFL data does not match (QA-2-039)", () => {
       ],
     ]);
     e2 = dataOf(await sw.call("ff_analyze_lineup", { week: 3 }));
+    e3 = await sw.call("ff_analyze_matchup", { week: 3 });
   }, 120_000);
   afterAll(async () => {
     await sw.close();
@@ -145,16 +147,29 @@ describe("E2 with a starter the NFL data does not match (QA-2-039)", () => {
     ).toBe(true);
   });
 
+  it("E3 refuses with NOT_FOUND rather than score the seat 0, and the cheat-sheet and start-sit say so", () => {
+    expect(e3.code).toBe("NOT_FOUND");
+    expect(errorOf(e3).hint).toMatch(/matches no NFL player/);
+    expect(E3_ROW).toMatch(/`NOT_FOUND`[^|]*does not match/);
+    const claim = sentences(START_SIT).find(
+      (s) => s.includes("ff_analyze_matchup") && /does not match|unmatched/.test(s),
+    );
+    expect(claim).toBeDefined();
+    expect(claim).toMatch(/NOT_FOUND|refuses/);
+  });
+
   it("start-sit and the cheat-sheet say the seat is kept, named in rec.assumptions, P(win) withheld", () => {
     for (const [label, text] of [
       ["start-sit", START_SIT],
       ["cheat-sheet", E2_TEXT],
     ] as const) {
       const claim = sentences(text).find(
-        (s) => /does not match|unmatched/i.test(s) && s.includes("seat"),
+        (s) =>
+          /does not match|unmatched/i.test(s) &&
+          s.includes("seat") &&
+          s.includes("rec.assumptions"),
       );
       expect(claim, label).toBeDefined();
-      expect(claim, label).toMatch(/rec\.assumptions/);
       expect(claim, label).toMatch(/P\(win\)/);
       expect(claim, label).toMatch(/not filled|never filled|kept/);
     }
