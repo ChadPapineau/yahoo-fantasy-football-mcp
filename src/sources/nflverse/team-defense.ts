@@ -3,7 +3,10 @@
 // into ds_player_week, plus the opponent offence's passing/sack/rushing yards from the opponent's
 // rows in the same game; plan 08 §3.2 dst_* inputs). A team-level row (no player_id — nflverse's
 // unattributed team credits, e.g. the BUF week-2 2026 safety) adds its TEAM_DEFENSE_SUM_COLUMNS only:
-// no player count and no offence yardage. Memory: one accumulator per team-week.
+// no player count and no offence yardage. `opp_sack_yards_lost` is the yards the opponent LOST on
+// sacks as a non-negative magnitude: nflverse stores `sack_yards_lost` negative (two sacks = −15),
+// and every dst_ya translator subtracts the loss from gross passing (yardsAllowed; QA-2-032).
+// Memory: one accumulator per team-week.
 import {
   DST_FUMBLE_RETURN_TD_COLUMN,
   defensiveFumbleReturnTds,
@@ -123,7 +126,7 @@ export class TeamDefenseAggregator {
       for (const c of TEAM_DEFENSE_SUM_COLUMNS) row[c] = a.sums[c] ?? 0;
       row[DST_FUMBLE_RETURN_TD_COLUMN] = a.sums[DST_FUMBLE_RETURN_TD_COLUMN] ?? 0;
       row.opp_passing_yards = sameGame ? opp.pass : null;
-      row.opp_sack_yards_lost = sameGame ? opp.sackYds : null;
+      row.opp_sack_yards_lost = sameGame ? Math.abs(opp.sackYds) : null;
       row.opp_rushing_yards = sameGame ? opp.rush : null;
       row.player_rows = a.rows;
       out.push(row);

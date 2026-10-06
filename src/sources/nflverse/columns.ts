@@ -4,7 +4,7 @@
 // schema assertion (schemas.ts) is what verifies these column names exist (A-1).
 // PURE: imports only domain types, no I/O, no store/sources modules — so it can move into
 // src/domain verbatim if the store's readers need it (store may not import src/sources).
-import { DST_TD_COLUMNS } from "../../domain/scoring/nflverse.js";
+import { DST_TD_COLUMNS, yardsAllowed } from "../../domain/scoring/nflverse.js";
 import type { Canonical, PositionType, StatLine } from "../../domain/scoring/types.js";
 
 /** One canonical stat and the nflverse columns summed to produce it. */
@@ -241,7 +241,8 @@ export interface DefenseOptions {
  * The DT StatLine of one `ds_team_defense_week` row (tables.ts READER_QUERIES
  * `PlayerWeekReader.defenseLines` mapping): dst_sack, dst_int, dst_fum_rec, dst_td, dst_ret_td,
  * dst_safety, dst_blk (FG + punt blocks, + PAT blocks when asked), dst_pa (the scalar; the engine
- * bracketizes it, plan 08 §4.1), dst_ya = opponent passing − sack yards + rushing (all three needed).
+ * bracketizes it, plan 08 §4.1), dst_ya = yardsAllowed(opponent passing, sack yards, rushing) —
+ * net yards, the sack term a magnitude whatever its sign (all three needed; QA-2-032).
  */
 export function toDefenseStatLine(
   row: Readonly<Record<string, unknown>>,
@@ -271,7 +272,8 @@ export function toDefenseStatLine(
   const pass = numeric(row.opp_passing_yards).value;
   const sackYds = numeric(row.opp_sack_yards_lost).value;
   const rush = numeric(row.opp_rushing_yards).value;
-  if (pass !== null && sackYds !== null && rush !== null) values.dst_ya = pass - sackYds + rush;
+  if (pass !== null && sackYds !== null && rush !== null)
+    values.dst_ya = yardsAllowed(pass, sackYds, rush);
   return { line: buildLine(values, "DT", opts.provisional ?? false), issues };
 }
 
