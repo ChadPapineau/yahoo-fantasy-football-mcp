@@ -4,11 +4,14 @@
 // configuration guard (src/config/schema.ts loadConfig → guardLocation), exercised here with a
 // sample path for every location the text names. The Skill may ask the model to refuse MORE than
 // the server does (that is the Skill's own guardrail); it may never say the server refuses a
-// location the server accepts.
+// location the server accepts. QA-2-002: nor may it leave out a folder the server refuses ("the
+// server refuses only …" without ~/Dropbox), which the over-claim check cannot see — so every
+// folder the guard refuses (src/config/paths.ts syncedFolders, and this checkout) must be named.
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { isInside, syncedFolders } from "../../src/config/paths.js";
 import { ConfigError, loadConfig } from "../../src/config/schema.js";
 import { ROOT, runSaveSteps } from "./helpers.js";
 import { sentences } from "./world.js";
@@ -26,43 +29,62 @@ const NEGATED = /\b(?:not|never|cannot|can't|doesn't|won't)\b/i;
 const ANAPHORA = /\b(?:those|these|them|such (?:paths|folders|locations))\b/i;
 
 /**
- * Every location phrase a Skill might attribute to the server, with a sample path of that kind
+ * Every location phrase a Skill might attribute to the server, with sample paths of that kind
  * (under a temporary home). `checkout` is matched and removed first, so "this project's checkout"
- * is not also read as "a repository".
+ * is not also read as "a repository". A `generic` phrase ("any synced folder") names no folder in
+ * particular, so it never counts as naming one of the server's refusals.
  */
-type Sample = (home: string) => string;
-const LOCATIONS: readonly (readonly [string, RegExp, Sample])[] = [
+type Samples = (home: string) => readonly string[];
+const BUSINESS_ONEDRIVE = "OneDrive - Example Org";
+const LOCATIONS: readonly (readonly [string, RegExp, Samples, "generic"?])[] = [
   [
     "this project's checkout",
     /\b(?:this project's|the project's|this) checkout\b/gi,
-    () => path.join(ROOT, "ff-location-probe"),
+    () => [path.join(ROOT, "ff-location-probe")],
   ],
   [
     "a git working tree / repository",
     /\b(?:any|a|another|other|every)\s+(?:(?:git|code)\s+)?(?:repository|repositories|working tree)\b|\bgit working tree\b|\binside a repository\b/gi,
-    (h) => path.join(h, "code", "dotfiles", "ff"),
+    (h) => [path.join(h, "code", "dotfiles", "ff")],
+    "generic",
   ],
-  ["Dropbox", /\bDropbox\b/g, (h) => path.join(h, "Dropbox", "ff")],
-  ["Google Drive", /\bGoogle Drive\b/g, (h) => path.join(h, "Google Drive", "ff")],
-  ["OneDrive", /\bOneDrive\b/g, (h) => path.join(h, "OneDrive", "ff")],
+  ["Dropbox", /\bDropbox\b/g, (h) => [path.join(h, "Dropbox", "ff")]],
+  ["Google Drive", /\bGoogle Drive\b/g, (h) => [path.join(h, "Google Drive", "ff")]],
+  [
+    "OneDrive",
+    /\bOneDrive\b/g,
+    (h) => [path.join(h, "OneDrive", "ff"), path.join(h, BUSINESS_ONEDRIVE, "ff")],
+  ],
   [
     "a synced folder",
     /\b(?:any|a|every)\s+(?:cloud-)?synced folder\b|\bsync(?:ed)? folders\b/gi,
-    (h) => path.join(h, "Dropbox", "ff"),
+    (h) => [path.join(h, "Dropbox", "ff")],
+    "generic",
   ],
   [
     "iCloud Drive",
     /\biCloud\b|\bMobile Documents\b/g,
-    (h) => path.join(h, "Library", "Mobile Documents", "com~apple~CloudDocs", "ff"),
+    (h) => [path.join(h, "Library", "Mobile Documents", "com~apple~CloudDocs", "ff")],
   ],
   [
     "CloudStorage",
     /\bCloudStorage\b/g,
-    (h) => path.join(h, "Library", "CloudStorage", "Box", "ff"),
+    (h) => [path.join(h, "Library", "CloudStorage", "Box", "ff")],
   ],
-  ["Desktop", /\bDesktop\b/g, (h) => path.join(h, "Desktop", "ff")],
-  ["Documents", /(?<!Mobile )\bDocuments\b/g, (h) => path.join(h, "Documents", "ff")],
+  ["Desktop", /\bDesktop\b/g, (h) => [path.join(h, "Desktop", "ff")]],
+  ["Documents", /(?<!Mobile )\bDocuments\b/g, (h) => [path.join(h, "Documents", "ff")]],
 ];
+
+/** The LOCATIONS entries a sentence names, in table order, each match removed before the next. */
+function named(sentence: string): (typeof LOCATIONS)[number][] {
+  let rest = sentence;
+  const out: (typeof LOCATIONS)[number][] = [];
+  for (const loc of LOCATIONS) {
+    if (new RegExp(loc[1]).test(rest)) out.push(loc);
+    rest = rest.replace(new RegExp(loc[1]), " ");
+  }
+  return out;
+}
 
 let base = "";
 let home = "";
@@ -70,6 +92,8 @@ beforeAll(() => {
   base = realpathSync(mkdtempSync(path.join(tmpdir(), "ff-loc-")));
   home = path.join(base, "home");
   mkdirSync(path.join(home, "code", "dotfiles", ".git"), { recursive: true });
+  // a business OneDrive, so the guard's per-home entry ("OneDrive - <org>") is in play
+  mkdirSync(path.join(home, BUSINESS_ONEDRIVE), { recursive: true, mode: 0o700 });
   mkdirSync(path.join(base, "cache"), { recursive: true, mode: 0o700 });
 });
 afterAll(() => {
@@ -127,15 +151,35 @@ describe("QA-1-044/QA-1-067: the onboard Skill claims only the location refusals
   it("every location a server-refusal sentence names is refused by the real guard", () => {
     const wrong: string[] = [];
     for (const c of claims) {
-      let rest = c.sentence;
-      for (const [label, re, sample] of LOCATIONS) {
-        const hit = new RegExp(re).test(rest);
-        rest = rest.replace(new RegExp(re), " ");
-        if (hit && !serverRefuses(sample(home)))
+      for (const [label, , samples] of named(c.sentence)) {
+        if (!samples(home).every(serverRefuses))
           wrong.push(`${c.file}: "${label}" in: ${c.sentence}`);
       }
     }
     expect(wrong).toEqual([]);
+  });
+
+  it("every folder the server refuses is named where the text says what it refuses [QA-2-002]", () => {
+    // the guard's own list: this checkout and every synced folder under the home
+    const refused = [ROOT, ...syncedFolders(home)];
+    expect(refused).toContain(path.join(home, BUSINESS_ONEDRIVE));
+    const phraseFor = (root: string) =>
+      LOCATIONS.filter(
+        ([, , samples, generic]) =>
+          generic === undefined && samples(home).some((s) => isInside(s, root)),
+      );
+    // a folder the guard refuses that no phrase here stands for: extend LOCATIONS (and the text)
+    expect(refused.filter((r) => phraseFor(r).length === 0)).toEqual([]);
+    for (const r of refused) expect(serverRefuses(path.join(r, "ff-location-probe")), r).toBe(true);
+    const missing: string[] = [];
+    for (const file of FILES) {
+      const said = claims.filter((c) => c.file === file).flatMap((c) => named(c.sentence));
+      if (said.length === 0) continue;
+      for (const r of refused)
+        if (!phraseFor(r).some((loc) => said.includes(loc)))
+          missing.push(`${file}: ${r === ROOT ? "this checkout" : `~/${path.relative(home, r)}`}`);
+    }
+    expect(missing).toEqual([]);
   });
 });
 

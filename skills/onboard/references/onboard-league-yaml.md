@@ -111,7 +111,7 @@ ff doctor
 
 Save the file at the path printed after `League file:`. If `ff doctor` then reports "no league file at" some other path, that is the path the server reads: move the file there. Never save it inside a code repository or a synced folder (any git working tree — a dotfiles repository that holds `~/.config` counts — iCloud Drive, Dropbox, Google Drive, OneDrive, or Desktop/Documents when they sync). The project repository is public, and a file in any repository is one `git add` away from being committed. If the commands print a line starting `STOP:`, do not save the file there: choose another folder, set `FF_CONFIG_DIR` to it, and run them again.
 
-The server's own location check is narrower than this rule, so do not rely on it: the server refuses only this project's checkout, `~/Documents`, `~/Desktop`, iCloud Drive (`~/Library/Mobile Documents`) and `~/Library/CloudStorage`. It does not look for other git working trees or for folders such as `~/Dropbox`; the commands above do.
+The server's own location check is narrower than this rule, so do not rely on it: the server refuses only this project's checkout and the synced folders in the home folder, `~/Documents`, `~/Desktop`, iCloud Drive (`~/Library/Mobile Documents`), `~/Library/CloudStorage`, `~/Dropbox`, `~/Google Drive` and `~/OneDrive` (a business `~/OneDrive - <organisation>` too). It does not look for other git working trees, or for a synced folder outside the home folder; the commands above check for both.
 
 ### Keeping it current
 
