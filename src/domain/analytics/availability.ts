@@ -84,6 +84,12 @@ export interface Availability {
    */
   readonly designation_pending?: true;
   /**
+   * Set instead of `designation_pending` when, in that same case, he did not practise on this week's
+   * report for an injury (a rest day is not one): a new injury, not "cleared" — `p` is the practice
+   * trend's Questionable-and-did-not-practise rate until his designation is out (QA-2-034) — named.
+   */
+  readonly dnp_pending?: true;
+  /**
    * Set when his newest designation (from that week) is more than INJURY_REPORT.carryWeeks old and
    * nothing newer is out: `p` is null (unknown), never "cleared" (QA-1-021) — named.
    */
@@ -123,6 +129,18 @@ function practiceLevel(r: InjuryReport): "full" | "limited" | "dnp" | null {
   return null;
 }
 
+/** A rest day (nflverse "Not injury related - resting player", "Rest"): no injury behind a DNP. */
+const REST_DAY_RE = /\brest(?:ing)?\b/i;
+
+/**
+ * Whether a row without a designation says he did not practise for an injury: his last practice
+ * level is DNP and the reason given is not a rest day (QA-2-034).
+ */
+function injuredDnp(r: InjuryReport): boolean {
+  if (practiceLevel(r) !== "dnp") return false;
+  return !REST_DAY_RE.test(r.primary_injury ?? "") && !REST_DAY_RE.test(r.secondary_injury ?? "");
+}
+
 /** P(active) from a status code (`O`, `D`, `Q`, `IR`, …); null for a code that says nothing. */
 function fromStatusCode(code: string | null): number | null {
   if (code === null) return null;
@@ -149,8 +167,10 @@ export function isRosterOut(status: string | null): boolean {
  * report at most — QA-2-034 — or none) → his designation on the newest earlier game-status report
  * carried (`carried_from`; a carried Questionable refined by the newest practice level), unknown
  * once it is more than INJURY_REPORT.carryWeeks old (`expired_from`, p null), or active when that
- * report did not designate him (`designation_pending` when he is on this week's practice report)
- * (QA-1-021); (6) the dataset loaded but no earlier report out → active; (7) nothing loaded →
+ * report did not designate him (`designation_pending` when he is on this week's practice report) —
+ * unless he did not practise on it for an injury: then not cleared, the Questionable-and-DNP trend
+ * rate (`dnp_pending`, QA-2-034) (QA-1-021); (6) the dataset loaded but no earlier report out →
+ * active, the same DNP exception applying; (7) nothing loaded →
  * `p: null`, basis `none` (the simulation then treats the player as active and the projection names
  * that assumption).
  */
@@ -178,10 +198,14 @@ export function pActive(input: AvailabilityInput): Availability {
   const published = input.reportPublished ?? input.injuriesLoaded;
   const final = input.reportFinal ?? (input.report !== null || published);
   if (final) return { p: P_ACTIVE.noDesignation, basis: "designation_base_rate" };
+  // no designation on his last game-status report (or none out yet): active, unless this week's
+  // practice report says he did not practise for an injury — a new injury is not "cleared"
   const pending: Availability =
     input.report === null
       ? { p: P_ACTIVE.noDesignation, basis: "designation_base_rate" }
-      : { p: P_ACTIVE.noDesignation, basis: "designation_base_rate", designation_pending: true };
+      : injuredDnp(input.report)
+        ? { p: P_ACTIVE.questionableByPractice.dnp, basis: "trend_model", dnp_pending: true }
+        : { p: P_ACTIVE.noDesignation, basis: "designation_base_rate", designation_pending: true };
   if (input.priorPublished === true) {
     const prior = input.priorReport ?? null;
     const carried = prior === null ? null : fromReport(prior);
@@ -260,4 +284,46 @@ export function reportStates(
     out.set(t, final ? "final" : listed.has(t) ? "practice" : "none");
   }
   return out;
+}
+
+/** What `pActive` reads about the official report for one player-week (QA-1-021, QA-2-034). */
+export interface ReportContext {
+  readonly report: InjuryReport | null;
+  readonly reportPublished: boolean;
+  readonly reportFinal: boolean;
+  readonly priorPublished: boolean;
+  readonly priorReport: InjuryReport | null;
+  readonly practiceReport: InjuryReport | null;
+  readonly week: Week;
+}
+
+/**
+ * The report inputs of `pActive` for one player-week, read the one way every tool reads them: this
+ * week's row and his team's report state; the newest EARLIER week whose game-status report is out for
+ * his team that week (across byes and look-ahead weeks, QA-1-021) and his row on it; and his newest
+ * row since then up to this week (the newest practice trend). `stateOf` gives a team's state in a
+ * week (`reportStates`), `rowOf` his row in a week. `loaded` is whether the target week's injury
+ * report was read at all. `team` null (no NFL team) has no report state.
+ */
+export function reportContext(
+  week: Week,
+  team: NflTeam | null,
+  loaded: boolean,
+  stateOf: (w: Week, team: NflTeam) => ReportState,
+  rowOf: (w: Week) => InjuryReport | null,
+): ReportContext {
+  const state = (w: Week, t: NflTeam | null): ReportState => (t === null ? "none" : stateOf(w, t));
+  let prior = week - 1;
+  while (prior >= 1 && state(prior, rowOf(prior)?.nfl_team ?? team) !== "final") prior -= 1;
+  let practiceReport: InjuryReport | null = null;
+  for (let w = week; w > prior && practiceReport === null; w--) practiceReport = rowOf(w);
+  return {
+    report: rowOf(week),
+    reportPublished: loaded && state(week, team) !== "none",
+    reportFinal: loaded && state(week, team) === "final",
+    priorPublished: loaded && prior >= 1,
+    priorReport: prior >= 1 ? rowOf(prior) : null,
+    practiceReport,
+    week,
+  };
 }
