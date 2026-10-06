@@ -24,8 +24,8 @@ trigger (§ Decisions made). **QA round 2 is complete; only the merge is left**
 ([`qa/2026-10-06-qa-round2.md`](qa/2026-10-06-qa-round2.md)). Its first half — the deferred-items
 analysis and a review of its own commits, QA-2-001 to QA-2-025 — is on `main` with the A17 script.
 Its second half is on `build/qa2-fixes` (from `main` at `f6ba81e`, which has not moved since, so the
-branch fast-forwards; head `1c46181`; CI green: `ci` 37455321403 and `secrets` 37455321274 on the
-head, `docs` 37454436573 on `7cb8d9d`). All 105 round-1 and round-2 fixes were re-checked with a
+branch fast-forwards; last code commit `1c46181`, then the round's records `7ea4abc`; CI green on
+`7ea4abc`: `ci` 37457598480, `docs` 37457598476, `secrets` 37457598479). All 105 round-1 and round-2 fixes were re-checked with a
 mutation run (83 held, 22 reopened); a second sweep confirmed 20 new findings, QA-2-026 to QA-2-045
 (one high: `exclude` kept an inactive starter in the lineup); a fix round worked the 42 items; an
 independent verification of that round found 8 problems (3 major: `exclude` still kept the inactive
@@ -173,7 +173,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 3 — adversarial review | ✅ **closed after three rounds** (`a98d41f`): 30 objections — 29 conceded-and-landed, 1 withdrawn on evidence, 0 pressed; round 3 raised no objections, three nits (fixed), remainder declared marginal; `## Closing verdict` in the log; `docs/plan/changelog.md` finalised (numbers, closing summary, rounds 1–3) | `docs/plan/adversarial-log.md`, `docs/plan/changelog.md` |
 | build — Phase 0 + 1a-full (foundation, modules, QA/pentest) | ✅ merged to `main`: 19 tools, 7 resources, 3 prompts, 4 Skills, `ff` CLI; 3,867 unit + 127 process tests, 98.65 % lines; QA/pentest round 1: 101 findings, 80 confirmed, **80 fixed** | `src/`, `tests/`, `skills/`, `docs/qa/` |
 | docs — README, LICENSE, SECURITY.md | ✅ `README.md` (947 lines, 16 sections, 7 Mermaid diagrams rendered by CI, 121 features marked 📋 planned), `LICENSE` (MIT), `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` — verified; CI green on `a7dad60` | root + `docs/README.md`, `docs/plan/00-index.md` |
-| QA round 2 | ✅ complete except the merge (2026-10-06). On `main`: the deferred-items analysis (the 7 skipped hand-offs decided; QA-2-001…005) and a review of its own commits (QA-2-006…025), all fixed. On `build/qa2-fixes` (head `1c46181`, CI green): re-verification of all 105 fixes (83 held, 22 reopened), a second sweep (20 confirmed, QA-2-026…045; 1 refuted), a fix round, and an integration round after an independent verification of it (8 problems, 3 major, all resolved). Of the 42 items 39 are fixed, 2 deferred (QA-1-080 behind a typed refusal, QA-2-037) and 1 closed; QA-2-046 fixed, QA-2-047/048 deferred; QA-2-049…055 registered (1 fixed, 3 open, 3 deferred) | `docs/qa/2026-10-06-qa-round2.md` |
+| QA round 2 | ✅ complete except the merge (2026-10-06). On `main`: the deferred-items analysis (the 7 skipped hand-offs decided; QA-2-001…005) and a review of its own commits (QA-2-006…025), all fixed. On `build/qa2-fixes` (last code commit `1c46181`, records `7ea4abc`, CI green): re-verification of all 105 fixes (83 held, 22 reopened), a second sweep (20 confirmed, QA-2-026…045; 1 refuted), a fix round, and an integration round after an independent verification of it (8 problems, 3 major, all resolved). Of the 42 items 39 are fixed, 2 deferred (QA-1-080 behind a typed refusal, QA-2-037) and 1 closed; QA-2-046 fixed, QA-2-047/048 deferred; QA-2-049…055 registered (1 fixed, 3 open, 3 deferred) | `docs/qa/2026-10-06-qa-round2.md` |
 
 ## Decisions made
 
