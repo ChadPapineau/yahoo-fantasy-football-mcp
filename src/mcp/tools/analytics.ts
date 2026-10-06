@@ -437,7 +437,11 @@ async function opponentKey(
   return null;
 }
 
-/** The opponent's lineup players, or null (no matchup, or an opponent with no roster). */
+/**
+ * The opponent's lineup players: `key` null when the platform lists no matchup for the week (no
+ * `opponents:` entry under the manual league), `side` null when there is none or the opponent's team
+ * has no projectable players listed — the two causes a "no opponent" answer must tell apart.
+ */
 async function opponentPlayers(
   ctx: ToolContext,
   lc: LeagueContext,
@@ -447,14 +451,17 @@ async function opponentPlayers(
   rng: Rng,
   inputs: InputStamp[],
   warnings: string[],
-): Promise<{ players: LineupPlayer[]; targets: Target[] } | null> {
-  const opp = await opponentKey(ctx, lc, mine, w, inputs);
-  if (opp === null) return null;
+): Promise<{
+  key: string | null;
+  side: { players: LineupPlayer[]; targets: Target[] } | null;
+}> {
+  const key = await opponentKey(ctx, lc, mine, w, inputs);
+  if (key === null) return { key, side: null };
   try {
-    const r = await lineupPlayers(ctx, lc, opp, w, settings, rng, inputs, warnings);
-    return { players: r.players, targets: r.targets };
+    const r = await lineupPlayers(ctx, lc, key, w, settings, rng, inputs, warnings);
+    return { key, side: { players: r.players, targets: r.targets } };
   } catch (e) {
-    if (e instanceof FfError && e.code === "NOT_FOUND") return null;
+    if (e instanceof FfError && e.code === "NOT_FOUND") return { key, side: null };
     throw e;
   }
 }
@@ -845,7 +852,7 @@ export const analyzeLineupTool = defineTool({
     );
     const mine = await lineupPlayers(ctx, lc, args.team_key, w, settings, rng, inputs, warnings);
     checkConstraints(args, mine.players, mine.rosterKeys, slots, ctx.nowMs);
-    const opp = await opponentPlayers(ctx, lc, myKey, w, settings, rng, inputs, warnings);
+    const opp = (await opponentPlayers(ctx, lc, myKey, w, settings, rng, inputs, warnings)).side;
     if (mine.out.lines_omitted) warnings.push(LINES_OMITTED_WARNING);
     const rec = analyzeLineup({
       slots,
@@ -934,11 +941,17 @@ const e3Data = z.strictObject({
 });
 
 /**
- * E3's NOT_FOUND hint for a week without an opponent (QA-1-008, QA-1-028): the shared manual hint
- * says "use objective mean", an argument only E2 has; this one names what E3's caller can do.
+ * E3's NOT_FOUND hint for a week without an `opponents:` entry (QA-1-008, QA-1-028): the shared
+ * manual hint says "use objective mean", an argument only E2 has; this one names what E3's caller
+ * can do. It never claims the opponent's roster is missing — it is usually in the file already, and
+ * the one missing line is the week's entry (QA-1-069).
  */
 export const MATCHUP_NO_OPPONENT_HINT =
-  "No opponent roster in league.yaml for this week: add an opponents: entry (with that team's players) for it, pass a week that has one, or use ff_analyze_lineup (objective mean) for start/sit.";
+  "No opponent for this week in league.yaml: add - { week: <week>, team: <id> } under opponents (that team's players go under other_teams if they are not listed yet), pass a week that has one, or use ff_analyze_lineup (objective mean) for start/sit.";
+
+/** E3's NOT_FOUND hint when the week's `opponents:` entry names a team with no players (QA-1-069). */
+export const MATCHUP_OPPONENT_NO_PLAYERS_HINT =
+  "This week's opponent in league.yaml has no players listed: add that team's players under other_teams, pass a week whose opponent has them, or use ff_analyze_lineup (objective mean) for start/sit.";
 
 export const analyzeMatchupTool = defineTool({
   name: "ff_analyze_matchup",
@@ -972,9 +985,12 @@ export const analyzeMatchupTool = defineTool({
       callSeed("ff_analyze_matchup", { league: lc.ref.league_key, team: myKey, week: w }, inputs),
     );
     const mine = await lineupPlayers(ctx, lc, args.team_key, w, settings, rng, inputs, warnings);
-    const opp = await opponentPlayers(ctx, lc, myKey, w, settings, rng, inputs, warnings);
+    const found = await opponentPlayers(ctx, lc, myKey, w, settings, rng, inputs, warnings);
+    const opp = found.side;
     if (opp === null || opp.players.length === 0)
-      throw new FfError("NOT_FOUND", { hint: MATCHUP_NO_OPPONENT_HINT });
+      throw new FfError("NOT_FOUND", {
+        hint: found.key === null ? MATCHUP_NO_OPPONENT_HINT : MATCHUP_OPPONENT_NO_PLAYERS_HINT,
+      });
     if (mine.out.lines_omitted) warnings.push(LINES_OMITTED_WARNING);
     const r = analyzeMatchupPre({
       slots,
