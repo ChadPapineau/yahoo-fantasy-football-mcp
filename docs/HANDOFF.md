@@ -118,7 +118,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 0 — repo setup | ✅ done | `.gitignore`, `.env.example`, `main` pushed, description + 14 topics applied via `gh`, tooling inventory (`docs/research/00-*`) |
 | 1 — research (waves 1–3) | ✅ 01–06 all verified (SHAs on origin, identifier scan, one load-bearing claim per doc checked at source) | `docs/research/01-*` … `06-*` |
 | 2 — plan | ✅ all ten files (`docs/plan/01-*`…`10-*`, 2,935 lines), both halves verified; plan 10 §4 lists 13 small tensions to fold in during the adversarial round | `docs/plan/` |
-| 2b — docs-only automation (plan 06 §4 step 1) | ✅ `docs` (Mermaid 7/7 + links, with self-tests) and `secrets` (gitleaks 8.30.1 pinned by sha256, 7 Yahoo rules, self-test, weekly full-history scan) green on `main` at `c30b997`; Dependabot; PR template. GitHub secret scanning + push protection were already enabled. **Branch ruleset applied 2026-10-06** (`24558591`: no force-push, no deletion, linear history, no bypass actors; plan 04 §5); required status checks deliberately deferred until PRs are required (a required check rejects every fresh direct push) | `.github/**`, `.gitleaks.toml`, `scripts/**` |
+| 2b — docs-only automation (plan 06 §4 step 1) | ✅ `docs` (Mermaid 7/7 + links, with self-tests) and `secrets` (gitleaks 8.30.1 pinned by sha256, 7 Yahoo rules, self-test, weekly full-history scan) green on `main` at `c30b997`; Dependabot (weekly version updates; security updates and vulnerability alerts are **not** on — Open items, QA-2-019); PR template. GitHub secret scanning + push protection were already enabled. **Branch ruleset applied 2026-10-06** (`24558591`: no force-push, no deletion, linear history, no bypass actors; plan 04 §5); required status checks deliberately deferred until PRs are required (a required check rejects every fresh direct push) | `.github/**`, `.gitleaks.toml`, `scripts/**` |
 | 3 — adversarial review | ✅ **closed after three rounds** (`a98d41f`): 30 objections — 29 conceded-and-landed, 1 withdrawn on evidence, 0 pressed; round 3 raised no objections, three nits (fixed), remainder declared marginal; `## Closing verdict` in the log; `docs/plan/changelog.md` finalised (numbers, closing summary, rounds 1–3) | `docs/plan/adversarial-log.md`, `docs/plan/changelog.md` |
 | build — Phase 0 + 1a-full (foundation, modules, QA/pentest) | ✅ merged to `main`: 19 tools, 7 resources, 3 prompts, 4 Skills, `ff` CLI; 3,867 unit + 127 process tests, 98.65 % lines; QA/pentest round 1: 101 findings, 80 confirmed, **80 fixed** | `src/`, `tests/`, `skills/`, `docs/qa/` |
 | docs — README, LICENSE, SECURITY.md | ✅ `README.md` (947 lines, 16 sections, 7 Mermaid diagrams rendered by CI, 121 features marked 📋 planned), `LICENSE` (MIT), `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` — verified; CI green on `a7dad60` | root + `docs/README.md`, `docs/plan/00-index.md` |
@@ -149,7 +149,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 2026-09-30 | **A required write reserves its longest observed yield (≥ poll + the store's own 110 ms stall) before sleeping** (modules gate, fix round 3) | the last yield could wake past the 1 s budget (982 ms measured; the test allowed +50 ms); now ~880 ms and the tests assert the literal ≤ 1 s |
 | 2026-09-30 | **Read-only is acceptable as the product** (Chad): thorough reads of free agents, roster, adds/drops, league activity, stats + intelligent move recommendations are sufficient. Write access is a bonus if Yahoo ever grants it, not a requirement | Yahoo's "write access is not available at this time"; the plan's Phase 1–3 are read-only by design, Phase W stays conditional and low priority |
 | 2026-10-06 | **Contributor rules live in `CONTRIBUTING.md`**; local working notes and personal tool settings stay untracked and out of the repository | the owner's decision |
-| 2026-10-06 | **Public history rewritten (QA-1-095).** Every commit's author and committer is the GitHub no-reply address; the co-author trailers were removed; `docs/scratch/` and `CLAUDE.md` (now local-only) were removed from every commit, which dropped the 62 commits that touched only those notes (312 → 250, plus `1446c7a`, which remaps the commit ids the docs cite). Each rewritten commit was verified against its original: the same names and dates, and the same tree apart from the removed paths and two in-file edits (the commit helper's trailer lines; the machine user name and router domain quoted in the QA register). `main` moved from `f2cdbc5` to `1446c7a` by one force-push, before the ruleset below existed. Old commit ids cited anywhere no longer resolve; the remapped ones do. Full record: QA register round 1, Open items | the owner's decision: the machine-derived address was in every early commit of a public repository. Copies taken before the rewrite (clones, forks, caches) keep the old history; there were no forks, pull requests or tags. GitHub Support can purge cached views (and pre-rewrite commits still served by id) if ever needed |
+| 2026-10-06 | **Public history rewritten (QA-1-095).** Every commit's author and committer is the GitHub no-reply address; the co-author trailers were removed; `docs/scratch/` and `CLAUDE.md` (now local-only) were removed from every commit, which dropped the 62 commits that touched only those notes (312 → 250, plus `1446c7a`, which remaps the commit ids the docs cite). Each rewritten commit was verified against its original: the same names and dates, and the same tree apart from the removed paths and two in-file edits (the commit helper's trailer lines; the machine user name and router domain quoted in the QA register). `main` moved from `f2cdbc5` to `1446c7a` by one force-push, before the ruleset below existed. Old commit ids no longer resolve in a clone of the rewritten history (GitHub may still serve pre-rewrite commits by URL until they are purged); the remapped ones do, and code comments cite them too (QA-2-021). Full record: QA register round 1, Open items | the owner's decision: the machine-derived address was in every early commit of a public repository. Copies taken before the rewrite (clones, forks, caches) keep the old history; there were no forks, pull requests or tags. GitHub Support can purge cached views (and pre-rewrite commits still served by id) if ever needed |
 | 2026-10-06 | **Branch ruleset on `main`**: id `24558591`, "main: no force-push, no deletion, linear history", enforcement active on the default branch, rules `deletion`, `non_fast_forward` and `required_linear_history`, **no bypass actors** (admins included). Required status checks are deliberately **not** required; revisit when pull requests are required (plan 04 §5) | plan 04 §5. `main` still takes direct pushes, and a required check would reject a fresh direct push; `docs.yml` is path-filtered, so a required docs check would block pushes it never runs on. Check: `gh api repos/<owner>/<repo>/rulesets/24558591` |
 | 2026-10-06 | Skipped hand-off **"return lineup comparisons separately": closed**, no code change. `comparisons[]` already ships apart from `swaps[]` (QA-1-010); only the internal engine/tool split remains, which fails safe and is held by tests | moving the split changes no output and reopens `lineup.ts` for no user value. Reopen with the next change to `lineup.ts`'s swap/compare construction, or a second caller passing `compare` (QA register round 1, Open items 1) |
 | 2026-10-06 | Skipped hand-off **"server-side git-working-tree guard": deferred** — if built, a **warning only**, never a refusal (§ Deferred designs) | a refusal locks out a home that is itself a dotfiles repository and cannot see bare-repo or yadm setups; Phase 1a stores no credential. Reopen when a credential lands in the config dir, the tool is distributed beyond the owner, league data turns up in a repository, or `~`/`~/.config` becomes a work tree (Open items 2). Its "fix now" part became QA-2-001/002 |
@@ -157,7 +157,8 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 2026-10-06 | Skipped hand-off **"crosswalk row in `ff doctor`": closed** | unmatched players are reported by `ff_get_status.crosswalk`, every roster tool's warnings and the Skills (plan 10 A5a/B3); doctor stays a value-free install/runtime check. Reopen when plan 06's `crosswalk rebuild` job stores an unmatched report, a text names doctor/status for the list, a field round shows the warning lost, or a non-chat front end is supported (Open items 4). The analysis also found QA-2-003 |
 | 2026-10-06 | Skipped hand-off **"`quick_check` on every publish": closed** — not for cost (3–150 ms measured) but because it cannot catch anything that can happen | the file is written only through SQLite and fsync'd before the rename; damage after the publish is already caught and repaired by `ff refresh` and doctor row 8. Reopen if a dataset file is ever produced other than by SQLite's own writes, or a `quick_check` failure is traced to a file nothing touched after its publish (Open items 5) |
 | 2026-10-06 | Skipped hand-off **"persist only near-lock projection weeks": closed** | E13 reads only the newest pre-lock row, so far-week rows never displace a better forecast; the Skill path writes none. The real growth term is player row size (item 14 below). Reopen if a real season's store passes plan 01 §5.6's 100 MB after that change with far-week rows over 25 % of projection bytes, or a single-lead-time forecast is needed (read-side cap) (Open items 6) |
-| 2026-10-06 | Skipped hand-off **E5 per-candidate ranges and per-position verdicts: deferred to Phase 2** (E5 for all positions). E5 keeps one `hold_vs_stream` — now labelled with the `position` it describes (QA-2-004, additive) — and no per-candidate Dist in Phase 1a; consumers rank one position per call | under the v1 `position_cv` basis a per-candidate band adds no information, and a full Dist per candidate would push a K-only compact result to the edge of halving. The Phase 2 design is in § Deferred designs. Reopen when Phase 2's E5 work starts, `player_sim` lands, an eval or real use misreads `marginal_value`'s interval, or a Skill ranks K and DEF in one call (Open items 7). The analysis also found QA-2-005 |
+| 2026-10-06 | Skipped hand-off **E5 per-candidate ranges and per-position verdicts: deferred to Phase 2** (E5 for all positions). E5 keeps one `hold_vs_stream` — now labelled with the `position` it describes (QA-2-004, additive) — and no per-candidate Dist in Phase 1a; consumers rank one position per call | under the v1 `position_cv` basis a per-candidate band adds no information, and a full Dist per candidate would push a K-only compact result to the edge of halving. The Phase 2 design is in § Deferred designs. Plan 09 §3.4's per-candidate p10/p90 is deferred to Phase 2's E5-for-all-positions schema (in 1a a candidate carries no range of its own; QA-2-011). Reopen when Phase 2's E5 work starts, `player_sim` lands, an eval or real use misreads `marginal_value`'s interval, or a Skill ranks K and DEF in one call (Open items 7). The analysis also found QA-2-005 |
+| 2026-10-06 | **`tool_contract` stays 1 before the first release** (QA-2-010): an additive output field, nested or not (`hold_vs_stream.position`, QA-2-004), does not bump it while the package and Skills are `0.0.0`; a renamed, removed or retyped field, an input-schema change or a tool rename still does. The first release starts the counter, after which every change plan 09 §4 lists bumps it, additive fields included | an older Skill never reads a field it does not know, and before a release the Skills and the server come from one checkout; plan 09 §4 carries the rule |
 
 ## Stack facts (checked 2026-09-29)
 
@@ -240,7 +241,9 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
   needed.
 - **Projection sample encoding (item 14).** Each stored player sample line is the expectation
   times one gamma multiplier, so storing the multiplier instead of the line cuts every player row
-  about 11×, on every path.
+  about 11×, on every path. Lossless only if the engine passes its own gamma draw g (dividing a
+  stored line by its mean is bit-exact for 1 of 40 measured rows); a v3 tag in
+  `src/store/repos/samples-codec.ts`, with v1/v2 reads kept (QA-2-023).
 
 ## Confirmation-gate facts (verified 2026-09-29)
 
@@ -387,6 +390,10 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
     one gamma multiplier, so storing the multiplier instead of the line would shrink every player
     row about 11× (rows are about 53 KB at 500 samples on the fixture league). It is the larger
     growth term of the projection table; the near-lock item's reopen trigger is measured after it.
+    Lossless only if the engine passes its own gamma draw g: dividing a stored line by its mean
+    is bit-exact for 1 of 40 measured rows, so deriving g by division would silently change the
+    stored samples. Store it under a v3 tag in `src/store/repos/samples-codec.ts`, with v1/v2
+    reads kept (QA-2-023).
 
 ## Open items
 
@@ -406,6 +413,12 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
 - [x] history rewrite for the machine-derived commit email (QA-1-095) — 2026-10-06
 - [x] the seven skipped round-1 hand-offs decided — 2026-10-06 (§ Decisions made)
 - [ ] **Chad:** A17 per client (item 9) — record both lines under "Build facts"
+- [ ] **Chad:** turn on vulnerability alerts and Dependabot security updates (QA-2-019; plan 04 §5's
+  "Now" column lists them, and neither is on: `security_and_analysis.dependabot_security_updates`
+  is `disabled`, `GET …/vulnerability-alerts` returns 404). Repository Settings → Code security, or
+  `gh api -X PUT repos/<owner>/<repo>/vulnerability-alerts` then
+  `gh api -X PUT repos/<owner>/<repo>/automated-security-fixes`. Owner only: nothing automated
+  touches repository settings. Until then no one is alerted to a CVE in the runtime dependencies
 - [ ] QA round 2: per-fix re-verification and the second sweep (`docs/qa/2026-10-06-qa-round2.md`)
 
 ## Log
@@ -512,6 +525,15 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
   designs). The analysis found five defects, each fixed with a regression test and mutation-checked
   on the branch head: QA-2-001 (`8852df5`), QA-2-002 (`3469278`), QA-2-003 (`acdf50e`), QA-2-004
   (`0d210f4`), QA-2-005 (`ebe095b`); `5302d5c` corrected the README and plan 09 §3.4 for
-  stream-kdef's one position per call. A17's Claude Code half is now a script (`149e05e`, hardened
-  in `b1dcd85` and `c99a067`); run on this machine it stopped at the login step. Next: the
-  per-fix re-verification and the second sweep.
+  stream-kdef's one position per call. A17's Claude Code half is now a script (`149e05e`; `b1dcd85` made
+  SIGTERM/SIGHUP interrupt like Ctrl-C, `c99a067` stopped reading an API error line as the
+  model's answer); run on this machine it stopped at the login step. Next: the per-fix
+  re-verification and the second sweep.
+- 2026-10-06 — **QA round 2: review of the round's own commits.** 19 findings, QA-2-006 to
+  QA-2-024 (three medium: the stream-kdef test accepted either sign of the hold interval, the
+  a17-check interrupt test covered SIGHUP only, and plan 04 §5 claimed Dependabot security updates
+  that are off), all fixed; the code fixes have
+  regression tests, each mutation-checked (round-2 register). The a17-check script now kills a
+  leftover child after the CLI exits, opens `--save` before the run and keeps no session record.
+  One owner step came out of it: turn on vulnerability alerts and Dependabot security updates
+  (§ Open items).
