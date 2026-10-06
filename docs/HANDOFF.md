@@ -22,18 +22,16 @@ gained branch ruleset `24558591` (no force-push, no deletion, linear history). T
 round-1 hand-offs are decided: four closed, three deferred with a recorded design and a reopen
 trigger (§ Decisions made). **QA round 2 is under way** on `build/deferred-items`. Its
 deferred-items analysis found five defects, QA-2-001 to QA-2-005, all fixed with mutation-checked
-regression tests ([`qa/2026-10-06-qa-round2.md`](qa/2026-10-06-qa-round2.md)). The branch also
-carries the A17 script; it merges to `main` when the full gate is green.
+regression tests ([`qa/2026-10-06-qa-round2.md`](qa/2026-10-06-qa-round2.md)). The branch,
+with the A17 script, is merged to `main` (`ae8b32a`, CI green).
 
 Owner's next steps, in order:
 
 1. **Set it up** — README § Getting started: build in `~/Developer/yahoo-fantasy-football-mcp`,
    `print-config` → add to Claude, copy the Skills, `ff refresh all`, then `/onboard` to write
    `~/.config/fantasy-football-mcp/league.yaml` (0600, never in the repo).
-2. **A17 (about 10 minutes for both clients; steps in item 9 below).** Claude Code: run
-   `claude auth login` once (on 2026-10-06 the script stopped at that step on this machine), then
-   `scripts/dev/with-node.sh node scripts/dev/a17-check.mjs` after a build, and record the line it
-   prints under "Build facts". Claude Desktop: the manual steps in item 9, then record its line.
+2. **A17, Claude Desktop half (about 10 minutes, mostly the app restart; steps in item 9).** The
+   Claude Code half is recorded under "Build facts" (2026-10-06: the model sees both copies).
 3. **QA round 2 continues:** the per-fix independent re-verification (round 1's 80 fixes and
    round 2's five), then a second sweep — the two sections marked TO DO in the round-2 register.
    One product call is still open: item 12 (E5 availability under the manual league).
@@ -198,8 +196,10 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 - **A17 — does the client show the model `structuredContent`?** (plan 10 A17; item 9 below says
   how to run it). Replace each "not recorded yet" with the line the check prints or the manual
   step gives:
-  - Claude Code: not recorded yet (`scripts/dev/a17-check.mjs`; on 2026-10-06 it stopped at the
-    login step, exit 3).
+  - Claude Code 2.1.238: structuredContent visible to the model: yes (2026-10-06,
+    `scripts/dev/a17-check.mjs`). Every result that carries `structuredContent` reaches the model
+    twice (its text block holds the same JSON); the C10 list tools keep omitting it (plan 07 C1),
+    and plan 07 §5.1 is re-based once the Claude Desktop line is in.
   - Claude Desktop: not recorded yet (manual).
 
 ## Deferred designs (recorded 2026-10-06, so they are not re-derived)
@@ -412,13 +412,9 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
 - [x] build Phase 0 + Phase 1a — merged to `main` 2026-09-30 (QA/pentest round 1: 80 fixed)
 - [x] history rewrite for the machine-derived commit email (QA-1-095) — 2026-10-06
 - [x] the seven skipped round-1 hand-offs decided — 2026-10-06 (§ Decisions made)
-- [ ] **Chad:** A17 per client (item 9) — record both lines under "Build facts"
-- [ ] **Chad:** turn on vulnerability alerts and Dependabot security updates (QA-2-019; plan 04 §5's
-  "Now" column lists them, and neither is on: `security_and_analysis.dependabot_security_updates`
-  is `disabled`, `GET …/vulnerability-alerts` returns 404). Repository Settings → Code security, or
-  `gh api -X PUT repos/<owner>/<repo>/vulnerability-alerts` then
-  `gh api -X PUT repos/<owner>/<repo>/automated-security-fixes`. Owner only: nothing automated
-  touches repository settings. Until then no one is alerted to a CVE in the runtime dependencies
+- [x] A17, Claude Code half — 2026-10-06 (Build facts: both copies reach the model)
+- [ ] **Chad:** A17, Claude Desktop half (item 9) — record its line under "Build facts"
+- [x] vulnerability alerts and Dependabot security updates enabled — 2026-10-06 (QA-2-019)
 - [ ] QA round 2: per-fix re-verification and the second sweep (`docs/qa/2026-10-06-qa-round2.md`)
 
 ## Log

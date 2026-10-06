@@ -129,7 +129,7 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
     SIGINT, SIGTERM and SIGHUP each, the SIGKILL step, and clean up after a failed run
     (QA-2-012, QA-2-013). `b1dcd85` made SIGTERM and SIGHUP interrupt like Ctrl-C.
   - Docs: plan 04 §5 said its whole "Now" column is applied, but Dependabot security updates and
-    vulnerability alerts are off (QA-2-019; an owner step in HANDOFF); plan 07 G3 and plan 01 §4.2
+    vulnerability alerts were off (QA-2-019; both enabled on 2026-10-06); plan 07 G3 and plan 01 §4.2
     now say "Build facts" (QA-2-017); plan 09 §3.4 no longer promises a per-candidate range
     (QA-2-011) and §4 says how `tool_contract` counts before the first release (QA-2-010); the
     README's `ff_analyze_lineup` row lists `comparisons[]?` and the nullable `swaps[].out`
