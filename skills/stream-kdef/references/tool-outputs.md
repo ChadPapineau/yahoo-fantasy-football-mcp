@@ -8,7 +8,7 @@ Every tool returns the same envelope: `data`, `meta` (`as_of`, `age_s`, `freshne
 
 | Tool | Use it for | Compact fields a Skill reads | Re-fetch |
 |---|---|---|---|
-| `ff_get_status` | version, capabilities, data freshness | `server.tool_contract`, `capabilities.write`, `league.current_week`, `sources[].freshness` | once |
+| `ff_get_status` | version, capabilities, data freshness | `server.tool_contract`, `capabilities.write`, `league.current_week`, `sources[].freshness` (`fresh`, `stale`, `expired`, `never_loaded`, `unreadable`), `sources[].last_error`, `crosswalk.unmatched_rostered` | once |
 | `ff_list_leagues` | the configured league and the user's team | `leagues[].league_key`, `my_team.team_key` | once |
 | `ff_get_league` | the settings digest | `league.current_week`, `rules.*`, `roster.slots[]`, `scoring.rules[]`, `scoring.settings_hash`, `weeks[]` | once |
 | `ff_get_standings` | standings (empty under the manual league, with a warning) | `teams[]`, `playoff_line` | once/hour |
