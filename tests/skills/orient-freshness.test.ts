@@ -16,6 +16,7 @@ const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
 const STATES: readonly string[] = (() => {
   const def = REGISTRY.find((e) => e.tool.name === "ff_get_status")?.tool;
   if (def === undefined) throw new Error("ff_get_status is not registered");
+  if (def.data === null) throw new Error("ff_get_status has no data schema");
   const json = z.toJSONSchema(def.data, { io: "output", unrepresentable: "any" }) as {
     properties?: {
       sources?: { items?: { properties?: { freshness?: { enum?: unknown[] } } } };
