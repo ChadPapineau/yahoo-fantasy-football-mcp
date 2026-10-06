@@ -42,11 +42,12 @@ Opponent pressure and turnover profiles are not a separate input in this version
 
 ## Output additions
 - The top 3 per position, from that position's call. For each candidate:
-  - **Expected points this week**: the value of its `signals[]` entry of kind stream. This version returns no range for a candidate on its own — never present the numbers below as one.
-  - **Gain over the current starter**: `marginal_value.mean` with `marginal_value.p10` / `marginal_value.p50` / `marginal_value.p90` and `marginal_value.basis`, labelled "gain over your current kicker/defense". A range that includes 0 is "no move".
+  - **Expected points this week**: the value of its `signals[]` entry of kind stream. This version returns no range for a candidate on its own.
+  - **Expected gain over the current starter**: `marginal_value.mean`, labelled "expected gain over your current kicker/defense" — one number, no range. The other quantiles of `marginal_value` are the candidate's own spread moved by the starter's mean: they leave out the starter's own variance, so never present them as the gain's range.
   - **Drivers**: `kdef.implied_total`, `kdef.opp_implied_total`, the bracket expectation `kdef.brackets_e`, for a defense `kdef.sacks_e` and `kdef.takeaways_e`, and `kdef.rare_c` (return and defensive touchdowns as a small constant, never a forecast).
 - Next week's look-ahead for each (`kdef.next_week`): opponent, implied total, expected points (`kdef.next_week.e`).
 - Per position: `hold_vs_stream.current_starter_delta` (this week's points gained by the best option over the current starter) and `hold_vs_stream.streamability` (the best option's projected points divided by the starter's, averaged over the two weeks; above 1 favours streaming). The verdict — **hold** or **stream** — is that call's `rec.action` (`rec.no_move` is true for hold), with why.
+- **The gain's range** is the verdict's, never a candidate's: `rec.delta_vs_next.p10` to `rec.delta_vs_next.p90` (around `rec.delta_vs_next.value`), the interval the call was decided on. For **stream** it is the streamed option's gain over the current starter. For **hold** it is the starter's margin over the best option, so the gain from streaming is that range with the signs flipped — the coin-flip line in `rec.assumptions`, when present, states it that way. A range that includes 0 is "no move".
 - The waiver clearing time when known (`waiver_clearing_time`; null under the manual league).
 - **Manual steps** that start with checking availability: "In the fantasy app, open Players → filter DEF → search for the team. If it is available: Add, dropping <current DEF> — before <lock time>. If it is taken: use the next one on the list."
 

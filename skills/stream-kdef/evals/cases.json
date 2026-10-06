@@ -22,6 +22,10 @@
         {
           "kind": "rubric",
           "text": "States a hold-or-stream verdict with the reason, and says the ranking does not know who is available so the user must check the waiver wire first."
+        },
+        {
+          "kind": "rubric",
+          "text": "Gives each candidate's gain over the current defense as one expected number with no range of its own; the only range for the gain is the verdict's interval against holding."
         }
       ]
     },
