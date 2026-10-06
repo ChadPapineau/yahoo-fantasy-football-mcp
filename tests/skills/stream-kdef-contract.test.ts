@@ -4,6 +4,8 @@
 // league by replaying the Skill's own tool_sequence.json. QA-2-005: the range the Skill gives for
 // the gain over the current starter must be the interval the verdict was decided on — marginal_value's
 // quantiles leave out the starter's own variance and disagreed with it (-4.2..12.9 vs -6.8..15.1).
+// QA-2-006: the interval must also point the way the call goes — negated for a hold, as given for
+// a stream — so the orientation is read from rec.no_move, never accepted either way.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -146,8 +148,11 @@ describe("QA-2-005: stream-kdef's gain range is the verdict's own Δ interval", 
             [...resolvePath(data, `${g}.${q}`), ...resolvePath(top, `${g}.${q}`)][0] as number;
           const [p10, p90] = [end("p10"), end("p90")];
           const near = (a: number, b: number) => Math.abs(a - b) <= 0.051;
-          // a hold states the starter's margin over the best option: the same interval, negated
-          const same = (near(p10, lo) && near(p90, hi)) || (near(-p90, lo) && near(-p10, hi));
+          // a hold states the starter's margin over the best option: the verdict's interval,
+          // negated (the Skill flips the signs back); a stream states the pick's gain as it is.
+          // The orientation comes from the call, so a sign error in either branch is caught (QA-2-006).
+          const hold = (data?.rec as { no_move?: boolean } | undefined)?.no_move === true;
+          const same = hold ? near(-p90, lo) && near(-p10, hi) : near(p10, lo) && near(p90, hi);
           checked += 1;
           if (!same)
             wrong.push(

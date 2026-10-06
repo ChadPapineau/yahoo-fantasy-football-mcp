@@ -255,3 +255,81 @@ describe("QA-2-004: hold_vs_stream names the position its numbers describe", () 
     }
   });
 });
+
+describe("QA-2-006: rec.delta_vs_next points the way the call goes", () => {
+  // stream-kdef reads the gain's range from rec.delta_vs_next and flips its signs for a hold, so
+  // the orientation is the contract: a hold states the starter's margin over the best option (the
+  // best option's gain, negated); a stream states the pick's gain over the starter (> 0).
+  it("property: every one-position call with a starter — a hold negates the best option's gain, a stream gives the pick's", () => {
+    const near = (a: number, b: number) => Math.abs(a - b) <= 0.0025;
+    const seen = { hold: 0, stream: 0 };
+    const wrong: string[] = [];
+    for (const week of [3, 5]) {
+      const playing = new Set(
+        data.games
+          .filter((g) => g.season === 2026 && g.week === week)
+          .flatMap((g) => [g.home, g.away]),
+      );
+      for (const pos of ["K", "DEF"] as const) {
+        const members = universe.filter((u) => u.position === pos);
+        const proj = projectPlayers({
+          targets: members.map((m) => ({ ...m, platform_status: null })),
+          season: 2026,
+          weeks: [week],
+          settings,
+          readers: fixtureReaders(data),
+          clock: fixedClock(beforeWeek(data, 3)),
+          rng: seededRng(5),
+          n_sims: 1000,
+        });
+        const mean = proj.result.projections.map((p) => p.weeks[0]?.points.mean ?? 0);
+        const ordered = members
+          .map((m, i) => ({ m, e: mean[i] ?? 0 }))
+          .sort((a, b) => b.e - a.e)
+          .map((x) => x.m);
+        const starters = [
+          ordered[0], // the best: nothing beats him, a hold
+          ordered[Math.floor(ordered.length / 2)],
+          ordered.at(-1), // the worst: streamed over unless the gain is a coin flip
+          members.find((m) => !playing.has(m.nfl_team)), // on bye: streamed over
+        ].filter((s): s is KdefCandidateInput => s !== undefined);
+        for (const mine of starters) {
+          const a = analyzeKdef(req({ positions: [pos], week, current: [mine] })).analysis;
+          const where = `${pos} week ${String(week)} starter ${mine.player_key}`;
+          const h = a.hold_vs_stream;
+          if (h === null) throw new Error(`${where}: no hold_vs_stream with a starter`);
+          const d = a.rec.delta_vs_next;
+          if (!(d.p10 <= d.value && d.value <= d.p90))
+            wrong.push(`${where}: ${String(d.value)} outside ${String(d.p10)}..${String(d.p90)}`);
+          if (a.rec.no_move) {
+            seen.hold += 1;
+            if (!near(d.value, -h.current_starter_delta))
+              wrong.push(
+                `${where}: hold Δ ${String(d.value)}, the best option's gain ${String(h.current_starter_delta)}`,
+              );
+            continue;
+          }
+          seen.stream += 1;
+          const pick = a.rec.subjects.find((s) => s.role === "stream");
+          const cands = a.candidates.filter((c) => c.position === pos);
+          const pickCand = cands.find((c) => c.player_key === pick?.player_key);
+          const e = (c: (typeof cands)[number] | undefined) =>
+            c?.signals.find((s) => s.kind === "stream")?.value ?? Number.NaN;
+          // the starter's mean, recovered from hold_vs_stream: the leader's E minus its gain
+          const starterE = e(cands[0]) - h.current_starter_delta;
+          const gain = e(pickCand) - starterE;
+          if (!(d.value > 0 && near(d.value, gain) && d.p10 >= 0))
+            wrong.push(
+              `${where}: stream Δ ${String(d.value)} (${String(d.p10)}..${String(d.p90)}), the pick's gain ${String(gain)}`,
+            );
+          if (pickCand !== undefined && !near(d.value, pickCand.marginal_value.mean))
+            wrong.push(`${where}: stream Δ ${String(d.value)} ≠ marginal_value.mean`);
+        }
+      }
+    }
+    // both orientations are exercised (control)
+    expect(seen.hold).toBeGreaterThan(0);
+    expect(seen.stream).toBeGreaterThan(0);
+    expect(wrong).toEqual([]);
+  });
+});
