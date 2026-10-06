@@ -248,7 +248,10 @@ describe("A9: start-sit on week N, retro on week N+1", () => {
     };
     const call = retro.calls.find((c) => c.log_id === logId);
     expect(call, "the week-3 call is in the retrospective").toBeDefined();
-    expect(call).toHaveProperty("regret");
+    // start-sit logs the other side of the runner-up swap as a like-for-like alternative (QA-2-041),
+    // so the week-3 call has a regret: a finite number, never null or missing
+    expect(typeof call?.regret, JSON.stringify(call)).toBe("number");
+    expect(Number.isFinite(call?.regret), JSON.stringify(call)).toBe(true);
     expect(call).toHaveProperty("followed");
     expect(retro.metrics.per_player).toBeDefined();
     expect(retro.metrics.swap_regret).toBeDefined();
