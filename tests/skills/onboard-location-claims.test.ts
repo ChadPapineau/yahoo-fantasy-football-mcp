@@ -7,6 +7,10 @@
 // location the server accepts. QA-2-002: nor may it leave out a folder the server refuses ("the
 // server refuses only …" without ~/Dropbox), which the over-claim check cannot see — so every
 // folder the guard refuses (src/config/paths.ts syncedFolders, and this checkout) must be named.
+// QA-2-007: the converse — a sentence saying what the server does NOT look for may not name a
+// folder it does refuse ("It does not look for … folders such as ~/Dropbox"). QA-2-008: a generic
+// "synced folder" phrase is sampled with a sync app the guard does not know (~/Nextcloud), so "the
+// server refuses … the synced folders in the home folder" is an over-claim the test can see.
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -58,7 +62,8 @@ const LOCATIONS: readonly (readonly [string, RegExp, Samples, "generic"?])[] = [
   [
     "a synced folder",
     /\b(?:any|a|every)\s+(?:cloud-)?synced folder\b|\bsync(?:ed)? folders\b/gi,
-    (h) => [path.join(h, "Dropbox", "ff")],
+    // a sync app the guard knows, and one it does not (QA-2-008): "any synced folder" means both
+    (h) => [path.join(h, "Dropbox", "ff"), path.join(h, "Nextcloud", "ff")],
     "generic",
   ],
   [
@@ -119,15 +124,40 @@ function serverRefuses(dir: string): boolean {
   }
 }
 
+/** Whether a sentence attributes a refusal to the server (a negated clause is not a claim). */
+const isClaim = (s: string): boolean => {
+  const m = SERVER_REFUSES.exec(s);
+  return m !== null && !NEGATED.test(m[0]);
+};
+
 /** The (file, sentence) pairs that attribute a refusal to the server. */
 const claims = FILES.flatMap((f) =>
   sentences(readFileSync(path.join(ROOT, f), "utf8"))
-    .filter((s) => {
-      const m = SERVER_REFUSES.exec(s);
-      return m !== null && !NEGATED.test(m[0]);
-    })
+    .filter(isClaim)
     .map((s) => ({ file: f, sentence: s })),
 );
+
+/** "It does not look for …", "The server never checks …": a statement of what is NOT refused. */
+const DENIES =
+  /^\s*(?:it|the server)\s+(?:does not|doesn't|never|cannot|can't|will not|won't)\s+(?:look(?:s)? for|refuse|check|see|catch)/i;
+
+/**
+ * QA-2-007: the (file, sentence) pairs that say what the server does NOT refuse — a negated
+ * server-refusal clause, a sentence that says so of the server by name, or an "It does not …"
+ * sentence right after a server-refusal sentence.
+ */
+const denials = FILES.flatMap((f) => {
+  const ss = sentences(readFileSync(path.join(ROOT, f), "utf8"));
+  return ss
+    .filter((s, i) => {
+      const m = SERVER_REFUSES.exec(s);
+      if (m !== null && NEGATED.test(m[0])) return true;
+      if (!DENIES.test(s)) return false;
+      const prev = ss[i - 1];
+      return /^\s*the server\b/i.test(s) || (prev !== undefined && isClaim(prev));
+    })
+    .map((s) => ({ file: f, sentence: s }));
+});
 
 describe("QA-1-044/QA-1-067: the onboard Skill claims only the location refusals the server makes", () => {
   it("the guard itself: sanity of the samples (control)", () => {
@@ -157,6 +187,28 @@ describe("QA-1-044/QA-1-067: the onboard Skill claims only the location refusals
       }
     }
     expect(wrong).toEqual([]);
+  });
+
+  it("a sentence saying what the server does not look for names no folder it refuses [QA-2-007]", () => {
+    // the control: the texts do say what the server leaves to the user
+    expect(denials.map((d) => d.file).sort()).toEqual([...FILES].sort());
+    const wrong: string[] = [];
+    for (const d of denials) {
+      for (const [label, , samples, generic] of named(d.sentence)) {
+        if (generic !== undefined) continue; // "other git working trees", "any other synced folder"
+        const refused = samples(home).filter(serverRefuses);
+        if (refused.length > 0) wrong.push(`${d.file}: "${label}" in: ${d.sentence}`);
+      }
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it("the denial check sees a refused folder named as not looked for (control) [QA-2-007]", () => {
+    const planted = "It does not look for other git working trees, or for folders such as Dropbox.";
+    const labels = named(planted).filter(([, , , generic]) => generic === undefined);
+    expect(labels.map(([l]) => l)).toEqual(["Dropbox"]);
+    expect(DENIES.test(planted)).toBe(true);
+    expect(labels.every(([, , samples]) => samples(home).some(serverRefuses))).toBe(true);
   });
 
   it("every folder the server refuses is named where the text says what it refuses [QA-2-002]", () => {
@@ -225,6 +277,24 @@ describe("QA-1-044/QA-1-067: the guide's save commands catch what the server's g
   ]) {
     it(`~/${rel} prints STOP (synced folder)`, () => {
       expect(saveAt(rel)).toMatch(/^STOP: .*synced folder/m);
+    });
+  }
+  // QA-2-008: the texts say the commands catch these apps' folders wherever they are
+  for (const rel of [
+    "Dropbox/ff",
+    "Google Drive/ff",
+    "OneDrive - Example/ff",
+    "CloudStorage/Box/ff",
+    "Mobile Documents/com~apple~CloudDocs/ff",
+  ]) {
+    it(`${rel} outside the home folder (another volume) prints STOP too [QA-2-008]`, () => {
+      expect(saveAt(`../volume/${rel}`)).toMatch(/^STOP: .*synced folder/m);
+    });
+  }
+  // ... and that neither they nor the server know other sync apps' folders (the texts say so)
+  for (const rel of ["Nextcloud/ff", "../volume/Nextcloud/ff"]) {
+    it(`${rel} prints no STOP, and the server accepts it: the texts must not say otherwise [QA-2-008]`, () => {
+      expect(saveAt(rel)).not.toMatch(/STOP/);
     });
   }
   it("a private folder outside any repository prints no STOP (control)", () => {
