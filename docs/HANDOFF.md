@@ -20,35 +20,72 @@ weather; Yahoo is not connected (no API access). On 2026-10-06 the public histor
 (no-reply identity on every commit, no co-author trailers, no working notes; QA-1-095) and `main`
 gained branch ruleset `24558591` (no force-push, no deletion, linear history). The seven skipped
 round-1 hand-offs are decided: four closed, three deferred with a recorded design and a reopen
-trigger (§ Decisions made). **QA round 2 is done except the merge**
+trigger (§ Decisions made). **QA round 2 is complete; only the merge is left**
 ([`qa/2026-10-06-qa-round2.md`](qa/2026-10-06-qa-round2.md)). Its first half — the deferred-items
 analysis and a review of its own commits, QA-2-001 to QA-2-025 — is on `main` with the A17 script.
-Its second half is on `build/qa2-fixes` (from `main` at `f6ba81e`; head `5daa625`, CI green): every
-one of the 105 round-1 and round-2 fixes was re-checked with a mutation run (83 held, 22 reopened),
-and a second sweep over round 1's twelve lenses confirmed 20 new findings, QA-2-026 to QA-2-045 (one
-high: `exclude` kept an inactive starter in the lineup). Of those 42 items, 35 are fixed with
-mutation-checked regression tests, 4 are partly fixed (the open part is in another owner's file),
-2 are deferred as product decisions (QA-1-080, QA-2-037) and 1 was closed by the owner's decision (QA-2-028).
-Three more were registered from the fix round (QA-2-046 to QA-2-048).
+Its second half is on `build/qa2-fixes` (from `main` at `f6ba81e`, which has not moved since, so the
+branch fast-forwards; head `1c46181`; CI green: `ci` 37455321403 and `secrets` 37455321274 on the
+head, `docs` 37454436573 on `7cb8d9d`). All 105 round-1 and round-2 fixes were re-checked with a
+mutation run (83 held, 22 reopened); a second sweep confirmed 20 new findings, QA-2-026 to QA-2-045
+(one high: `exclude` kept an inactive starter in the lineup); a fix round worked the 42 items; an
+independent verification of that round found 8 problems (3 major: `exclude` still kept the inactive
+starter whenever his replacement was Questionable, a decisive lineup change carried an unrelated
+coin flip, and `ff_analyze_matchup` left my unmatched starter out of P(win)); and an integration
+round fixed them and finished the hand-offs. Final tally: of the 22 reopened fixes, 21 are fixed and
+QA-1-080 is deferred behind a typed refusal; of the 20 sweep findings, 18 are fixed (QA-2-045's TE
+premium part deferred), QA-2-037 is deferred and QA-2-028 closed; QA-2-046 is fixed and QA-2-047 and
+QA-2-048 are deferred; and seven low findings were registered, QA-2-049 to QA-2-055 (1 fixed, 3 open,
+3 deferred).
 
 Owner's next steps, in order:
 
-1. **Finish and merge `build/qa2-fixes`.** The register's § Open after round 2 lists the hand-offs.
-   Four are small code changes: pass the roster slot to E5, without which `ff_analyze_waivers` still
-   freezes a position for a locked bench K/DEF (QA-2-033); move D2 (`ff_get_injuries`) onto the new
-   report-state rule, which E1 already uses (QA-2-034); warn on unmatched keys in `ff_get_roster`
-   (QA-2-039); and compute `dst_ya` with `yardsAllowed` in `statline.ts` (QA-2-032). The rest is Skill
-   and CONTRIBUTING text, plus fixes for QA-2-046 and QA-2-048. Then the full gate and the merge.
-2. **Set it up** — README § Getting started: build in `~/Developer/yahoo-fantasy-football-mcp`,
-   `print-config` → add to Claude, copy the Skills, `ff refresh all`, then `/onboard` to write
-   `~/.config/fantasy-football-mcp/league.yaml` (0600, never in the repo). A cache built before this
-   branch needs `ff refresh nflverse:stats --force` (QA-2-032), and launchd jobs installed before it
-   need `ff install-launchd` again (QA-2-035).
-3. **Decide QA-2-037 before 2026-11-25** (the next game that is not on a Thursday, Sunday or Monday):
-   game days taken from `ds_schedules`, or a 30-minute schedules job every day. The other open product
-   calls: QA-1-080 (a very deep lineup — 16 starting seats, 20 on the bench — still gets `INTERNAL`
-   from `ff_analyze_lineup`), QA-2-045 (TE premium in `league.yaml`), QA-2-047 (the retrospective's
-   window: one week or season to date), and item 12 (E5 availability under the manual league).
+1. **Merge `build/qa2-fixes`.** Recommended first, each a few lines with a test in one file:
+   QA-2-054 (`ff doctor` row 9 passes a source whose dataset file is deleted — introduced on this
+   branch; row 8 still fails it, so doctor still exits non-zero) and QA-2-053 (E1 names the new
+   `dnp_pending` state); QA-2-052 (the lineup seat assumption under `objective: pwin`) can follow the
+   merge. Then confirm CI on the head (`ci` covers lint, typecheck, test with the coverage gate,
+   process on ubuntu, smoke, pack and supply-chain; the macOS process job runs on dispatch) and
+   fast-forward `main`.
+2. **Set it up, or upgrade** — README § Getting started: build in
+   `~/Developer/yahoo-fantasy-football-mcp`, `print-config` → add to Claude, copy the Skills,
+   `ff refresh all`, then `/onboard` to write `~/.config/fantasy-football-mcp/league.yaml` (0600,
+   never in the repo). An install from before this branch needs **`ff refresh all`** once (dataset
+   files are now `ds_schema` 3, QA-2-032; until then the tools answer `STALE_ONLY`) and
+   `ff install-launchd` again (QA-2-035).
+3. **Owner decisions, each with a recommendation** (register § Open after round 2 has the evidence
+   and reopen triggers):
+   - **QA-2-037 — decide before 2026-11-25** (Wed GB@LA, the next game off Thursday, Sunday and
+     Monday; weeks 15–16 are fantasy-playoff weeks). Game days from `ds_schedules`, or a 30-minute
+     schedules job every day. *Recommendation:* game days from `ds_schedules` — what plans 01 §5.2 and
+     06 §1.2 already specify, and the only option that follows a flexed or added game without a code
+     change; keep the 30-minute-every-day job as the fallback if that multi-owner change cannot land
+     by 2026-11-25.
+   - **QA-1-080 with QA-2-050** — E2's truncation contract for lineups deeper than about 14 starting
+     seats, and `rec.subjects` past 20. *Recommendation:* keep the interim `VALIDATION`
+     `lineup_too_deep` refusal until a league that deep is actually used (the reopen trigger). When
+     deciding, never cut the decision (`swaps`, QA-2-050) while unchanged seats' Dists remain, and
+     lean towards raising `REC_LIMITS.subjects` over capping it, because the retrospective sums the
+     start subjects and pairs starts with sits.
+   - **QA-2-045, TE premium** — a canonical `rec_te` derived from the league position.
+     *Recommendation:* build it only if your league has a TE premium (a small change: the canonical
+     stat plus one schema line); otherwise leave it deferred.
+   - **QA-2-047** — the retrospective's window. *Recommendation:* season to date, as plan 10 §2.1's
+     "reaches n by week k" column assumes, shown beside the week's own numbers: with one week, swap
+     regret can never reach `min_n`, and even per-player error fell one short (29 of 30) in the A9
+     chain with both rosters projected. Hold A15 (< 500 ms) with a sample cap.
+   - **QA-2-048** — `brier.p_active`. *Recommendation:* store the issued `p_active` with each
+     projection (a nullable column, store migration 003) rather than estimating it from the samples
+     (standard error up to 0.022, none for DEF), and define "played" by `roster_weekly` status for the
+     week (not `INA`), after checking on a past week that `INA` marks game-day inactives; a stats row
+     misses active players who recorded nothing.
+   - **QA-2-051** — what a swap row's `coin_flip` means. *Recommendation:* make it follow the decision
+     (true exactly for a held coin flip; ΔP(win)'s band stays in `delta_pwin`), and round the row's
+     interval as the decision does.
+   - **QA-2-055** — whether a current-week injury DNP carries into look-ahead weeks.
+     *Recommendation:* leave deferred until Phase 2's multi-week horizons read look-ahead weeks.
+   - **Item 12** — E5 availability under the manual league. *Recommendation:* adopt the option in item
+     12 (players on another team's roster in `league.yaml` are `T` and not offered; `waivers` are `W`;
+     everyone else `unknown`): a kicker another team rosters is advice you cannot act on.
 4. **A17, Claude Desktop half (about 10 minutes, mostly the app restart; steps in item 9).** The
    Claude Code half is recorded under "Build facts" (2026-10-06: the model sees both copies).
 5. **Then Phase 2** (usage data, waivers for all positions — with the E5 schema deferred from 1a,
@@ -136,7 +173,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 3 — adversarial review | ✅ **closed after three rounds** (`a98d41f`): 30 objections — 29 conceded-and-landed, 1 withdrawn on evidence, 0 pressed; round 3 raised no objections, three nits (fixed), remainder declared marginal; `## Closing verdict` in the log; `docs/plan/changelog.md` finalised (numbers, closing summary, rounds 1–3) | `docs/plan/adversarial-log.md`, `docs/plan/changelog.md` |
 | build — Phase 0 + 1a-full (foundation, modules, QA/pentest) | ✅ merged to `main`: 19 tools, 7 resources, 3 prompts, 4 Skills, `ff` CLI; 3,867 unit + 127 process tests, 98.65 % lines; QA/pentest round 1: 101 findings, 80 confirmed, **80 fixed** | `src/`, `tests/`, `skills/`, `docs/qa/` |
 | docs — README, LICENSE, SECURITY.md | ✅ `README.md` (947 lines, 16 sections, 7 Mermaid diagrams rendered by CI, 121 features marked 📋 planned), `LICENSE` (MIT), `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` — verified; CI green on `a7dad60` | root + `docs/README.md`, `docs/plan/00-index.md` |
-| QA round 2 | ✅ done except the merge (2026-10-06). On `main`: the deferred-items analysis (the 7 skipped hand-offs decided; QA-2-001…005) and a review of its own commits (QA-2-006…025), all fixed. On `build/qa2-fixes` (head `5daa625`, CI green): re-verification of all 105 fixes (83 held, 22 reopened) and a second sweep (20 confirmed, QA-2-026…045; 1 refuted); 35 of the 42 fixed, 4 partly fixed (hand-offs), 2 deferred, 1 closed; QA-2-046…048 registered | `docs/qa/2026-10-06-qa-round2.md` |
+| QA round 2 | ✅ complete except the merge (2026-10-06). On `main`: the deferred-items analysis (the 7 skipped hand-offs decided; QA-2-001…005) and a review of its own commits (QA-2-006…025), all fixed. On `build/qa2-fixes` (head `1c46181`, CI green): re-verification of all 105 fixes (83 held, 22 reopened), a second sweep (20 confirmed, QA-2-026…045; 1 refuted), a fix round, and an integration round after an independent verification of it (8 problems, 3 major, all resolved). Of the 42 items 39 are fixed, 2 deferred (QA-1-080 behind a typed refusal, QA-2-037) and 1 closed; QA-2-046 fixed, QA-2-047/048 deferred; QA-2-049…055 registered (1 fixed, 3 open, 3 deferred) | `docs/qa/2026-10-06-qa-round2.md` |
 
 ## Decisions made
 
@@ -174,12 +211,16 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 2026-10-06 | Skipped hand-off **E5 per-candidate ranges and per-position verdicts: deferred to Phase 2** (E5 for all positions). E5 keeps one `hold_vs_stream` — now labelled with the `position` it describes (QA-2-004, additive) — and no per-candidate Dist in Phase 1a; consumers rank one position per call | under the v1 `position_cv` basis a per-candidate band adds no information, and a full Dist per candidate would push a K-only compact result to the edge of halving. The Phase 2 design is in § Deferred designs. Plan 09 §3.4's per-candidate p10/p90 is deferred to Phase 2's E5-for-all-positions schema (in 1a a candidate carries no range of its own; QA-2-011). Reopen when Phase 2's E5 work starts, `player_sim` lands, an eval or real use misreads `marginal_value`'s interval, or a Skill ranks K and DEF in one call (Open items 7). The analysis also found QA-2-005 |
 | 2026-10-06 | **`tool_contract` stays 1 before the first release** (QA-2-010): an additive output field, nested or not (`hold_vs_stream.position`, QA-2-004), does not bump it while the package and Skills are `0.0.0`; a renamed, removed or retyped field, an input-schema change or a tool rename still does. The first release starts the counter, after which every change plan 09 §4 lists bumps it, additive fields included | an older Skill never reads a field it does not know, and before a release the Skills and the server come from one checkout; plan 09 §4 carries the rule |
 | 2026-10-06 | **QA-2-028 closed: this repository keeps its own heavy-job lock.** The default lock is `$HOME/.cache/heavy-lock/.heavy.lock`; sharing a lock with another project's heavy jobs is opt-in (`HEAVY_LOCK_DIR` or `git config dev.heavyLockDir`) | the owner's decision (QA round 2) |
-| 2026-10-06 | **Injury designations are carried for at most 2 weeks** past the report they came from (`INJURY_REPORT.carryWeeks` in `src/domain/analytics/constants.ts`); after that availability is unknown (`p_active` null, named), never "cleared". Only a final game-status report clears a player; a practice-only report does not (QA-1-021, QA-2-034; plan 07 D2) | carrying every Out for the rest of the season would zero rest-of-season totals; reading a missing report as cleared projected Out players fully active |
+| 2026-10-06 | **Injury designations are carried for at most 2 weeks** past the report they came from (`INJURY_REPORT.carryWeeks` in `src/domain/analytics/constants.ts`); after that availability is unknown (`p_active` null, named), never "cleared". Only a final game-status report clears a player; a practice-only report does not (QA-1-021, QA-2-034; plan 07 D2). **Integration round** (`50991e0`): a player not designated on the last game-status report who did not practise this week for an injury is not cleared either — `P_ACTIVE.questionableByPractice.dnp` (0.4), basis `trend_model`, `dnp_pending`; a rest day keeps `p` 1. D2 (`ff_get_injuries`) reads the report state through E1's own `reportContext()` | carrying every Out for the rest of the season would zero rest-of-season totals; reading a missing report as cleared projected Out players fully active; a new mid-week injury is not a clean bill of health |
 | 2026-10-06 | **`nflverse-daily` runs every 6 h** (04:30, 10:30, 16:30, 22:30; QA-2-035) — the injuries TTL sets the cadence; the 12 h TTL and 36 h hard limit are unchanged (plan 01 §5.2, plan 06 §1.2) | the old 10:30 daily + Wed–Sat 16:30 calendar left injuries stale about 60 h a week, and one failed run passed the hard limit |
-| 2026-10-06 | **E2 applies the no-move rule change by change, and an excluded player scores 0** (QA-1-020/040, QA-2-038): changes are made together when their combined interval excludes 0, otherwise only those whose own interval does, and `rec.action` names the coin flips held; an unmatched starter's seat is kept, never filled (QA-2-039); a non-head-to-head league forces `objective: "mean"` (QA-2-043). Plan 07 E2 "Implementation rules" | one coin-flip swap held back a fill that could not lose points; `exclude` measured swaps against the inactive player's full projection |
+| 2026-10-06 | **E2 applies the no-move rule change by change, and an excluded player scores 0** (QA-1-020/040, QA-2-038): ~~changes are made together when their combined interval excludes 0, otherwise only those whose own interval does~~ (superseded in the integration round, next row), and `rec.action` names the coin flips held; an unmatched starter's seat is kept, never filled (QA-2-039); a non-head-to-head league forces `objective: "mean"` (QA-2-043). Plan 07 E2 "Implementation rules" | one coin-flip swap held back a fill that could not lose points; `exclude` measured swaps against the inactive player's full projection |
+| 2026-10-06 | **E2 decides each lineup change on its own interval alone, and prices a seat that scores a known 0 exactly** (integration round; QA-1-020/040, QA-2-038; `c612ef9`, `1c46181`): a change is made when its own Δ interval excludes 0, held as a coin flip when it includes 0, skipped when it gains nothing (Δ 0 whatever happens), and a forced start is always made — never decided as a group, so the verification's "make coin flips together when they combine above 0" was not adopted; entrants are re-matched to freed seats so the made changes gain the most. A seat held by a player who will not play (excluded, `status: O`, bye) or empty is priced by the entrant's own quantiles and filled whenever he is expected to score; a starter who will not score and whom no rostered scorer replaces is left out of `rec.lineup` with his seat named. Plan 07 E2 | the combined rule tied unrelated seats both ways (a coin flip held back a fill; a decisive change carried a coin flip); the symmetric approximation kept an excluded starter behind any Questionable replacement (p10 = 0) |
 | 2026-10-06 | **E5 names a decision week without betting lines and never streams over a starter who plays on trailing points alone**; stale-omitted lines (QA-1-004) count as missing too (QA-2-044, plan 07 E5) | plan 07 §2: missing drivers are named, never silently omitted |
 | 2026-10-06 | **E13 under the manual league:** the league file is evidence of a past week's lineup only while unchanged since that week's last lock; otherwise `followed` comes from a final outcome, an earlier review or the logged hint, with a warning (QA-2-040, plan 07 E13). `CURRENT_ONLY_ROSTER_PLATFORMS = {manual}` in `src/mcp/tools/reclog.ts` stands in for a platform read feature (`historical_rosters`) until one exists | the file holds only the current roster; editing it for the next week flipped last week's calls |
-| 2026-10-06 | **Deferred in QA round 2, each with a reopen trigger** (round-2 register): QA-1-080 (E2's truncation contract for very deep lineups, and `rec.subjects` past 20), QA-2-037 (game days per `ds_schedules` vs a 30-minute job every day — **before 2026-11-25**), QA-2-045's TE premium (a canonical `rec_te`), QA-2-047 (the retrospective's window) | each needs a product decision or touches several owners' files; a patch would have been a heuristic |
+| 2026-10-06 | **Deferred in QA round 2, each with a reopen trigger** (round-2 register): QA-1-080 (E2's truncation contract for very deep lineups, and `rec.subjects` past 20) with QA-2-050 (a deep result fits only by halving `swaps`), QA-2-037 (game days per `ds_schedules` vs a 30-minute job every day — **before 2026-11-25**), QA-2-045's TE premium (a canonical `rec_te`), QA-2-047 (the retrospective's window), QA-2-048 (`brier.p_active`: no stored pre-lock `p_active` to feed, and "played" undefined), QA-2-051 (whether a swap row's `coin_flip` is C11's ΔP(win) test or the decision), QA-2-055 (a current-week injury DNP in look-ahead weeks). Recommendations in ▶ NEXT STEP | each needs a product decision or touches several owners' files; a patch would have been a heuristic |
+| 2026-10-06 | **Dataset files go to `ds_schema` 3** (QA-2-032, `fb1b2e3`): a layout-2 team-defence file may hold upstream's negative sack yardage, so every layout-2 file is refused at attach until republished (`DS_SCHEMA_VERSION` is one global value); run `ff refresh all` once after upgrading | the documented contract (`opp_sack_yards_lost` a non-negative magnitude) must hold for every file served; the QA-1-017 / QA-1-098 precedent and path |
+| 2026-10-06 | **`ff_analyze_matchup` refuses when one of my starters is unmatched** (QA-2-046, `35989bb`): `NOT_FOUND` with `MATCHUP_UNMATCHED_STARTER_HINT`, as for the opponent's side (QA-1-043), rather than a P(win) without his points | E3's whole answer is P(win); E2 withholds P(win) for the same input |
+| 2026-10-06 | **Interim for QA-1-080: a lineup too deep for one result is `VALIDATION` `lineup_too_deep` with a hint** (`3969e15`), using the server's own fit and `REC_LIMITS`, so a result that fits is never refused | an `INTERNAL` with nothing to act on needed no product decision to replace; the truncation contract stays deferred |
 
 ## Stack facts (checked 2026-09-29)
 
@@ -440,10 +481,12 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
 - [x] vulnerability alerts and Dependabot security updates enabled — 2026-10-06 (QA-2-019)
 - [x] QA round 2: per-fix re-verification and the second sweep — 2026-10-06
   (`docs/qa/2026-10-06-qa-round2.md`)
-- [ ] finish the round-2 hand-offs (register § Open after round 2), run the full gate and merge
-  `build/qa2-fixes`
-- [ ] **Chad:** decide QA-2-037 before 2026-11-25; QA-1-080, QA-2-045 (TE premium) and QA-2-047 when
-  convenient
+- [x] QA round 2: fix round and integration round — 2026-10-06 (every hand-off done or deferred with
+  a trigger; CI green on `1c46181`)
+- [ ] fix QA-2-054 and QA-2-053 (recommended before the merge), then merge `build/qa2-fixes`
+  (fast-forward); QA-2-052 after
+- [ ] **Chad:** decide QA-2-037 before 2026-11-25; QA-1-080 (with QA-2-050), QA-2-045 (TE premium),
+  QA-2-047, QA-2-048, QA-2-051, QA-2-055 and item 12 when convenient (recommendations in ▶ NEXT STEP)
 
 ## Log
 
@@ -574,3 +617,25 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
   QA-2-037) and 1 was closed by the owner (QA-2-028). Three more were registered (QA-2-046 to
   QA-2-048). Plans 01, 06 and 07 and the README were corrected where the fixes changed them. CI green
   on `5daa625`.
+- 2026-10-06 — **QA round 2: integration round; the round is complete** (`build/qa2-fixes`,
+  `fb1b2e3` … `1c46181`). An independent verification of the fix round (the branch at `57ea405`;
+  the items' reproductions and variants of them probed, the full unit suite run) found 8 problems. Three were major: `exclude` still kept an inactive starter whenever the
+  replacement was Questionable (a swap against a player who scores 0 was priced with a symmetric
+  approximation), the combined-interval rule let a decisive change carry an unrelated coin flip, and
+  `ff_analyze_matchup` left my unmatched starter out of P(win) (QA-2-046, reproduced over stdio). Three
+  integration groups, partitioned by file ownership, fixed them with failing-first, mutation-checked
+  tests: each lineup change is decided on its own interval, a seat that scores a known 0 is priced by
+  the entrant's own quantiles, entrants are re-matched to freed seats, a change that gains nothing is
+  worded and counted apart (`c612ef9`, `1c46181`); E3 refuses on my unmatched starter (`35989bb`); a
+  new injury DNP without a designation is not cleared and D2 reads the report state as E1 does
+  (`50991e0`); the store's team-defence reader nets the sack yardage and dataset files go to
+  `ds_schema` 3 (`fb1b2e3`; run `ff refresh all`); a too-deep lineup gets `VALIDATION`
+  `lineup_too_deep` instead of `INTERNAL` while QA-1-080's decision stays deferred (`3969e15`); and the
+  supply-chain checks work under a UUID-named checkout (`2180a00`, QA-2-049). They also finished the
+  fix round's hand-offs: `ff_analyze_waivers` passes the roster slot (`4edf921`, QA-2-033),
+  `ff_get_roster` warns on unmatched keys (`7d7798b`, QA-2-039), `ff status` reads a deleted file as
+  `unreadable` (`1957798`, QA-1-038), and the Skills, plan 07 and CONTRIBUTING follow (`a0793fc`,
+  `fb0a1ca`, `22261e1`, `216238f`, `2614675`, `05d0636`, `3a91376`, `775f859`, `7cb8d9d`, `4b53dcb`).
+  QA-2-048 was deferred (no stored pre-lock `p_active` to feed), and seven low findings were registered
+  (QA-2-049 to QA-2-055: 1 fixed, 3 open, 3 deferred). CI green on `1c46181` (`ci` 37455321403,
+  `secrets` 37455321274). Next: QA-2-054 and QA-2-053, then the merge (▶ NEXT STEP).
