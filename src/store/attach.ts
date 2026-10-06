@@ -19,11 +19,14 @@ import { MAX_ATTACHED, RESERVED_ATTACH_SLOTS, type ReattachReport } from "./type
 /** The metadata table the publisher writes into every dataset file (not a ds_* table). */
 export const DATASET_META_TABLE = "dataset_meta";
 /**
- * Version of the dataset-file layout (plan 03 §7 `ds_schema`: bumped when ds_* tables change).
- * 2: ds_team_defense_week gained fumble_recovery_tds_opp (QA-1-017) — a file of layout 1 is refused
- * like any other layout and the next refresh republishes it.
+ * Version of the dataset-file layout (plan 03 §7 `ds_schema`: bumped when ds_* tables change, or a
+ * stored column changes meaning). A file of another layout is refused and the next refresh
+ * republishes it.
+ * 2: ds_team_defense_week gained fumble_recovery_tds_opp (QA-1-017).
+ * 3: ds_team_defense_week.opp_sack_yards_lost is the non-negative magnitude of the yards lost on
+ *    sacks; a layout-2 file may hold upstream's negative SUM (QA-2-032).
  */
-export const DS_SCHEMA_VERSION = 2;
+export const DS_SCHEMA_VERSION = 3;
 
 /**
  * A `dataset_meta.ds_schema` value as a layout version: digits only (so "1x" or " 1" is not 1),
