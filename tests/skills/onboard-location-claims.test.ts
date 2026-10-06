@@ -8,7 +8,8 @@
 // server refuses only …" without ~/Dropbox), which the over-claim check cannot see — so every
 // folder the guard refuses (src/config/paths.ts syncedFolders, and this checkout) must be named.
 // QA-2-007: the converse — a sentence saying what the server does NOT look for may not name a
-// folder it does refuse ("It does not look for … folders such as ~/Dropbox"). QA-2-008: a generic
+// folder it does refuse ("It does not look for … folders such as ~/Dropbox"), in any voice — a
+// passive "~/Dropbox is not checked by the server" too (reopened QA-2-007). QA-2-008: a generic
 // "synced folder" phrase is sampled with a sync app the guard does not know (~/Nextcloud), so "the
 // server refuses … the synced folders in the home folder" is an over-claim the test can see.
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -137,27 +138,66 @@ const claims = FILES.flatMap((f) =>
     .map((s) => ({ file: f, sentence: s })),
 );
 
-/** "It does not look for …", "The server never checks …": a statement of what is NOT refused. */
-const DENIES =
-  /^\s*(?:it|the server)\s+(?:does not|doesn't|never|cannot|can't|will not|won't)\s+(?:look(?:s)? for|refuse|check|see|catch)/i;
+/** A negation, in any voice ("does not", "isn't", "neither … nor"). */
+const NEGATION = /\b(?:not|never|no|none|nothing|neither|nor|cannot)\b|n't\b/i;
+/** A checking verb (or noun), in any form: "looks for", "is checked", "caught", "has no check". */
+const CHECKING =
+  /\b(?:look(?:s|ed|ing)?\s+(?:for|at|in|into)|check(?:s|ed|ing)?|refus(?:e|es|ed|ing)|catch(?:es|ing)?|caught|see(?:s|n|ing)?|block(?:s|ed|ing)?|guard(?:s|ed|ing)?|cover(?:s|ed|ing)?|detect(?:s|ed|ing)?|stop(?:s|ped|ping)?|flag(?:s|ged|ging)?|reject(?:s|ed|ing)?|know(?:s|n)?|recogni[sz](?:e|es|ed|ing))\b/i;
+/** A denial with no negation: "the server ignores X", "accepts X", "lets X through", "unchecked". */
+const LETS_THROUGH =
+  /\bun(?:checked|caught|guarded|detected|refused|noticed)\b|\b(?:ignor(?:e|es|ed|ing)|skip(?:s|ped|ping)?|miss(?:es|ed|ing)?|overlook(?:s|ed|ing)?|accept(?:s|ed|ing)?|allow(?:s|ed|ing)?|permit(?:s|ted|ting)?)\b|\blets?\b[^.;:]*\bthrough\b/i;
+/** An elliptic denial whose verb is elsewhere in the sentence: "…; X is not.", "…, but not X". */
+const ELLIPTIC =
+  /^\s*(?:(?:but|and|or)\s+)?not\b|\b(?:is|are|does|do|will|can)(?:\s+not|n't)\s*\.?$/i;
+/** A clause whose explicit subject is not the server: the guide's commands, or the user. */
+const OTHER_SUBJECT =
+  /^\s*(?:the\s+)?(?:(?:guide's\s+)?(?:save\s+)?commands?(?:\s+above)?|you|the user)\b/i;
+
+/** Paragraphs of a Markdown text (code fences dropped): blank-line blocks and list items. */
+const paragraphs = (markdown: string): string[] =>
+  markdown
+    .replace(/^```[\s\S]*?^```/gm, "")
+    .split(/\n\s*\n|\n(?=\s*(?:[-*]|\d+\.)\s)/)
+    .filter((p) => p.trim() !== "");
+
+/** Clauses of a sentence: at every sentence end, colon, semicolon, dash, and "but"/"so"/"while". */
+const clauses = (sentence: string): string[] =>
+  sentence
+    .split(/(?<=[.!?])\s+|\s*[:;]\s+|\s+—\s+|,?\s+(?=(?:but|so|while|whereas|yet)\s)/)
+    .filter((c) => c.trim() !== "");
 
 /**
- * QA-2-007: the (file, sentence) pairs that say what the server does NOT refuse — a negated
- * server-refusal clause, a sentence that says so of the server by name, or an "It does not …"
- * sentence right after a server-refusal sentence.
+ * QA-2-007: every clause that says what the server does NOT refuse, in any voice — "It does not look
+ * for X", "X is not checked by the server", "Nor does it check X", "The server ignores X",
+ * "Neither the server nor the commands catch X", "…; X is not". A clause is about the server when
+ * it names the server, or when its paragraph does and its own subject is not the guide's commands
+ * or the user. (Reopened QA-2-007: only two active forms were recognised, so a passive denial of a
+ * refused folder passed.)
  */
-const denials = FILES.flatMap((f) => {
-  const ss = sentences(readFileSync(path.join(ROOT, f), "utf8"));
-  return ss
-    .filter((s, i) => {
-      const m = SERVER_REFUSES.exec(s);
-      if (m !== null && NEGATED.test(m[0])) return true;
-      if (!DENIES.test(s)) return false;
-      const prev = ss[i - 1];
-      return /^\s*the server\b/i.test(s) || (prev !== undefined && isClaim(prev));
-    })
-    .map((s) => ({ file: f, sentence: s }));
-});
+const denialsIn = (markdown: string): string[] =>
+  paragraphs(markdown).flatMap((para) => {
+    const serverParagraph = /\bserver\b/i.test(para);
+    return sentences(para).flatMap((sentence) =>
+      clauses(sentence).filter((c) => {
+        const aboutServer = /\bserver\b/i.test(c) || (serverParagraph && !OTHER_SUBJECT.test(c));
+        if (!aboutServer) return false;
+        if (LETS_THROUGH.test(c)) return true;
+        if (!NEGATION.test(c)) return false;
+        return CHECKING.test(c) || (ELLIPTIC.test(c) && CHECKING.test(sentence));
+      }),
+    );
+  });
+
+/** The (file, clause) pairs that say what the server does NOT refuse. */
+const denials = FILES.flatMap((f) =>
+  denialsIn(readFileSync(path.join(ROOT, f), "utf8")).map((s) => ({ file: f, sentence: s })),
+);
+
+/** The non-generic locations a denial names that the real guard refuses. */
+const refusedIn = (denial: string): string[] =>
+  named(denial)
+    .filter(([, , samples, generic]) => generic === undefined && samples(home).some(serverRefuses))
+    .map(([label]) => label);
 
 describe("QA-1-044/QA-1-067: the onboard Skill claims only the location refusals the server makes", () => {
   it("the guard itself: sanity of the samples (control)", () => {
@@ -191,24 +231,70 @@ describe("QA-1-044/QA-1-067: the onboard Skill claims only the location refusals
 
   it("a sentence saying what the server does not look for names no folder it refuses [QA-2-007]", () => {
     // the control: the texts do say what the server leaves to the user
-    expect(denials.map((d) => d.file).sort()).toEqual([...FILES].sort());
-    const wrong: string[] = [];
-    for (const d of denials) {
-      for (const [label, , samples, generic] of named(d.sentence)) {
-        if (generic !== undefined) continue; // "other git working trees", "any other synced folder"
-        const refused = samples(home).filter(serverRefuses);
-        if (refused.length > 0) wrong.push(`${d.file}: "${label}" in: ${d.sentence}`);
-      }
-    }
+    expect([...new Set(denials.map((d) => d.file))].sort()).toEqual([...FILES].sort());
+    const wrong = denials.flatMap((d) =>
+      refusedIn(d.sentence).map((label) => `${d.file}: "${label}" in: ${d.sentence}`),
+    );
     expect(wrong).toEqual([]);
   });
 
-  it("the denial check sees a refused folder named as not looked for (control) [QA-2-007]", () => {
-    const planted = "It does not look for other git working trees, or for folders such as Dropbox.";
-    const labels = named(planted).filter(([, , , generic]) => generic === undefined);
-    expect(labels.map(([l]) => l)).toEqual(["Dropbox"]);
-    expect(DENIES.test(planted)).toBe(true);
-    expect(labels.every(([, , samples]) => samples(home).some(serverRefuses))).toBe(true);
+  // Every way of saying "the server does not refuse X", planted in the paragraph where each text
+  // says what the server refuses, with X each folder the server does refuse: all must be seen.
+  const DENIAL_FORMS = [
+    "It does not look for other git working trees, or for folders such as {X}.",
+    "Folders such as {X} are not checked by the server.",
+    "{X} is not checked by the server.",
+    "{X} isn't refused by the server.",
+    "Nor does it check {X}.",
+    "It never sees {X}.",
+    "The server ignores {X}.",
+    "The server accepts {X}.",
+    "The server lets {X} through.",
+    "Neither the server nor the commands catch {X}.",
+    "{X} is left unchecked by the server.",
+    "The server has no check for {X}.",
+    "The server refuses ~/.ssh, but not {X}.",
+    "Only ~/.ssh is refused; {X} is not.",
+  ] as const;
+  const REFUSED_SPELLINGS: readonly (readonly [string, string])[] = [
+    ["this project's checkout", "this project's checkout"],
+    ["Dropbox", "`~/Dropbox`"],
+    ["Google Drive", "`~/Google Drive`"],
+    ["OneDrive", "`~/OneDrive - <organisation>`"],
+    ["iCloud Drive", "iCloud Drive"],
+    ["CloudStorage", "`~/Library/CloudStorage`"],
+    ["Desktop", "`~/Desktop`"],
+    ["Documents", "`~/Documents`"],
+  ];
+
+  it("every form of denial is seen, in either text, for every folder the server refuses (control) [QA-2-007]", () => {
+    const missed: string[] = [];
+    for (const file of FILES) {
+      const text = readFileSync(path.join(ROOT, file), "utf8");
+      const claim = claims.find((c) => c.file === file);
+      expect(claim, `${file} says what the server refuses`).toBeDefined();
+      // the line (paragraph) that holds the first server-refusal claim
+      const anchor = text.split("\n").find((l) => sentences(l).includes(claim?.sentence ?? "\0"));
+      expect(anchor, `${file}: the claim's line`).toBeDefined();
+      for (const [label, spelling] of REFUSED_SPELLINGS) {
+        for (const form of DENIAL_FORMS) {
+          const planted = form.replaceAll("{X}", spelling);
+          const edited = text.replace(anchor ?? "", `${anchor ?? ""} ${planted}`);
+          const seen = denialsIn(edited).some((d) => refusedIn(d).includes(label));
+          if (!seen) missed.push(`${file}: ${planted}`);
+        }
+      }
+    }
+    expect(missed).toEqual([]);
+  });
+
+  it("a true denial passes: what the server does not refuse may be said in any form (control) [QA-2-007]", () => {
+    for (const form of DENIAL_FORMS) {
+      const planted = form.replaceAll("{X}", "`~/Nextcloud`");
+      const found = denialsIn(`The server refuses only \`~/Documents\`. ${planted}`);
+      expect(found.length, planted).toBeGreaterThan(0);
+      expect(found.flatMap(refusedIn), planted).toEqual([]);
+    }
   });
 
   it("every folder the server refuses is named where the text says what it refuses [QA-2-002]", () => {
