@@ -1,7 +1,7 @@
 // dataset-unreadable.test.ts — QA-1-038: a dataset the refresh log lists as current whose file is
 // damaged or gone is reported as exactly that — not "older than its hard limit", not "never loaded"
 // — with the one command that repairs it (`ff refresh <source>`; plain refresh republishes a
-// damaged file since 49ace6d). A source never loaded keeps the never-loaded hint.
+// damaged file since e689740). A source never loaded keeps the never-loaded hint.
 import { rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

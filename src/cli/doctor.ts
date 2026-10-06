@@ -759,7 +759,7 @@ export function checkStore(config: Config, ex: ExistingStore): DoctorRow {
     const c = quickCheckFile(file);
     if (c !== "ok") {
       worse("fail");
-      // a plain refresh republishes a damaged current file (49ace6d): --force is not needed
+      // a plain refresh republishes a damaged current file (e689740): --force is not needed
       details.push(`${r.source}: dataset file quick_check ${c} — \`ff refresh ${r.source}\``);
       continue;
     }
