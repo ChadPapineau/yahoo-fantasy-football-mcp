@@ -201,6 +201,23 @@ describe("purge never deletes a directory tree it did not create (QA-2-029)", ()
     expect(keep).toContain(tmp);
   });
 
+  it("--dry-run says it would keep the person's directories, and deletes nothing", async () => {
+    const s = sandbox({ create: true });
+    sb = s;
+    const tmp = runTempDir(s.cacheDir);
+    mkdirSync(tmp, { mode: 0o700 });
+    mkdirSync(path.join(tmp, "client-report"), { mode: 0o755 });
+    chmodSync(path.join(tmp, "client-report"), 0o755);
+    const io = makeIo(s);
+    expect(await main(["uninstall", "--dry-run", "--purge"], io)).toBe(EXIT.OK);
+    expect(io.out.text).toContain(
+      `would keep (not ours: not a run directory this program made) ${path.join(tmp, "client-report")}`,
+    );
+    expect(io.out.text).not.toMatch(/^kept \(not ours/m);
+    expect(io.out.text).toContain(`would delete ${tmp} (if empty)`);
+    expect(existsSync(path.join(tmp, "client-report"))).toBe(true);
+  });
+
   it("positive control: the run directories `ff refresh` leaves are still deleted", async () => {
     const s = sandbox({ create: true });
     sb = s;

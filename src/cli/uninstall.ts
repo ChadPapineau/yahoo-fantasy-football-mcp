@@ -207,13 +207,15 @@ export async function uninstall(
 
   if (opts.purge) {
     if (opts.dryRun) {
-      for (const p of deleting) await out(`would delete ${p.path}`);
+      for (const p of deleting)
+        await out(`would delete ${p.path}${p.action === "rmdir" ? " (if empty)" : ""}`);
     } else {
       const r = executePurge(deleting);
       for (const p of r.removed) await out(`deleted ${p}`);
       for (const p of r.kept) await out(`kept (not empty or not removable) ${p}`);
     }
-    for (const p of leaving) await out(`kept (not ours: ${p.reason}) ${p.path}`);
+    for (const p of leaving)
+      await out(`${opts.dryRun ? "would keep" : "kept"} (not ours: ${p.reason}) ${p.path}`);
   } else {
     await out(
       `kept your data: ${config.cacheDir} (store, datasets, backups) — \`ff uninstall --purge --yes\` deletes it`,
