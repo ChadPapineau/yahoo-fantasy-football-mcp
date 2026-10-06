@@ -5,6 +5,8 @@
 // A player entered with last season's NFL team (nflverse has him elsewhere) is the case.
 // QA-2-003: the same holds for the rule fields a league file leaves out ("unverified"): every
 // surface the text names for that list must list them (`ff doctor` was named and does not).
+// QA-2-009: a surface named in a following sentence that refers back ("The `ff doctor` check lists
+// those fields too.") is named for the unverified fields as well, so a split sentence cannot hide it.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -31,11 +33,32 @@ const remedy = TEXTS.flatMap(({ file, text }) =>
     .map((s) => ({ file, s })),
 );
 
-/** Sentences that tell the reader where the unverified (left-out) rule fields are listed. */
+/** A sentence about the rule fields a league file leaves out ("unverified"). */
+const UNVERIFIED = /unverified|\bleft[- ]out\b|\bleav(?:e|es|ing) (?:\w+ ){0,3}out\b/i;
+/** A sentence that refers back to the one before it ("those fields", "them", "too"). */
+const REFERS_BACK = /\b(?:them|they|those|these|both|too|also|likewise|the same)\b/i;
+
+/**
+ * Sentences that tell the reader where the unverified (left-out) rule fields are listed: each
+ * sentence about them, and every following sentence of the same paragraph that refers back to it
+ * (QA-2-009). A paragraph is a line: the Skill texts keep one paragraph or list item per line.
+ */
+function unverifiedSentences(markdown: string): string[] {
+  return markdown
+    .replace(/^```[\s\S]*?^```/gm, "")
+    .split("\n")
+    .flatMap((line) => {
+      const out: string[] = [];
+      let run = false;
+      for (const s of sentences(line)) {
+        run = UNVERIFIED.test(s) || (run && REFERS_BACK.test(s));
+        if (run) out.push(s);
+      }
+      return out;
+    });
+}
 const unverified = TEXTS.flatMap(({ file, text }) =>
-  sentences(text)
-    .filter((s) => /unverified/i.test(s))
-    .map((s) => ({ file, s })),
+  unverifiedSentences(text).map((s) => ({ file, s })),
 );
 
 /** The surfaces a Skill may name for the unmatched list or the unverified fields. */
@@ -151,6 +174,15 @@ describe("QA-2-003: every surface the onboard text names for the unverified rule
 
   it("the fixture league leaves rule fields out, and the league tool lists them (control)", async () => {
     expect(await leftOut()).toContain("playoffs_reseeding");
+  });
+
+  it("a surface named in a following sentence that refers back is read too (control) [QA-2-009]", () => {
+    const planted =
+      "The league check (`ff_get_league`) lists the rules left out under `rules.unverified_fields`. The `ff doctor` check lists those fields too. Slot names are the app's; `ff status` shows the path.";
+    const got = unverifiedSentences(planted);
+    expect(got.some((s) => SURFACES["ff doctor"].test(s))).toBe(true);
+    // a sentence that does not refer back ends the run: `ff status` is not named for the fields
+    expect(got.some((s) => SURFACES["ff status"].test(s))).toBe(false);
   });
 
   it("the text names at least one place where the unverified fields are listed", () => {
