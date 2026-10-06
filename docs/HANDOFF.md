@@ -109,10 +109,10 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 0 — repo setup | ✅ done | `.gitignore`, `.env.example`, `main` pushed, description + 14 topics applied via `gh`, tooling inventory (`docs/research/00-*`) |
 | 1 — research (waves 1–3) | ✅ 01–06 all verified (SHAs on origin, identifier scan, one load-bearing claim per doc checked at source) | `docs/research/01-*` … `06-*` |
 | 2 — plan | ✅ all ten files (`docs/plan/01-*`…`10-*`, 2,935 lines), both halves verified; plan 10 §4 lists 13 small tensions to fold in during the adversarial round | `docs/plan/` |
-| 2b — docs-only automation (plan 06 §4 step 1) | ✅ `docs` (Mermaid 7/7 + links, with self-tests) and `secrets` (gitleaks 8.30.1 pinned by sha256, 7 Yahoo rules, self-test, weekly full-history scan) green on `main` at `f3a0a48`; Dependabot; PR template. GitHub secret scanning + push protection were already enabled. **Chad's step:** a branch ruleset (no force-push, no deletion, linear history; plan 04 §5); required status checks deliberately deferred until PRs are required (a required check rejects every fresh direct push) | `.github/**`, `.gitleaks.toml`, `scripts/**` |
-| 3 — adversarial review | ✅ **closed after three rounds** (`4c1d981`): 30 objections — 29 conceded-and-landed, 1 withdrawn on evidence, 0 pressed; round 3 raised no objections, three nits (fixed), remainder declared marginal; `## Closing verdict` in the log; `docs/plan/changelog.md` finalised (numbers, closing summary, rounds 1–3) | `docs/plan/adversarial-log.md`, `docs/plan/changelog.md` |
+| 2b — docs-only automation (plan 06 §4 step 1) | ✅ `docs` (Mermaid 7/7 + links, with self-tests) and `secrets` (gitleaks 8.30.1 pinned by sha256, 7 Yahoo rules, self-test, weekly full-history scan) green on `main` at `c30b997`; Dependabot; PR template. GitHub secret scanning + push protection were already enabled. **Chad's step:** a branch ruleset (no force-push, no deletion, linear history; plan 04 §5); required status checks deliberately deferred until PRs are required (a required check rejects every fresh direct push) | `.github/**`, `.gitleaks.toml`, `scripts/**` |
+| 3 — adversarial review | ✅ **closed after three rounds** (`a98d41f`): 30 objections — 29 conceded-and-landed, 1 withdrawn on evidence, 0 pressed; round 3 raised no objections, three nits (fixed), remainder declared marginal; `## Closing verdict` in the log; `docs/plan/changelog.md` finalised (numbers, closing summary, rounds 1–3) | `docs/plan/adversarial-log.md`, `docs/plan/changelog.md` |
 | build — Phase 0 + 1a-full (foundation, modules, QA/pentest) | ✅ merged to `main`: 19 tools, 7 resources, 3 prompts, 4 Skills, `ff` CLI; 3,867 unit + 127 process tests, 98.65 % lines; QA/pentest round 1: 101 findings, 80 confirmed, **80 fixed** | `src/`, `tests/`, `skills/`, `docs/qa/` |
-| docs — README, LICENSE, SECURITY.md | ✅ `README.md` (947 lines, 16 sections, 7 Mermaid diagrams rendered by CI, 121 features marked 📋 planned), `LICENSE` (MIT), `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` — verified; CI green on `b09fd77` | root + `docs/README.md`, `docs/plan/00-index.md` |
+| docs — README, LICENSE, SECURITY.md | ✅ `README.md` (947 lines, 16 sections, 7 Mermaid diagrams rendered by CI, 121 features marked 📋 planned), `LICENSE` (MIT), `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` — verified; CI green on `a7dad60` | root + `docs/README.md`, `docs/plan/00-index.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
 
 ## Decisions made
@@ -302,16 +302,16 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 - 2026-09-30 — Chad's decisions: no legacy Yahoo app; read-only is the
   product; no development until the package is reviewed.
 - 2026-09-30 — Adversarial review: three rounds, 30 objections, review
-  closed (`4c1d981`); plan revised twice (`8c39191`, `b904a6f`); changelog
-  finalised (`72301ad`).
-- 2026-09-30 — README/LICENSE/SECURITY/indexes landed (`b09fd77`).
+  closed (`a98d41f`); plan revised twice (`00038db`, `65e5483`); changelog
+  finalised (`dd54be2`).
+- 2026-09-30 — README/LICENSE/SECURITY/indexes landed (`a7dad60`).
   **Pre-build work complete; waiting on Chad.**
-- 2026-09-30 — **Build approved.** Guard-rails first (`b0a7194`, `1224af6`): secret/identifier
+- 2026-09-30 — **Build approved.** Guard-rails first (`6c27fdc`, `6c27fdc`): secret/identifier
   scanner + pre-commit hook + commit helper, all self-tested.
-- 2026-09-30 — **Foundation stage green**: scaffold (`.npmrc` alone first `8402644`, Z3
+- 2026-09-30 — **Foundation stage green**: scaffold (`.npmrc` alone first `1e1c2b5`, Z3
   proven), exact pins, strict TS, ESLint with layer boundaries, coverage gate, zero-dep
   supply-chain checks, `ci.yml`; the contract layer, critiqued in two independent reviews
-  (46 issues: 44 applied, 2 routed to the owning modules) and revised (`fbcd8e8`); an
+  (46 issues: 44 applied, 2 routed to the owning modules) and revised (`c0811f6`); an
   independent gate re-ran everything from a clean install — green first time, **1,014 tests**,
   ~99.5 % coverage, CI green. Re-verified in a fresh clone outside iCloud, and the build moved
   there; the domain `Math.random`/`Date.now` ban and the conflict-copy guard were added.
@@ -323,7 +323,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   `test:coverage` + `check:coverage` green 3/3 in sequence locally at load ≤ 38. A17's manual
   half and the A15 reading are Chad's (items 9–10 above).
 - 2026-09-30 — **Modules gate, fix round 2** (gate RED on A15 literal; A17 manual). **A15 met as
-  written** (`bb345d7`): profiling the served E1 call showed 43 % of it storing samples
+  written** (`a613301`): profiling the served E1 call showed 43 % of it storing samples
   (`JSON.stringify` of 4,000 full `StatLine`s per player-week, ~1.6 MB each) and most of the rest
   in `scoreSamples` building per-sample contributions and a string round trip per term in
   `denoise`. Fixed: compact exact sample storage + a 1,000-sample stored prefix; the sample path
@@ -331,37 +331,37 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   over every bit pattern and the ulp neighbours of decimal ties) equal to
   `Number(x.toPrecision(15))`. Roster call 729–830 → ≈ 293 ms; 32 × 4000 1.3–1.4 s → 693 ms;
   the latency test now holds E1 to the literal 500 ms. Also fixed: bare `ff refresh all` in fixture
-  mode (`b42f2e6`), E12's unchecked week (`06372c7`); `docs/evals/1a-backtest.md` now says the
+  mode (`9f2b6e6`), E12's unchecked week (`04eb926`); `docs/evals/1a-backtest.md` now says the
   served K universe (roster_weekly kickers: 3 on the fixture excerpt) differs from the backtest's
   32. A17's manual half stays with Chad (item 9); item 12 (E5 availability) is a product call.
-  **A13 on macOS in CI on this round's head:** the first dispatch (`36777995749`, on `eb7eacc`)
+  **A13 on macOS in CI on this round's head:** the first dispatch (`36777995749`, on `1286ecf`)
   was the A4a contention test's first macOS CI run and failed (p95 551 ms): best-effort writes
   used SQLite's busy handler, which sums its *intended* sleeps, so on a macOS VM whose short
-  sleeps overshoot a "100 ms" wait stalled ~5×. Fixed at the root (`27cee94`: non-blocking tries
-  until a monotonic 100 ms deadline); dispatch `36779073123` on `27cee94` is green on both OSes —
+  sleeps overshoot a "100 ms" wait stalled ~5×. Fixed at the root (`0512b20`: non-blocking tries
+  until a monotonic 100 ms deadline); dispatch `36779073123` on `0512b20` is green on both OSes —
   macOS A4a p95 126 ms, E1 roster 222 ms, 32 × 4000 556 ms; ubuntu A4a 97 ms, E1 250 ms. A
   pre-existing fast-check oracle flake in the CRPS property (a subnormal counterexample whose
-  correctly rounded CRPS is 0) was fixed in the test (`7def120`).
+  correctly rounded CRPS is 0) was fixed in the test (`f54e3e9`).
 - 2026-09-30 — **Modules gate, fix round 3** (gate RED only on A17's manual half, which is Chad's —
   item 9; plan 10's 1a-full exit gate does not list A17). The three thin margins were fixed at the
   root. **A8:** the "exactly 3 K candidates" margin hid a production defect — the roster excerpt
   held only the fixture league's kickers, while on the real `roster_weekly` E5 ranked 32 DEF + 40 K
   + my K/DEF through E1's 64-target validation, so every served `ff_analyze_waivers` was
-  `VALIDATION`. Fixed (`d323e13`): E5's own 96 bound, `ACT`-only kickers, a balanced 5 + 5 compact /
+  `VALIDATION`. Fixed (`90ac543`): E5's own 96 bound, `ACT`-only kickers, a balanced 5 + 5 compact /
   3 + 3 full list that fits C8 without halving, and a roster excerpt that keeps every kicker's row
   (regenerated with `make-fixtures --only weekly_rosters` from byte-identical upstream).
   **A4a:** `STORE_BUSY` measured 982 ms against the 1 s budget with a +50 ms test tolerance; each
-  yield now reserves the longest one observed (`e8cc991`), ~880 ms, tests assert the literal 1 s.
+  yield now reserves the longest one observed (`41f2042`), ~880 ms, tests assert the literal 1 s.
   **Exit on stdin close during maximum-size synchronous calls (~1.28 s):** not changed — a
   synchronous `node:sqlite`/engine call cannot be pre-empted; plan 05 §4.2's bound is 3 s and the
-  idle case exits in 15–17 ms. **CI green on `2774446`** (push `36782980116` + dispatch
+  idle case exits in 15–17 ms. **CI green on `297642e`** (push `36782980116` + dispatch
   `36782980065` with macOS): A4a `STORE_BUSY` 891 ms ubuntu / 875 ms macOS, p95 97 / 110 ms.
 - 2026-09-30 — **Modules stage done**: dataset contract grounded in the real 2026 nflverse files
-  (`d6c6801`), 8 modules built in parallel (store, network/runner/weather, nflverse, scoring,
+  (`50414d9`), 8 modules built in parallel (store, network/runner/weather, nflverse, scoring,
   crosswalk, league + `ManualLeagueProvider`, reclog, Skills), analytics, MCP surface (19 P0
   tools, 7 resources, 3 prompts) + `ff` CLI, integration (golden over real nflverse lines, E2E
   over stdio, Skills dry run, latency), 3 gate/fix rounds.
-  Head `b69e439`: every automated check green — **3,392 unit + 115 process tests, 98.8 % lines**,
+  Head `3182482`: every automated check green — **3,392 unit + 115 process tests, 98.8 % lines**,
   smoke in both protocol eras, CI green. The gate's only open item is **A17's manual half**
   (Chad asks Claude Code and Claude Desktop to repeat the `ff_debug_echo` nonce). A re-run of
   the gate from a clean install got the same numbers. QA + pentest next.
@@ -377,7 +377,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   refactor, E1 worker thread, publisher `quick_check`, far-week projection persistence.
 - 2026-09-30 — **QA + pentest round 1**: 12 review lenses, 101 findings, 237 independent
   refutation checks → 80 confirmed (9 high, 50 medium, 21 low); 73 fixed area by area + 7
-  completed in the integration pass (`c69b6e5`), every fix with a failing-first,
+  completed in the integration pass (`acd6db1`), every fix with a failing-first,
   mutation-checked regression test; loop stopped after round 1. The full gate was re-run from a
   clean install: 3,867 + 127 tests green, 98.65 % lines, CI green. Register
   `docs/qa/2026-09-30-phase1a-qa-pentest.md`. README now describes the built product. Merged to `main`.

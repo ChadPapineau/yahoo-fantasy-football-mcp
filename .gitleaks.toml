@@ -93,11 +93,11 @@ description = "gitleaks self-test fixtures: fake, well-formed values that MUST m
 paths = ['''scripts/gitleaks-selftest/''']
 
 [[allowlists]]
-# History-only false positive. Commit a93cd68 (a test of `ff doctor`'s client-log redaction)
+# History-only false positive. Commit 4a96589 (a test of `ff doctor`'s client-log redaction)
 # used the fake string "access_token=abcdef…"; a later commit replaced it with a placeholder.
 # No credential exists in this project. COMMITS-ONLY on purpose: a commit list never matches a
 # working-tree (`gitleaks dir`) scan, so the tree scan stays fully armed — a `paths` criterion
 # here would exempt that file in tree scans (verified with gitleaks 8.30.1). That commit's six
 # test files were scanned in full; this was its only finding.
-description = "History-only false positive in commit a93cd68 (fake token in a redaction test); commits-only so tree scans stay armed"
-commits = ["a93cd687dff2e2d99f4e8eaabc4382886b40d6a5"]
+description = "History-only false positive in commit 4a96589 (fake token in a redaction test); commits-only so tree scans stay armed"
+commits = ["4a96589752c1a13f704382eda70ba7cf7a964543"]
