@@ -500,6 +500,41 @@ describe("rows 8–10 — store, datasets, journal", () => {
     expect(checkDatasets(makeIo(s), c, { kind: "missing" }).status).toBe("fail");
   });
 
+  it("row 9: a current dataset file that is deleted, a directory or overwritten fails, naming the source [QA-2-054]", () => {
+    const damage = {
+      deleted: (f: string) => {
+        rmSync(f);
+      },
+      directory: (f: string) => {
+        rmSync(f);
+        mkdirSync(f);
+      },
+      overwritten: (f: string) => {
+        writeFileSync(f, Buffer.alloc(8192, 0x5a));
+      },
+    } as const;
+    for (const [kind, apply] of Object.entries(damage)) {
+      const s = refreshed();
+      const c = cfg(s, { FF_WEATHER_SOURCE: "off" });
+      const now = fixedClock("2026-09-30T18:10:00.000Z");
+      const before = openExistingStore(c, now, log(s));
+      try {
+        expect(checkDatasets(makeIo(s, { clock: now }), c, before).status, kind).toBe("ok");
+      } finally {
+        if (before.kind === "open") before.store.close();
+      }
+      apply(path.join(s.cacheDir, "ds", "nflverse__injuries.sqlite"));
+      const ex = openExistingStore(c, now, log(s));
+      try {
+        const r = checkDatasets(makeIo(s, { clock: now }), c, ex);
+        expect(r.details.join("\n"), kind).toMatch(/^nflverse:injuries: unreadable\b/m);
+        expect(r.status, kind).toBe("fail");
+      } finally {
+        if (ex.kind === "open") ex.store.close();
+      }
+    }
+  });
+
   it("row 8: an unwritable cache dir names the real problem; row 9 skips instead of 'never_loaded' [QA-1-053]", () => {
     const s = refreshed();
     const c = cfg(s);
