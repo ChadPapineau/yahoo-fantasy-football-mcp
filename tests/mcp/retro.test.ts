@@ -87,8 +87,9 @@ describe("the week-3 retrospective (A9)", () => {
       regret: number | null;
     }[];
     expect(calls.map((x) => x.log_id).sort()).toEqual([...logged].sort());
-    // roster evidence decides `followed` over the hint: league.yaml still holds the old lineup,
-    // so a call that changed the lineup reads as not followed (a no-move call as followed)
+    // `followed` is settled either way: from the week's roster while the fixture league file is
+    // unchanged since week 3 locked, else (its checkout time is later) from the logged hint
+    // "user_said_yes" — tests/mcp/retro-followed.test.ts holds both paths (QA-2-040)
     const lineup = calls.find((x) => x.kind === "lineup");
     expect(typeof lineup?.followed).toBe("boolean");
     expect(typeof lineup?.realised).toBe("number");
