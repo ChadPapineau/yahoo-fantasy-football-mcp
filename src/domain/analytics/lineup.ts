@@ -546,6 +546,25 @@ function slotFlow(
 }
 
 // --- the no-move rule, change by change (QA-1-060, QA-1-020/040 reopened, QA-2-038) -------------------
+//
+// The rule (plan 07 E2; research 05 §14.4, "every move is compared against doing nothing"):
+//  1. Each change is decided on its own Δ interval. The changes touch disjoint seats, so any subset
+//     of them applied to the current lineup is legal, and nothing ties one change to another: a
+//     coin flip never holds back a decisive change, and a decisive change never carries a coin flip.
+//  2. A change is made when its own interval excludes 0, held as a coin flip when it straddles 0,
+//     and not made when it gains nothing (Δ ≡ 0: a player who will not play for one who scores 0).
+//     A `force_start` is always made.
+//  3. A seat that scores a known 0 now — empty, or held by a player who will not play (`exclude`,
+//     `status: O`, a bye: a Dist that is a point mass at 0) — is priced exactly: Δ is the entrant's
+//     own points, his quantiles, never a symmetric approximation. Doing nothing there scores exactly
+//     0, so the change is made whenever the entrant is expected to score (Δ_e > 0): a player who
+//     will not play is never started while a replacement who can score exists (QA-2-038).
+//  4. A starter who scores a known 0 and stays (no replacement who can score) is left out of
+//     `rec.lineup` and of the start subjects — his seat scores 0 whoever holds it — and an assumption
+//     names him and the seat (QA-2-038 "rec.lineup never starts an excluded player").
+
+/** How the no-move rule decided one change. */
+type Verdict = "made" | "coin_flip" | "gains_nothing";
 
 /**
  * One independent lineup change on the way from the current lineup to the best one: an entrant's
@@ -560,8 +579,7 @@ interface Change {
   readonly members: readonly LineupPlayer[];
   /** The Δ-points interval of this change alone (rounded, as reported in `swaps`). */
   readonly interval: readonly [number, number];
-  /** A `force_start` entrant: the user's instruction, never held. */
-  readonly forced: boolean;
+  readonly verdict: Verdict;
 }
 
 /** A Δ interval that includes 0: the change could lose points (research 05 §14.4; QA-1-060). */
@@ -574,50 +592,89 @@ const straddles = (iv: readonly [number, number]): boolean => iv[0] < 0 && iv[1]
 const gainsNothing = (iv: readonly [number, number]): boolean => iv[0] === 0 && iv[1] === 0;
 
 /**
- * A swap's Δ points (`in` − `out`) and its p10–p90 interval: a fill's Δ is the entrant's own points
- * (the seat scores 0 now) — his quantiles, exactly; a swap's by the normal approximation with the
- * pair's same-team correlation.
+ * A Dist that is a point mass at 0: a player who will not score this week — excluded, `status: O`,
+ * on bye, no team (QA-2-038).
+ */
+const scoresZero = (d: Dist): boolean => d.mean === 0 && d.p10 === 0 && d.p90 === 0;
+
+/** A Dist with no spread: the player scores exactly `mean` (a bye, an exclusion, `status: O`). */
+const pointMass = (d: Dist): boolean => d.p10 === d.p90 && d.p10 === d.mean;
+
+/**
+ * Whether a swap frees a seat that scores a known 0 now — an empty seat (`out` null) or one held by
+ * a player who will not score — so doing nothing there is worth exactly 0 (rule 3).
+ */
+const freesZeroSeat = (pr: { readonly out: LineupPlayer | null }): boolean =>
+  pr.out === null || scoresZero(pr.out.points);
+
+/**
+ * A swap's Δ points (`in` − `out`) and its p10–p90 interval. A side with no spread (an empty seat, a
+ * player who will not play, one on bye) is a constant, so Δ's quantiles are the other side's,
+ * exactly (rule 3) — a symmetric approximation around a skewed entrant's mean put p10 below 0 for a
+ * replacement who cannot lose points (the round-2 verification of QA-2-038); two uncertain sides use
+ * the normal approximation with the pair's same-team correlation.
  */
 function pairDelta(pr: { readonly out: LineupPlayer | null; readonly in: LineupPlayer }): {
   de: number;
   interval: readonly [number, number];
 } {
-  const out = pr.out;
-  if (out === null) {
+  const inn = pr.in.points;
+  const outP = pr.out;
+  if (outP === null || pointMass(outP.points)) {
+    const c = outP?.points.mean ?? 0;
+    return { de: inn.mean - c, interval: [round(inn.p10 - c), round(inn.p90 - c)] };
+  }
+  const out = outP.points;
+  if (pointMass(inn)) {
     return {
-      de: pr.in.points.mean,
-      interval: [round(pr.in.points.p10), round(pr.in.points.p90)],
+      de: inn.mean - out.mean,
+      interval: [round(inn.mean - out.p90), round(inn.mean - out.p10)],
     };
   }
-  const de = pr.in.points.mean - out.points.mean;
-  const si = sigmaOf(pr.in.points);
-  const so = sigmaOf(out.points);
+  const de = inn.mean - out.mean;
+  const si = sigmaOf(inn);
+  const so = sigmaOf(out);
   const sd = Math.sqrt(
-    Math.max(0, si * si + so * so - 2 * rho(member(pr.in), member(out)) * si * so),
+    Math.max(0, si * si + so * so - 2 * rho(member(pr.in), member(outP)) * si * so),
   );
   return { de, interval: [round(de - Z90 * sd), round(de + Z90 * sd)] };
+}
+
+/** Rule 2 and 3 for one change: made, held as a coin flip, or not made because it gains nothing. */
+function verdictOf(
+  zeroSeat: boolean,
+  de: number,
+  interval: readonly [number, number],
+  forced: boolean,
+): Verdict {
+  if (forced) return "made";
+  if (zeroSeat) return de > 0 ? "made" : "gains_nothing";
+  if (gainsNothing(interval)) return "gains_nothing";
+  return straddles(interval) ? "coin_flip" : "made";
 }
 
 /** The changes a flow is made of, each with its own Δ (the swap's, as reported in `swaps`). */
 function changesOf(flow: Flow, force: ReadonlySet<PlayerKey>): Change[] {
   const out: Change[] = flow.pairs.map((pr) => {
+    const { de, interval } = pairDelta(pr);
     return {
       pair: pr,
       leaver: null,
       members: [pr.in, ...pr.movers, ...(pr.out === null ? [] : [pr.out])],
-      interval: pairDelta(pr).interval,
-      forced: force.has(pr.in.player_key),
+      interval,
+      verdict: verdictOf(freesZeroSeat(pr), de, interval, force.has(pr.in.player_key)),
     };
   });
   for (const lc of flow.leaverChains) {
     // benched with nobody reaching his seat: Δ is minus his own points (his quantiles, exactly)
     const pts = lc.leaver.points;
+    const interval: readonly [number, number] = [round(-pts.p90), round(-pts.p10)];
     out.push({
       pair: null,
       leaver: lc,
       members: [...lc.movers, lc.leaver],
-      interval: [round(-pts.p90), round(-pts.p10)],
-      forced: false,
+      interval,
+      verdict: verdictOf(false, -pts.mean, interval, false),
     });
   }
   return out;
@@ -647,25 +704,100 @@ function appliedFlow(flow: Flow, applied: readonly Change[]): Flow {
 const plural = (n: number, one: string, many: string): string =>
   `${String(n)} ${n === 1 ? one : many}`;
 
+/** Words joined as a list: "a", "a and b", "a, b and c". */
+const listed = (parts: readonly string[]): string =>
+  parts.length <= 1
+    ? (parts[0] ?? "")
+    : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1] ?? ""}`;
+
 /**
- * The action in words: "make N lineup changes" counts exactly the swaps listed that are made, and
- * "hold M coin flips" the listed swaps that are not (QA-1-080's contract: N + M = the swaps listed);
+ * The action in words: "make N lineup changes" counts exactly the swaps listed that are made, "hold
+ * M coin flips" the listed swaps held because their own interval includes 0, and "skip K changes
+ * that gain nothing" the listed swaps worth exactly 0 (QA-1-080's contract: N + M + K = the swaps
+ * listed; a change that gains nothing is never counted as a coin flip — the round-2 verification);
  * fills not listed as swaps, starters benched with no replacement, and slot-only moves are named.
  */
-function actionText(flow: Flow, fillsListed: boolean, heldListed: number): string {
+function actionText(flow: Flow, fillsListed: boolean, heldCoin: number, heldZero: number): string {
   const fills = flow.pairs.filter((p) => p.out === null).length;
-  const listed = fillsListed ? flow.pairs.length : flow.pairs.length - fills;
+  const made = fillsListed ? flow.pairs.length : flow.pairs.length - fills;
   const unlistedFills = fillsListed ? 0 : fills;
   const parts: string[] = [];
-  if (listed > 0) parts.push(`make ${plural(listed, "lineup change", "lineup changes")}`);
+  if (made > 0) parts.push(`make ${plural(made, "lineup change", "lineup changes")}`);
   if (unlistedFills > 0)
     parts.push(`fill ${plural(unlistedFills, "empty starting slot", "empty starting slots")}`);
   if (flow.unpairedLeavers.length > 0)
     parts.push(`bench ${plural(flow.unpairedLeavers.length, "starter", "starters")}`);
   if (parts.length === 0 && flow.slotMovers.length > 0)
     parts.push(`move ${plural(flow.slotMovers.length, "starter", "starters")} between slots`);
-  if (heldListed > 0) parts.push(`hold ${plural(heldListed, "coin flip", "coin flips")}`);
-  return parts.join(" and ");
+  if (heldCoin > 0) parts.push(`hold ${plural(heldCoin, "coin flip", "coin flips")}`);
+  if (heldZero > 0)
+    parts.push(
+      `skip ${plural(heldZero, "change that gains nothing", "changes that gain nothing")}`,
+    );
+  return listed(parts);
+}
+
+/**
+ * The assumption that says why held changes were not made (research 05 §14.4), the coin flips and
+ * the changes that gain nothing worded apart (the round-2 verification of QA-2-038).
+ */
+function heldAssumption(
+  held: readonly Change[],
+  noMove: boolean,
+): { text: string; revisit_trigger: string } | null {
+  const coin = held.filter((c) => c.verdict === "coin_flip");
+  const zero = held.filter((c) => c.verdict === "gains_nothing");
+  const trigger = "a status or projection change moves the interval off 0";
+  if (coin.length === 0 && zero.length === 0) return null;
+  if (noMove) {
+    const only = coin[0];
+    if (zero.length === 0 && coin.length === 1 && only !== undefined) {
+      const [lo, hi] = only.interval;
+      return A(
+        `the best lineup change is a coin flip: its Δ interval (${String(round(lo, 1))} to ${String(round(hi, 1))} points) includes 0, so the call is no move (research 05 §14.4)`,
+        trigger,
+      );
+    }
+    if (coin.length === 0)
+      return A(
+        zero.length === 1
+          ? "the best lineup change gains nothing: its Δ is 0 whatever happens (a player who will not play for one who scores 0), so the call is no move (research 05 §14.4)"
+          : `the best lineup's ${String(zero.length)} changes gain nothing: each one's Δ is 0 whatever happens, so the call is no move (research 05 §14.4)`,
+        trigger,
+      );
+    return A(
+      `the best lineup's ${String(held.length)} changes are held: ${plural(coin.length, "coin flip", "coin flips")} (each one's own Δ interval includes 0)${zero.length > 0 ? ` and ${String(zero.length)} that gain nothing (Δ 0 whatever happens)` : ""}, so the call is no move (research 05 §14.4)`,
+      trigger,
+    );
+  }
+  const parts: string[] = [];
+  if (coin.length > 0)
+    parts.push(
+      `${plural(coin.length, "change", "changes")} of the best lineup held: each one's own Δ interval includes 0 (research 05 §14.4); the changes made exclude 0`,
+    );
+  if (zero.length > 0)
+    parts.push(
+      `${plural(zero.length, "change", "changes")} of the best lineup not made: ${zero.length === 1 ? "it gains" : "they gain"} nothing (Δ 0 whatever happens)`,
+    );
+  return A(parts.join("; "), trigger);
+}
+
+/**
+ * The assumption naming the starting seats that score 0 whoever holds them (rule 4): kept starters
+ * who will not score and whom no replacement who can score reaches — left out of `rec.lineup`.
+ */
+function zeroSeatAssumption(seats: readonly { slot: string; key: PlayerKey }[]): Assumption | null {
+  if (seats.length === 0) return null;
+  const slotNames = [...new Set(seats.map((s) => s.slot))];
+  const keys = seats.map((s) => s.key);
+  const who = `${keys.slice(0, 2).join(", ")}${keys.length > 2 ? ` +${String(keys.length - 2)}` : ""}`;
+  const kdef = slotNames.some((n) => n === "K" || n === "DEF");
+  return A(
+    `${plural(seats.length, "starting seat", "starting seats")} (${slotNames.slice(0, 3).join(", ")}) ${seats.length === 1 ? "scores" : "score"} 0: ${who} will not score this week and no rostered player who can take ${seats.length === 1 ? "it" : "them"} gains points; left out of rec.lineup`,
+    kdef
+      ? "a K or DEF to stream (ff_analyze_waivers) or a player who can take the seat is rostered"
+      : "a player who can take the seat is rostered, or his status changes",
+  );
 }
 
 // --- the engine ------------------------------------------------------------------------------------------
@@ -904,7 +1036,9 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
       delta_e: round(de),
       dp,
       interval,
-      coin_flip: isCoinFlip(basis, dp, interval),
+      // against a seat that scores 0 now, the call is the entrant's expected points (rule 3): a
+      // scorer is never a coin flip there, one who scores 0 too gains nothing (flagged, as held)
+      coin_flip: freesZeroSeat(pr) ? !(de > 0) : isCoinFlip(basis, dp, interval),
       option_value:
         out === null
           ? null
@@ -972,15 +1106,17 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   const inputs = [...(req.inputs ?? [])];
 
   // Δ of a lineup against the current one: the swapped part by the normal approximation (with the
-  // same-team covariances), each fill (a seat that scores 0 now) by its entrant's own quantiles — a
-  // fill cannot lose points, so its p10 is never pushed below 0 by a symmetric approximation
+  // same-team covariances), each change into a seat that scores 0 now (empty, or held by a player who
+  // will not score) by its entrant's own quantiles — as in `swaps` (rule 3): such a change cannot
+  // lose points, so its p10 is never pushed below 0 by a symmetric approximation
   const curMembers = curStarters.map(member);
   const curM = lineupMoments(curMembers);
   const deltaOf = (
     starters: readonly LineupPlayer[],
     f: Flow,
   ): { value: number; p10: number; p90: number } => {
-    const fills = f.pairs.filter((pr) => pr.out === null).map((pr) => pr.in);
+    // the outgoing player of such a change scores exactly 0: he adds nothing to the current side
+    const fills = f.pairs.filter(freesZeroSeat).map((pr) => pr.in);
     const swappedMembers = starters.filter((p) => !fills.includes(p)).map(member);
     const swappedM = lineupMoments(swappedMembers);
     const covSC = lineupCov(swappedMembers, curMembers);
@@ -994,47 +1130,32 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
     };
   };
 
-  // research 05 §14.4 (the no-op baseline), change by change: the best lineup's changes are made
-  // when their Δ interval excludes 0; when it includes 0 (p10 < 0 < p90) only the changes whose own
-  // interval excludes 0 are made — a coin-flip swap never holds back a fill that cannot lose points
-  // (QA-1-020/040 reopened). A change that gains nothing (Δ ≡ 0) is never a move (QA-2-038); a
-  // forced start always is. Held changes stay listed in `swaps`, coin_flip set (QA-1-060).
+  // research 05 §14.4 (the no-op baseline), change by change (rules 1–3 above): each change of the
+  // best lineup is made or held on its own Δ interval alone — a coin flip never holds back a change
+  // that excludes 0 (QA-1-020/040 reopened), and a change that excludes 0 never carries a coin flip
+  // (the round-2 verification). Held changes stay listed in `swaps`, coin_flip set (QA-1-060).
   const all = changesOf(flow, force);
-  const holdable = (c: Change, coin: boolean): boolean =>
-    !c.forced && (gainsNothing(c.interval) || (coin && straddles(c.interval)));
-  const keptOf = (held: ReadonlySet<Change>) => {
-    const applied = all.filter((c) => !held.has(c));
+  const held = all.filter((c) => c.verdict !== "made");
+  const applied = all.filter((c) => c.verdict === "made");
+  const kept = (() => {
     const f = appliedFlow(flow, applied);
     if (f === flow) return { f, a: chosen.a, starters: recStarters };
     const a = new Map(curA);
     for (const c of applied)
       for (const p of c.members) a.set(p.player_key, slotIn(chosen.a, p.player_key));
     return { f, a: a as Assignment, starters: startersOf(a, players, slots) };
-  };
-  let held = new Set(all.filter((c) => holdable(c, false)));
-  let kept = keptOf(held);
-  let keptDelta = deltaOf(kept.starters, kept.f);
-  if (straddles([keptDelta.p10, keptDelta.p90])) {
-    held = new Set(all.filter((c) => holdable(c, true)));
-    kept = keptOf(held);
-    keptDelta = deltaOf(kept.starters, kept.f);
-  }
+  })();
   const changes = kept.f.changes;
   const noMove = changes === 0;
-  const heldListed = [...held].filter(
-    (c) => c.pair !== null && (req.fills_in_swaps === true || c.pair.out !== null),
-  ).length;
+  const listedHeld = (v: Verdict): number =>
+    held.filter(
+      (c) =>
+        c.verdict === v && c.pair !== null && (req.fills_in_swaps === true || c.pair.out !== null),
+    ).length;
   // no move: Δ of the best lineup, the change that was not made (0 when it is the current one)
-  const delta = noMove ? deltaOf(recStarters, flow) : keptDelta;
-  if (held.size > 0) {
-    const zeroOnly = [...held].every((c) => gainsNothing(c.interval));
-    const text = noMove
-      ? zeroOnly
-        ? "the best lineup change gains nothing: its Δ is 0 whatever happens (a player who will not play for one who scores 0), so the call is no move (research 05 §14.4)"
-        : `the best lineup change is a coin flip: its Δ interval (${String(round(delta.p10, 1))} to ${String(round(delta.p90, 1))} points) includes 0, so the call is no move (research 05 §14.4)`
-      : `${plural(held.size, "change", "changes")} of the best lineup held: each one's own Δ interval includes 0 (research 05 §14.4); the changes made exclude 0`;
-    assumptions.push(A(text, "a status or projection change moves the interval off 0"));
-  }
+  const delta = noMove ? deltaOf(recStarters, flow) : deltaOf(kept.starters, kept.f);
+  const heldText = heldAssumption(held, noMove);
+  if (heldText !== null) assumptions.push(heldText);
   const movers = new Set<LineupPlayer>([
     ...kept.f.entrants,
     ...kept.f.leavers,
@@ -1057,10 +1178,20 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   const paired = noMove
     ? []
     : kept.f.pairs.filter((pr): pr is FlowPair & { out: LineupPlayer } => pr.out !== null);
+  // rule 4: a kept starter who will not score (no replacement who can score reaches his seat) is not
+  // listed as a starter — what is logged and scored never starts a player who will not play; the
+  // seat is named instead. A made change's entrant is always listed (the k-th start ↔ k-th sit).
+  const entering = new Set(kept.f.pairs.map((pr) => pr.in));
+  const zeroStay = keptStarters.filter((p) => scoresZero(p.points) && !entering.has(p));
+  const listedStarters = keptStarters.filter((p) => !zeroStay.includes(p));
+  const seatNote = zeroSeatAssumption(
+    zeroStay.map((p) => ({ slot: slotIn(keptA, p.player_key), key: p.player_key })),
+  );
+  if (seatNote !== null) assumptions.push(seatNote);
   const subjects: RecSubject[] = [
     ...[
       ...paired.map((pr) => pr.in),
-      ...keptStarters.filter((p) => !paired.some((pr) => pr.in === p)),
+      ...listedStarters.filter((p) => !paired.some((pr) => pr.in === p)),
     ].map((p) => subjectOf(p, "start", keptA)),
     ...(noMove ? [] : [...paired.map((pr) => pr.out), ...kept.f.unpairedLeavers]).map((o) =>
       subjectOf(o, "sit", curA),
@@ -1072,9 +1203,14 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   const rec: Rec = {
     action: noMove
       ? "keep the current lineup"
-      : actionText(kept.f, req.fills_in_swaps === true, heldListed),
+      : actionText(
+          kept.f,
+          req.fills_in_swaps === true,
+          listedHeld("coin_flip"),
+          listedHeld("gains_nothing"),
+        ),
     subjects,
-    lineup: assignments(keptA, keptStarters, slots).map((s) => ({
+    lineup: assignments(keptA, listedStarters, slots).map((s) => ({
       slot: s.slot,
       player_key: s.player_key,
     })),
