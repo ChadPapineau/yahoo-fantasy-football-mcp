@@ -44,7 +44,7 @@ If the user named players, resolve each name with `fantasy-football-mcp-server:f
 
 ### 4. Game-day branch (some slots locked)
 1. Call `fantasy-football-mcp-server:ff_analyze_lineup` with `only_unlocked: true` — set it automatically; a locked player is never moved, benched or suggested.
-2. **Availability.** Under the manual league there is no game-day availability source at all: no platform status, no inactive list. Say so. The user's own "X is inactive" is unconfirmed until the fantasy app shows it: give a conditional ("if the app shows X as Out or Inactive, put Y in — Y's game kicks off at 16:25 ET, so the swap is still open") rather than treating the report as fact. Only when the user confirms the app shows X as inactive, pass X in `exclude`.
+2. **Availability.** Under the manual league there is no game-day availability source at all: no platform status, no inactive list. Say so. The user's own "X is inactive" is unconfirmed until the fantasy app shows it: give a conditional ("if the app shows X as Out or Inactive, put Y in — Y's game kicks off at 16:25 ET, so the swap is still open") rather than treating the report as fact. Only when the user confirms the app shows X as inactive, pass X in `exclude`: an excluded player scores 0 for the week, the same as an Out designation, so every swap is measured against the lineup the user actually has.
 3. `fantasy-football-mcp-server:ff_get_roster` may be re-read once with `force_refresh: true`; `fantasy-football-mcp-server:ff_get_scoreboard` is re-read on every call in this branch.
 4. `fantasy-football-mcp-server:ff_project_players` for the players whose games have not started only (`is_editable` true on the roster).
 5. **Live win probability is not available in this version** — say "live odds are not available yet". When an opponent roster exists, `fantasy-football-mcp-server:ff_analyze_matchup` with `mode: "pre"` gives the pre-game number; label it pre-game, and treat every in-game score as provisional.
@@ -53,15 +53,16 @@ If the user named players, resolve each name with `fantasy-football-mcp-server:f
 
 ### 5. Output additions (on top of the contract)
 - The lineup by slot: `E`, `p10`, `p90`, and the distribution `basis` (`position_cv` in this version — "a position-level spread").
-- `P(win)` before and after with its interval — only when an opponent roster exists.
-- The top swaps: `ΔE`, `ΔP(win)` as a sign and band ("small positive") whenever the basis is `position_cv`, the interval, and `coin_flip`.
+- `P(win)` before and after with its interval — only when an opponent roster exists, the league plays head-to-head (a points-only league gets the expected-points lineup and no P(win)), and every starting seat is matched. A starting seat held by a player the NFL data does not match is kept as it is, not filled, left out of the totals and named in `rec.assumptions`, and P(win) is withheld: name the seat and say that correcting his line in the league file (`ff_get_status` lists him under `crosswalk.unmatched_rostered`) brings P(win) back.
+- The top swaps: `ΔE`, `ΔP(win)` as a sign and band ("small positive") whenever the basis is `position_cv`, the interval, and `coin_flip`. Each change is decided on its own interval, so report them as `rec.action` counts them ("make 1 lineup change and hold 1 coin flip"): the changes made first, then each coin flip held (its interval includes 0) and any change skipped because it gains nothing.
 - `protect`, `chase` or `neutral`, with the one-line reason (the sign of `μ_m − μ_o`: ahead → protect the floor; behind → chase the ceiling).
 - The Thursday or Monday option-value verdict whenever a swap involves an earlier or later game.
 - Conditionals ("if X is inactive by 11:30 ET, start Y").
+- A starter who will not play (excluded, or `status: O`) and whom no rostered player who can score replaces is left out of `rec.lineup`, and an assumption names his seat: say that seat scores 0 this week and, for a kicker or defense, offer to stream one ("ask which defense to stream").
 - The lock schedule.
 
 ### 6. Guardrails specific to start-sit
-- A swap with `coin_flip: true` is reported as a coin flip, not dramatised.
+- A swap with `coin_flip: true` is reported as a coin flip, not dramatised. A change whose own Δ interval includes 0 is held: it never rides along with a change that is made, and never holds one back.
 - Never bench a Thursday player for a Sunday one without the option-value line (once the Thursday game starts, the Sunday alternative cannot come back).
 - Never count an injury twice: the projection already includes `p_active`.
 - In the game-day branch, never a move on a locked player.
