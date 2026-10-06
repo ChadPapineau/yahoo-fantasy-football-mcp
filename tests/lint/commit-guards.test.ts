@@ -162,6 +162,56 @@ describe(".githooks/pre-commit scans every staged blob (QA-1-088)", () => {
   });
 });
 
+describe(".githooks/pre-commit refuses iCloud/Finder conflict-copy names", () => {
+  // iCloud and Finder name a conflict copy "name 2.ext" (or a directory "name 2"); in an
+  // iCloud-synced checkout they reappear on their own, and a stray `git add -A` would commit e.g.
+  // ".github/workflows/ci 2.yml" — a second CI workflow. Only ADDED names are refused, so deleting
+  // a copy that slipped in is never blocked.
+  it.each([
+    [".github/workflows/ci 2.yml"],
+    ["scripts/dev/scan-secrets 2.mjs"],
+    ["src/foo.test 3.ts"],
+    ["src/cli 2/serve.ts"],
+    ["coverage 2"],
+  ])("refuses to add %j and commits nothing", (name) => {
+    const repo = makeRepo();
+    const before = head(repo);
+    repo.write(name, "nothing secret here\n");
+    repo.git(["add", "--", name]);
+    const r = repo.git(["commit", "-qm", "conflict copy"]);
+    expect(r.status, r.out).not.toBe(0);
+    expect(r.out).toContain(`${name}  [conflict-copy-name]`);
+    expect(head(repo)).toBe(before);
+  });
+
+  it.each([
+    ["v2.ts"],
+    ["round-2.md"],
+    ["Season 2026 notes.md"],
+    ["fixture2.json"],
+    ["src/x2/y.ts"],
+  ])("lets an ordinary name through: %j", (name) => {
+    const repo = makeRepo();
+    repo.write(name, "nothing secret here\n");
+    repo.git(["add", "--", name]);
+    const r = repo.git(["commit", "-qm", "ordinary"]);
+    expect(r.status, r.out).toBe(0);
+  });
+
+  it("never blocks deleting a conflict copy that is already tracked (the cleanup path)", () => {
+    const repo = makeRepo();
+    repo.write("ci 2.yml", "name: copy\n");
+    repo.git(["add", "ci 2.yml"]);
+    // the copy got in some other way (hook disabled for this one setup commit)
+    expect(repo.git(["-c", "core.hooksPath=/dev/null", "commit", "-qm", "slipped in"]).status).toBe(
+      0,
+    );
+    repo.git(["rm", "-q", "ci 2.yml"]);
+    const r = repo.git(["commit", "-qm", "remove the copy"]);
+    expect(r.status, r.out).toBe(0);
+  });
+});
+
 describe("commit identity guard (QA-1-095)", () => {
   it("pre-commit refuses a machine-derived author address", () => {
     const repo = makeRepo();
