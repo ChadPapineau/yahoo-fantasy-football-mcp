@@ -7,7 +7,7 @@
 import type { Clock, Rng } from "../clock.js";
 import type { NflTeam } from "../../config/schema.js";
 import { kickoffMs, lockAtFor, type LockMode } from "../league/schedule.js";
-import type { PlayerKey, Week } from "../league/types.js";
+import type { PlayerKey, SlotClass, Week } from "../league/types.js";
 import type {
   Dist,
   PositionType,
@@ -53,6 +53,13 @@ export interface KdefCandidateInput {
   readonly nfl_team: NflTeam;
   /** From the provider's FA pool; ignored (→ `unknown`) when `availability_known` is false. */
   readonly availability: Availability;
+  /**
+   * For my rostered K/DEF (`current`): the class of the slot he is in this week (`RosterEntry.
+   * slot_class`). A starter (`starter`/`flex`) whose game has started freezes his position; a
+   * benched one does not, and cannot be fielded once locked (QA-2-033). Omitted/null → unknown,
+   * read as a possible starter.
+   */
+  readonly slot_class?: SlotClass | null;
 }
 
 /** An E5 K/DEF request. */
@@ -64,7 +71,10 @@ export interface KdefRequest {
   /** 0..2 weeks beyond `week` (plan 07 E5; K/DEF default 2). */
   readonly look_ahead?: number;
   readonly universe: readonly KdefCandidateInput[];
-  /** My rostered K/DEF (the hold-vs-stream baseline); may be empty. */
+  /**
+   * My rostered K/DEF, each with its `slot_class` (the hold-vs-stream baseline is the best one I can
+   * field this week); may be empty.
+   */
   readonly current: readonly KdefCandidateInput[];
   /** Whether the provider has a platform FA pool (`read_features.free_agent_pool`). */
   readonly availability_known: boolean;
@@ -204,9 +214,18 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
     return true;
   });
   const current = req.current.filter((c) => positions.includes(c.position));
+  // a lock applies to the locked player (QA-2-033): a locked starter freezes his position (his slot
+  // is filled for the week), a locked bench K/DEF only drops out of what I can field — he can be
+  // neither started nor dropped, and he is never the hold-vs-stream baseline
+  const benched = (c: KdefCandidateInput): boolean =>
+    c.slot_class === "bench" || c.slot_class === "ir" || c.slot_class === "other";
+  const lockedStarters = current.filter((c) => !benched(c) && lockedNow(c.nfl_team));
+  const lockedBench = current.filter((c) => benched(c) && lockedNow(c.nfl_team));
   /** Positions whose current starter is locked: no move there this week. */
-  const frozen = new Set<KdefPosition>(
-    current.filter((c) => lockedNow(c.nfl_team)).map((c) => c.position),
+  const frozen = new Set<KdefPosition>(lockedStarters.map((c) => c.position));
+  /** What I can field this week: a starter, or a benched K/DEF whose game has not started. */
+  const fieldable = current.filter(
+    (c) => !(benched(c) && lockedNow(c.nfl_team)) && c.slot_class !== "ir",
   );
   const all = [...current, ...pool];
   const uniq = new Map<PlayerKey, KdefCandidateInput>();
@@ -252,22 +271,55 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
   );
   const byKey = new Map(out.players.map((p) => [keyOf(p), p]));
   const inputs = out.result.inputs;
+  // the market driver (QA-2-044; plan 07 §2: a missing driver is named, never silently omitted): a
+  // decision-week game without a betting line — not published yet, off the board, or omitted as
+  // stale — ranks its K/DEF on trailing points only, and such a K/DEF is never called as a stream
+  // over a starter
+  const linesOmitted = out.lines_omitted || first.lines_omitted;
+  const unpricedGames = weekGames.filter(
+    (g) => g.season === req.season && g.week === req.week && (linesOmitted || g.lines === null),
+  );
+  const unpricedTeams = [...new Set(unpricedGames.flatMap((g) => [g.away, g.home]))].sort(cmpStr);
+  const nGames = weekGames.filter((g) => g.season === req.season && g.week === req.week).length;
+  const wk = String(req.week);
   const assumptions: Assumption[] = [
-    A(
-      "K/DEF are dominated by this week's implied totals; the look-ahead reuses the published lines only",
-      "lines for later weeks move",
-    ),
+    unpricedGames.length > 0 && unpricedGames.length === nGames
+      ? A(
+          `no betting lines for week ${wk}: K/DEF are dominated by the implied totals, so this ranking is trailing points only and no stream is called over a current starter`,
+          `week ${wk}'s lines are published (ff refresh nflverse)`,
+        )
+      : A(
+          "K/DEF are dominated by this week's implied totals; the look-ahead reuses the published lines only",
+          "lines for later weeks move",
+        ),
     A(
       "defensive and return touchdowns, safeties and blocks are a league-average constant",
       "never — they are not predictable week to week",
     ),
   ];
-  if (out.lines_omitted || first.lines_omitted) assumptions.push(LINES_OMITTED);
-  for (const c of current) {
-    if (!frozen.has(c.position) || !lockedNow(c.nfl_team)) continue;
+  if (linesOmitted) assumptions.push(LINES_OMITTED);
+  if (unpricedGames.length > 0 && unpricedGames.length < nGames) {
+    const shown = unpricedTeams.slice(0, KDEF.unpricedTeamsShown);
+    const more = unpricedTeams.length - shown.length;
+    assumptions.push(
+      A(
+        `no betting line for ${String(unpricedGames.length)} of week ${wk}'s ${String(nGames)} games (${shown.join(", ")}${more > 0 ? ` and ${String(more)} more` : ""}): their K/DEF rank on trailing points only and are not called as a stream`,
+        `week ${wk}'s lines for those games are published`,
+      ),
+    );
+  }
+  for (const c of lockedStarters) {
     assumptions.push(
       A(
         `your ${c.position} ${c.player_key} is locked for week ${String(req.week)} (his game has started): no ${c.position} move this week`,
+        `week ${String(req.week + 1)}'s ${c.position} decision`,
+      ),
+    );
+  }
+  for (const c of lockedBench) {
+    assumptions.push(
+      A(
+        `your benched ${c.position} ${c.player_key} is locked for week ${String(req.week)} (his game has started): he can be neither started nor dropped this week`,
         `week ${String(req.week + 1)}'s ${c.position} decision`,
       ),
     );
@@ -294,7 +346,7 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
   const scored: Scored[] = [];
 
   for (const pos of positions) {
-    const cur = current
+    const cur = fieldable
       .filter((c) => c.position === pos)
       .map((c) => byKey.get(c.player_key))
       .filter((p): p is ProjectedPlayer => p !== undefined)
@@ -387,15 +439,30 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
   const beatsHold = (x: Scored): boolean => x.delta === null || x.delta > KDEF.holdMargin;
   // executable: the candidate has a known lock still ahead (an unknown kickoff has no deadline)
   const executable = (x: Scored): boolean => lockOf(x.p.target.nfl_team) !== null;
-  const pick = order.find((x) => beatsHold(x) && !straddles(vsHold(x)) && executable(x)) ?? null;
+  // priced: its decision-week game has a betting line — a stream over a starter needs the market
+  // driver (QA-2-044); an empty slot is filled either way
+  const priced = (x: Scored): boolean => {
+    const w0 = at(x.p.weeks, 0);
+    return w0.game === null || w0.implied_total !== null;
+  };
+  const pick =
+    order.find(
+      (x) =>
+        beatsHold(x) && !straddles(vsHold(x)) && executable(x) && (x.cur === null || priced(x)),
+    ) ?? null;
   const streamIt = pick !== null;
   if (!streamIt && top?.cur != null && beatsHold(top)) {
     const iv = vsHold(top);
     assumptions.push(
-      A(
-        `the best stream is a coin flip: its Δ interval against holding (${String(round(iv.p10, 1))} to ${String(round(iv.p90, 1))} points) includes 0, so the call is hold (research 05 §14.4)`,
-        "lines or injury news move the interval off 0",
-      ),
+      !straddles(iv) && !priced(top)
+        ? A(
+            `the best stream has no betting line for week ${wk}: on trailing points alone it is not called, so the call is hold`,
+            `week ${wk}'s line for its game is published`,
+          )
+        : A(
+            `the best stream is a coin flip: its Δ interval against holding (${String(round(iv.p10, 1))} to ${String(round(iv.p90, 1))} points) includes 0, so the call is hold (research 05 §14.4)`,
+            "lines or injury news move the interval off 0",
+          ),
     );
   }
   const subject = (p: ProjectedPlayer, role: RecSubject["role"]): RecSubject => ({
