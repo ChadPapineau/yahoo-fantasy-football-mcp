@@ -279,6 +279,39 @@ describe("analyseRun — the visibility verdict", () => {
     expect(a.shownNonces).toEqual([]);
   });
 
+  it("an API error line after the call is not the model's answer, whichever marker flags it", () => {
+    const n = hex12();
+    const apiError = (marker: Ev): Ev => ({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        model: "claude-test-model",
+        content: [{ type: "text", text: `API Error: 500 (request ${n})` }],
+      },
+      session_id: SESSION,
+      ...marker,
+    });
+    for (const marker of [
+      { is_api_error_message: true },
+      { error: "server_error" },
+      {
+        message: { role: "assistant", model: "<synthetic>", content: [{ type: "text", text: n }] },
+      },
+    ]) {
+      const stdout = jsonl(
+        init(),
+        call(),
+        toolResult(TEXT_ONLY, { record: record(n) }),
+        apiError(marker),
+        result("API Error: 500", { is_error: true }),
+      );
+      const a = analyseRun({ stdout });
+      expect(a.outcome, JSON.stringify(marker)).toBe("not-visible");
+      expect(a.finalAnswer).toBeNull();
+      expect(a.notes.join(" ")).toContain("ended with an error after the tool call");
+    }
+  });
+
   it("a tool_result whose id matches no ff_debug_echo call is ignored", () => {
     const n = hex12();
     const stdout = jsonl(

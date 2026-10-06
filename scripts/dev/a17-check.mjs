@@ -370,7 +370,7 @@ export function analyseRun(input) {
         .filter((t) => t !== "")
         .join("\n");
       // an API/auth error surfaces as a synthetic assistant message, not as the model speaking
-      if (typeof ev.error === "string" || msg.model === "<synthetic>") {
+      if (typeof ev.error === "string" || ev.is_api_error_message === true || msg.model === "<synthetic>") {
         apiErrors.push({ kind: typeof ev.error === "string" ? ev.error : "", text });
         continue;
       }
