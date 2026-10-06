@@ -58,7 +58,12 @@ const sourceRow = z.strictObject({
   license: z.string().max(32).nullable(),
   last_success_at: iso.nullable(),
   age_s: z.number().int().min(0).nullable(),
-  freshness: z.enum(["fresh", "stale", "expired", "never_loaded"]),
+  /**
+   * `unreadable`: the refresh log lists a current file the server cannot serve — missing, damaged,
+   * or another source's/version's/layout's (QA-1-038; the tools answer STALE_ONLY "missing or
+   * unreadable" for it, and `ff refresh <source>` repairs it).
+   */
+  freshness: z.enum(["fresh", "stale", "expired", "never_loaded", "unreadable"]),
   rows: z.number().int().min(0).nullable(),
   last_error: z
     .string()
@@ -68,13 +73,23 @@ const sourceRow = z.strictObject({
 });
 export type SourceRow = z.infer<typeof sourceRow>;
 
-/** One row per Phase-1a dataset source (plan 01 §7; plan 07 G1 `sources[]`). */
+/**
+ * One row per Phase-1a dataset source (plan 01 §7; plan 07 G1 `sources[]`). A source whose current
+ * file is not what the server has attached — the refresh log's version — reads `unreadable`, never
+ * its age's state (QA-1-038): every call re-attaches the current files first (`beforeCall`), and
+ * the attach refuses a missing, damaged or foreign file, so "not attached at that version" is
+ * "cannot be served". This holds while every current source fits the attach slots (MAX_ATTACHED −
+ * RESERVED_ATTACH_SLOTS = 9; Phase 1a has at most six sources).
+ */
 export function sourceRows(ctx: {
   services: McpServices;
   options: McpServerOptions;
   nowMs: number;
 }): SourceRow[] {
   const current = new Map(ctx.services.refreshLog.current().map((r) => [r.source, r]));
+  const attached = new Map(
+    ctx.services.storeStats().attached.map((a) => [a.source, a.file_version]),
+  );
   return statusSources(ctx.options).map((id) => {
     const ok = current.get(id);
     const latest = ctx.services.refreshLog.latest(id);
@@ -109,12 +124,13 @@ export function sourceRows(ctx: {
       },
       ctx.nowMs,
     );
+    const servable = ok.file_version !== null && attached.get(id) === ok.file_version;
     return {
       id,
       license: info.attribution.license,
       last_success_at: new Date(Date.parse(ok.finished_at)).toISOString(),
       age_s: st.age_s,
-      freshness: st.state,
+      freshness: servable ? st.state : ("unreadable" as const),
       rows: ok.rows,
       last_error: lastError,
       consecutive_failures: failures,
@@ -305,7 +321,12 @@ function datasetChecks(sources: readonly SourceRow[]): StatusCheck[] {
     return { id, ok: bad === undefined, detail: bad === undefined ? "ok" : checkDetail(bad.id) };
   };
   return [
-    row("datasets_loaded", required, (x) => x.freshness !== "never_loaded"),
+    // a file the server cannot serve is not loaded (QA-1-038)
+    row(
+      "datasets_loaded",
+      required,
+      (x) => x.freshness !== "never_loaded" && x.freshness !== "unreadable",
+    ),
     row("datasets_fresh", required, (x) => x.freshness === "fresh"),
     row("optional_drivers", optional, (x) => x.freshness === "fresh"),
   ];
