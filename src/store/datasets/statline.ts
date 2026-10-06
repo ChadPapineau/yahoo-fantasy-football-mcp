@@ -2,7 +2,7 @@
 // §3.3 position types) and the team-defence DT line (READER_QUERIES["PlayerWeekReader.defenseLines"]
 // mapping). Lives in src/store because the store may not import src/sources (plan 01 §1.1): the
 // plan names src/sources/nflverse/columns.ts, which the store cannot reach.
-import { DST_TD_COLUMNS } from "../../domain/scoring/nflverse.js";
+import { DST_TD_COLUMNS, yardsAllowed } from "../../domain/scoring/nflverse.js";
 import type { Canonical, PositionType, StatLine } from "../../domain/scoring/types.js";
 
 /** A row as SQLite returns it. */
@@ -104,13 +104,14 @@ export function playerRowToStatLine(row: SqlRow): StatLine {
 /**
  * A ds_team_defense_week row → the DT StatLine. `pointsAllowed` is the opponent's final score
  * (definition (a), plan 08 §3.2 U-6) or null when the game is not final / schedules is absent.
- * dst_ya = opp_passing_yards − opp_sack_yards_lost + opp_rushing_yards ([U] Yahoo's definition),
- * present only when the opponent had rows (opp_passing_yards and opp_rushing_yards non-null).
+ * dst_ya = yardsAllowed(opp_passing_yards, opp_sack_yards_lost, opp_rushing_yards) — the opponent's
+ * net yards, the sack loss subtracted as a magnitude whatever its stored sign ([U] Yahoo's
+ * definition; QA-2-032) — present only when the opponent had rows (both yardage columns non-null).
  */
 export function defenseRowToStatLine(row: SqlRow, pointsAllowed: number | null): StatLine {
   const pass = num(row.opp_passing_yards);
   const rush = num(row.opp_rushing_yards);
   const sackYds = num(row.opp_sack_yards_lost) ?? 0;
-  const ya = pass !== null && rush !== null ? pass - sackYds + rush : null;
+  const ya = pass !== null && rush !== null ? yardsAllowed(pass, sackYds, rush) : null;
   return build(row, DEFENSE_STAT_MAP, { dst_pa: pointsAllowed, dst_ya: ya }, "DT");
 }

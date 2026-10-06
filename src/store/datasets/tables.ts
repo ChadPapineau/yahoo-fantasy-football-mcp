@@ -369,7 +369,7 @@ export const DS_TEAM_DEFENSE_WEEK = table({
       "INTEGER",
       true,
       ["sack_yards_lost", "opponent_team", "game_id"],
-      "SUM(sack_yards_lost) over the opponent's rows in the same game",
+      "|SUM(sack_yards_lost)| over the opponent's rows in the same game: the yards lost to sacks as a non-negative magnitude (upstream stores the loss negative; QA-2-032)",
     ),
     col(
       "opp_rushing_yards",
@@ -687,7 +687,7 @@ WHERE season = :season AND game_id IN (SELECT value FROM json_each(:game_ids))`,
       ),
     ],
     mapping:
-      "nfl_team ← team; opponent ← opponent_team; line ← DT StatLine: dst_sack ← def_sacks, dst_int ← def_interceptions, dst_fum_rec ← fumble_recovery_opp, dst_td ← def_tds + fumble_recovery_tds_opp, dst_ret_td ← special_teams_tds, dst_safety ← def_safeties, dst_blk ← def_fg_blocks + def_punt_blocks (+ def_pat_blocks per the league's rule, plan 08 U), dst_pa ← the opponent's score from statement 2 (game final only; definition (a)/(b) per plan 08 §3.2 U-6), dst_ya ← opp_passing_yards − opp_sack_yards_lost + opp_rushing_yards ([U] Yahoo's yards-allowed definition)",
+      "nfl_team ← team; opponent ← opponent_team; line ← DT StatLine: dst_sack ← def_sacks, dst_int ← def_interceptions, dst_fum_rec ← fumble_recovery_opp, dst_td ← def_tds + fumble_recovery_tds_opp, dst_ret_td ← special_teams_tds, dst_safety ← def_safeties, dst_blk ← def_fg_blocks + def_punt_blocks (+ def_pat_blocks per the league's rule, plan 08 U), dst_pa ← the opponent's score from statement 2 (game final only; definition (a)/(b) per plan 08 §3.2 U-6), dst_ya ← yardsAllowed(opp_passing_yards, opp_sack_yards_lost, opp_rushing_yards) = opp_passing_yards − |opp_sack_yards_lost| + opp_rushing_yards, the opponent's net yards ([U] Yahoo's yards-allowed definition; QA-2-032)",
   }),
   /** WeatherReader.forGames(gameIds) — the configured weather source's table, then the other. */
   "WeatherReader.forGames": Object.freeze({
