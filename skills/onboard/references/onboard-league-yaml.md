@@ -8,7 +8,7 @@ Ask in this order, a few at a time. "I don't know" is a fine answer: leave the f
 
 1. **League:** season; number of teams; head-to-head points or points-only; last regular-season week; first playoff week and number of playoff teams.
 2. **Roster slots:** how many of each — QB, WR, RB, TE, W/R/T (flex), K, DEF, BN (bench), IR.
-3. **Scoring:** which preset is closest (below), then every difference. Kicker: points per field goal by distance and per extra point. Defense: sacks, interceptions, fumble recoveries, touchdowns, safeties, blocked kicks, and the points-allowed brackets.
+3. **Scoring:** which preset is closest (below), then every difference. Kicker: points per field goal by distance, per extra point, and any penalty for a missed field goal by distance. Defense: sacks, interceptions, fumble recoveries, touchdowns, safeties, blocked kicks, the points-allowed brackets, and the yards-allowed brackets if the league scores them. Ask whether tight ends get extra points per reception (a TE premium): it [cannot be stated yet](#te-premium-cannot-be-stated-yet).
 4. **Waivers:** FAAB (and the starting budget) or rolling priority; a weekly add limit if there is one.
 5. **The user's team:** a team name (anything), and every player with position, NFL team and current slot. The app's roster page lists all of it.
 6. **Optional — this week's opponent:** a name and their starters (they go under `other_teams`, and the week under `opponents`). Needed only for a win probability.
@@ -26,6 +26,17 @@ The server has three built-in presets with the platform's public default values;
 | `fum_lost` / `two_pt` | -2 / 2 | same | same |
 
 Kicker (every preset): `fg_0_19` 3, `fg_20_29` 3, `fg_30_39` 3, `fg_40_49` 4, `fg_50p` 5, `pat_made` 1. Defense (every preset): `dst_sack` 1, `dst_int` 2, `dst_fum_rec` 2, `dst_td` 6, `dst_safety` 2, `dst_blk` 2, points allowed `dst_pa_0` 10, `dst_pa_1_6` 7, `dst_pa_7_13` 4, `dst_pa_14_20` 1, `dst_pa_21_27` 0, `dst_pa_28_34` -1, `dst_pa_35p` -4. Always confirm against the league's own scoring page — leagues differ most in the defense brackets. Threshold bonuses go under `bonuses` (`{ stat, target, points }`); every value stays between -50 and 50.
+
+#### Missed field goals and yards allowed
+
+No preset scores either; a league that does lists them under `overrides`.
+
+- **Missed field goals:** the penalty per distance bin — `fg_miss_0_19`, `fg_miss_20_29`, `fg_miss_30_39`, `fg_miss_40_49`, `fg_miss_50p`. A bin left out scores 0, so a league that penalises only short misses lists only those.
+- **Yards allowed:** list every bin of the league's set, the bins worth 0 included, so the set runs from 0 yards to one open-ended bin with no gap or overlap; otherwise `ff doctor` reports `scoring.overrides` and the file does not load. Yahoo's bins are `dst_ya_0_99`, `dst_ya_100_199`, `dst_ya_200_299`, `dst_ya_300_399`, `dst_ya_400_499` and `dst_ya_500p`; ESPN's and Sleeper's are `dst_ya_0_99`, `dst_ya_100_199`, `dst_ya_200_299`, `dst_ya_300_349`, `dst_ya_350_399`, `dst_ya_400_449`, `dst_ya_450_499`, `dst_ya_500_549` and `dst_ya_550p`. For example (the values are the league's own; these only show the shape): `dst_ya_0_99: 5`, `dst_ya_100_199: 3`, `dst_ya_200_299: 2`, `dst_ya_300_399: 0`, `dst_ya_400_499: -1`, `dst_ya_500p: -3`.
+
+#### TE premium: cannot be stated yet
+
+Scoring values apply per position type (offense, kicker, defense), not per position, so the file has no way to give tight ends more per reception than other players; it refuses any key that tries, and `ff doctor` says so. Leave the premium out and tell the user what that omits: in a TE-premium league the tight ends' points read low by the premium × receptions (half a point on six catches is 3 points a week), and every start/sit and weekly-review number for a tight end carries that gap. Any other rule that applies to one position only is the same.
 
 ### The shape
 

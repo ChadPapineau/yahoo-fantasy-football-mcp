@@ -32,7 +32,7 @@ Ask in small batches, in this order, accepting "I don't know" (the field stays e
 
 1. League basics: season, number of teams, head-to-head or points-only, the week the regular season ends, when the playoffs start and how many teams make them.
 2. Roster slots and counts (QB, WR, RB, TE, W/R/T, K, DEF, BN, IR).
-3. Scoring — offer the common presets (standard, half-PPR, PPR) first, then only the differences; kicker distance brackets and defense points-allowed brackets.
+3. Scoring — offer the common presets (standard, half-PPR, PPR) first, then only the differences; kicker distance brackets, missed field goals by distance (`fg_miss_0_19` … `fg_miss_50p`), defense points-allowed brackets, and yards-allowed brackets if the league scores them (`dst_ya_*`: every bin from 0 yards to the open-ended one, the bins worth 0 included). A TE premium cannot be stated in this version: if the league has one, say so and leave it out — its tight ends' points read low by the premium × receptions.
 4. Waivers: FAAB or rolling priority, the starting FAAB budget, any weekly add limit.
 5. The user's roster: each player's name, position, NFL team and current slot.
 6. Optional: this week's opponent and their roster (without it there is no win probability).
