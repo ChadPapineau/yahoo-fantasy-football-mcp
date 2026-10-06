@@ -34,7 +34,7 @@ import {
   type Week,
   type LeagueFileIssue,
 } from "../platform.js";
-import type { LeagueFile, RosterEntryInput } from "./schema.js";
+import { UNKNOWN_SLOT_HINT, type LeagueFile, type RosterEntryInput } from "./schema.js";
 import { buildScoringSettings } from "./scoring.js";
 
 /** Default league slug when the file names none. */
@@ -188,10 +188,8 @@ export function unverifiedRuleFields(f: LeagueFile): readonly string[] {
   return Object.freeze(out);
 }
 
-/** Fixed hint for a slot name the model cannot classify (ESPN/Sleeper `FLEX`, `D/ST`; QA-1-047). */
-export const UNKNOWN_SLOT_HINT =
-  "a flex is named by its positions (W/R/T, W/R, W/T, Q/W/R/T) or given an eligible list; " +
-  "the team defence slot is DEF, the bench BN, injured reserve IR";
+/** Fixed hint for a slot name the model cannot classify (defined beside the schema that also uses it). */
+export { UNKNOWN_SLOT_HINT };
 
 /** Value-free reason for a rejected slot definition (the problem code, plus a hint when unknown). */
 export function slotProblemReason(problem: SlotDefinitionProblem): string {

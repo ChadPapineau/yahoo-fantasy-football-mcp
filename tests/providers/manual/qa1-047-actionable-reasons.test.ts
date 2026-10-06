@@ -74,3 +74,60 @@ describe("QA-1-047: actionable, value-free reasons for copied spellings", () => 
     expect(wrong).not.toMatch(/missing/);
   });
 });
+
+describe("QA-1-047 (round 2): slot spellings in any case get the same actionable reason", () => {
+  // every spelling a fantasy app shows, in lower, title and mixed case; `use` = the vocabulary
+  // spelling the reason must name, or null when the reason must carry the slot-vocabulary hint
+  const SPELLINGS: readonly (readonly [string, string | null])[] = [
+    ["flex", null],
+    ["Flex", null],
+    ["fLeX", null],
+    ["d/st", null],
+    ["D/st", null],
+    ["dst", null],
+    ["Dst", null],
+    ["def", "DEF"],
+    ["Def", "DEF"],
+    ["wr", "WR"],
+    ["Wr", "WR"],
+    ["te", "TE"],
+    ["k", "K"],
+    ["w/r/t", "W/R/T"],
+    ["W/r/T", "W/R/T"],
+    ["q/w/r/t", "Q/W/R/T"],
+    ["bn", "BN"],
+    ["Ir", "IR"],
+    ["Qzxwvk", null], // an unknown word: hinted, never echoed in either case
+    ["Super Flex", null], // not slot-shaped at all
+    ["1qb", null],
+  ];
+  const HINT = /W\/R\/T.*DEF|DEF.*W\/R\/T/;
+
+  for (const [spelled, use] of SPELLINGS) {
+    it(`slot ${JSON.stringify(spelled)} names ${use ?? "the slot vocabulary"} as a slot definition and as a player's slot`, async () => {
+      const asDef = await issues(
+        edit("{ name: TE, count: 1 }", `{ name: "${spelled}", count: 1 }`),
+      );
+      const asSlot = await issues(
+        edit(
+          'position: TE, gsis_id: "00-0037744", slot: TE',
+          `position: TE, gsis_id: "00-0037744", slot: "${spelled}"`,
+        ),
+      );
+      for (const [where, r] of [
+        ["roster_slots[3].name", asDef],
+        ["my_team.players[5].slot", asSlot],
+      ] as const) {
+        const line = r.split("\n").find((l) => l.startsWith(`${where}: `)) ?? "";
+        expect(line, `${spelled} @ ${where}\n${r}`).not.toBe("");
+        if (use !== null) expect(line).toContain(`(use ${use})`);
+        else expect(line).toMatch(HINT);
+        // value-free: an unknown spelling is never echoed, in its own case or upper-cased
+        if (use === null && !/flex|def|d\/st|dst/i.test(spelled)) {
+          expect(line).not.toContain(spelled);
+          expect(line).not.toContain(spelled.toUpperCase());
+        }
+      }
+    });
+  }
+});
