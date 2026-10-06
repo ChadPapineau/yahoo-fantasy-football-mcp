@@ -4,7 +4,8 @@
 # deletion, type changes included — enumerated by the scanner itself (`git diff --cached --raw -z`)
 # and read by object id, so a name git would C-quote (non-ASCII, tab, quote, backslash) is never
 # mangled into a path that "does not exist" and skipped (QA-1-088). It also refuses an author or
-# committer address that is not a no-reply/reserved placeholder (QA-1-095).
+# committer address that is not a no-reply/reserved placeholder (QA-1-095), and refuses to add an
+# iCloud/Finder conflict copy ("ci 2.yml", "src/cli 2/x.ts") — deleting one is never blocked.
 # Enabled per clone with:  git config core.hooksPath .githooks
 # (scripts/dev/commit-paths.sh runs the same scanner itself, since it commits via
 # plumbing that does not fire hooks.) Never bypass with --no-verify.

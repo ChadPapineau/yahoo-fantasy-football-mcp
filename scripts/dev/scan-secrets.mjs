@@ -14,7 +14,9 @@
 //     --all       scan every tracked file (git ls-files)
 //     --index     scan every blob the next commit adds or changes (index vs HEAD, any status but
 //                 D — including type changes — read by object id, so no path is ever re-quoted);
-//                 the pre-commit hook and commit-paths.sh use this (QA-1-088)
+//                 the pre-commit hook and commit-paths.sh use this (QA-1-088). It also refuses
+//                 to ADD a path with an iCloud/Finder conflict-copy segment ("ci 2.yml",
+//                 "src/cli 2/x.ts"); deleting one is never blocked
 //     --identity  refuse an author or committer address that is not a no-reply or reserved
 //                 placeholder address (QA-1-095); the address itself is never printed
 // Exit: 0 clean · 1 findings · 2 usage/IO error, or a file it cannot scan (QA-1-089: it fails
@@ -165,7 +167,7 @@ function readWorktree(file) {
  * Every blob the next commit adds or changes: `git diff --cached --raw -z --no-renames` (index
  * vs HEAD, or vs the empty tree before the first commit). NUL-separated, so no name is quoted;
  * every status except D is kept (A, M, T type change, …); blobs are read by object id.
- * @returns {{file: string, sha: string}[]}
+ * @returns {{file: string, sha: string, status: string}[]}
  */
 function indexEntries() {
   const raw = git(["diff", "--cached", "--raw", "-z", "--no-renames", "--no-abbrev", "--no-ext-diff", "--ignore-submodules=none"], 256 * 1024 * 1024)
@@ -182,9 +184,20 @@ function indexEntries() {
     i += paths;
     if (status.startsWith("D") || newMode === "000000" || newMode === "160000") continue;
     if (!newSha || /^0+$/.test(newSha)) throw new ScanError(`${file}: no staged blob id (status ${status})`);
-    entries.push({ file, sha: newSha });
+    entries.push({ file, sha: newSha, status });
   }
   return entries;
+}
+
+/**
+ * True when any segment of a repo-relative path is an iCloud/Finder conflict copy: a space, a
+ * number, then only dot-extensions ("ci 2.yml", "foo.test 3.ts", "cli 2", "Copy 12"). In an
+ * iCloud-synced checkout these appear on their own; committing ".github/workflows/ci 2.yml" would
+ * add a second CI workflow. "v2.ts", "round-2.md" and "Season 2026 notes.md" are not copies.
+ * @param {string} file
+ */
+export function isConflictCopyName(file) {
+  return file.split("/").some((segment) => / [0-9]+(\.[^.]+)*$/.test(segment));
 }
 
 /** The address in a `git var GIT_*_IDENT` line ("Name <addr> 1700000000 +0000"). */
@@ -224,6 +237,8 @@ function fail(e) {
 
 /** @type {{file: string, read: () => Buffer | null}[]} */
 const targets = [];
+/** Paths refused for their NAME, before any content is read. */
+const nameFindings = [];
 try {
   if (identity) {
     for (const which of ["GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"]) {
@@ -241,7 +256,12 @@ try {
       targets.push({ file: f, read: () => readWorktree(f) });
     }
   }
-  if (index) for (const { file, sha } of indexEntries()) targets.push({ file, read: () => readBlob(sha, file) });
+  if (index) {
+    for (const { file, sha, status } of indexEntries()) {
+      if (status.startsWith("A") && isConflictCopyName(file)) nameFindings.push(`${file}  [conflict-copy-name]`);
+      targets.push({ file, read: () => readBlob(sha, file) });
+    }
+  }
   for (const f of files) targets.push({ file: f, read: () => (staged ? readStaged(f) : readWorktree(f)) });
 } catch (e) {
   fail(e);
@@ -252,7 +272,7 @@ if (!targets.length && !index && !identity) {
 }
 
 const deny = loadDenylist();
-const findings = [];
+const findings = [...nameFindings];
 let scanned = 0;
 let binary = 0;
 for (const { file, read } of targets) {

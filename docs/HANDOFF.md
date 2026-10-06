@@ -120,6 +120,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | date | decision | why |
 |---|---|---|
 | 2026-09-29 | Repo lives at `~/Documents/Repos/Yahoo Fantasy Football` (iCloud-synced folder), per Chad | alongside his other MCP servers. Consequence: OAuth tokens and caches are stored **outside** the repo dir by design (`~/.config/…`, `~/.cache/…`) so nothing secret syncs |
+| 2026-10-05 | **Superseded: one checkout, `~/Developer/yahoo-fantasy-football-mcp`.** The `~/Documents` copy was retired (moved to the Trash, nothing unpushed) and the merged `build/phase-1a` branch deleted; the pre-commit hook now refuses conflict-copy names too | Chad: "the option that imposes the least amount of clutter and is the most optimally efficient and effective going forward"; iCloud kept recreating conflict copies there |
 | 2026-09-29 | Handoff document = `docs/HANDOFF.md`, committed | Chad's choice; survives context loss and machine changes |
 | 2026-09-29 | Stack default: Node/TypeScript + official MCP SDK | matches Chad's other local MCP servers; deviations must be justified in the plan |
 | 2026-09-29 | Concurrency capped at two agents | Chad's credit-efficiency rule (2026-09-24) |
@@ -153,12 +154,13 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 
 ## Build facts (Stage A, 2026-09-30 — verified by the orchestrator)
 
-- **Working copy for the build: `~/Developer/yahoo-fantasy-football-mcp`** (outside iCloud).
-  The canonical checkout Chad chose, `~/Documents/Repos/Yahoo Fantasy Football`, stays and is
-  updated by `git pull`; it holds no `node_modules`/`dist`/coverage. Reason: iCloud created 207
-  conflict duplicates inside `node_modules` (`@babel/parser 2` …) during Stage A and broke three
-  tests locally; git metadata written by parallel agents is at the same risk. The commit helper
-  now refuses any "name 2.ext" conflict-copy path.
+- **The only checkout is `~/Developer/yahoo-fantasy-football-mcp`** (outside iCloud). The first
+  checkout, `~/Documents/Repos/Yahoo Fantasy Football`, was retired on 2026-10-05 (moved to the
+  Trash after confirming nothing was unpushed): iCloud created 207 conflict duplicates inside its
+  `node_modules` during Stage A, later restored deleted build output with 149 more, and left 13
+  "name 2.ext" copies of scripts and workflows (`ci 2.yml` would have run as a second workflow if
+  committed). Both commit paths (`.githooks/pre-commit` and `scripts/dev/commit-paths.sh`, via
+  `scan-secrets.mjs --index`) now refuse to add a conflict-copy name.
 - Node **24.21.0** via fnm for this repo only (`.nvmrc` = 24; the global default stays 22 for
   SOTARA). `node:sqlite` on 24 prints no experimental warning; `ATTACH 'file:…?mode=ro'` is
   honoured; **at most 10 attached databases** — Phase 2 needs attach-on-demand (LRU).
@@ -381,3 +383,8 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   mutation-checked regression test; loop stopped after round 1 for budget. Orchestrator re-ran the
   full gate from a clean install: 3,867 + 127 tests green, 98.65 % lines, CI green. Register
   `docs/qa/2026-09-30-phase1a-qa-pentest.md`. README now describes the built product. Merged to `main`.
+- 2026-10-05 — **One checkout.** A peer session flagged 13 iCloud conflict copies in the `~/Documents`
+  checkout (untracked, byte-identical to versions in history); removed them. On Chad's choice of the
+  least-clutter option: the pre-commit hook refuses conflict-copy names (test-first, mutation-checked),
+  the `~/Documents` checkout was moved to the Trash after a final no-unpushed-work check, and the merged
+  `build/phase-1a` branch was deleted. `~/Developer/yahoo-fantasy-football-mcp` is the only checkout.
