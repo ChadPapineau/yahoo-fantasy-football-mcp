@@ -164,6 +164,25 @@ describe("QA-2-038 — an excluded starter scores 0", () => {
     expect(excluded.rec.lineup).toEqual(empty.rec.lineup);
   });
 
+  it("a compare with an entrant who scores a known 0 (on bye): Δ is minus the starter's own quantiles", () => {
+    const rb1 = player("RB", 15, { slot: "RB", points: skewed(15, 30, 0.1) });
+    const rb2 = player("RB", 12, { slot: "RB", points: dist(12, 6) });
+    const bye = player("RB", 0, { slot: "BN", points: zeroDist("position_cv"), p_active: 0 });
+    const r = analyzeLineup({
+      slots: RB2,
+      players: [rb1, rb2, bye],
+      opponent: null,
+      compare: [{ out: rb1.player_key, in: bye.player_key }],
+      clock,
+    });
+    expect(r.rec.action).toBe("keep the current lineup");
+    expect(r.swaps).toEqual([
+      expect.objectContaining({ out: rb1.player_key, in: bye.player_key, delta_e: -15 }),
+    ]);
+    // exact: [0 − p90, 0 − p10] of the starter, never a symmetric band around −15
+    expect(r.swaps[0]?.interval).toEqual([-30, 0]);
+  });
+
   it("a replacement with a negative p10 (a defence): the seat that scores 0 is still filled", () => {
     const slots = slotsOf([
       { name: "DEF", count: 1 },

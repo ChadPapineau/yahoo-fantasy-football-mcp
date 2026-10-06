@@ -361,4 +361,40 @@ describe("QA-1-020/040 — filling an empty starting seat is a move", () => {
     expect(decided(10).r.rec.action).toBe("make 1 lineup change and hold 1 coin flip");
     expect(decided(28).r.rec.action).toBe("keep the current lineup");
   });
+
+  it("two entrants, an empty seat and a coin flip: the stronger entrant takes the seat that is made", () => {
+    // which entrant fills the empty RB seat and which faces the starter is a tie for the solve (same
+    // total); decided change by change, the stronger one must fill — held behind the coin flip, he
+    // would sit while the weaker one starts (the round-2 verification's exclude ≡ status O property)
+    const slots = slotsOf([
+      { name: "RB", count: 2 },
+      { name: "BN", count: 4 },
+    ]);
+    for (const strongerFirst of [true, false]) {
+      const label = `stronger entrant created ${strongerFirst ? "first" : "second"}`;
+      const starter = player("RB", 10, { slot: "RB", points: dist(10, 8) });
+      const make = (m: number) => player("RB", m, { slot: "BN", points: dist(m, 8) });
+      const [strong, weak] = strongerFirst
+        ? [make(12), make(11)]
+        : (() => {
+            const w = make(11);
+            return [make(12), w] as const;
+          })();
+      const r = analyzeLineup({
+        slots,
+        players: [starter, strong, weak],
+        opponent: null,
+        clock,
+        fills_in_swaps: true,
+      });
+      expect(r.rec.action, label).toBe("make 1 lineup change and hold 1 coin flip");
+      expect(r.swaps.find((s) => s.out === null)?.in, label).toBe(strong.player_key);
+      expect(r.swaps.find((s) => s.out === starter.player_key)?.in, label).toBe(weak.player_key);
+      const kept = (r.rec.lineup ?? []).map((x) => x.player_key).sort();
+      expect(kept, label).toEqual([starter.player_key, strong.player_key].sort());
+      // the seats agree with what is shown as the recommendation
+      const shown = r.recommended_lineup.filter((x) => x.slot === "RB").map((x) => x.player_key);
+      expect(shown.sort(), label).toEqual([strong.player_key, weak.player_key].sort());
+    }
+  });
 });

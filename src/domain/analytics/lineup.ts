@@ -680,6 +680,56 @@ function changesOf(flow: Flow, force: ReadonlySet<PlayerKey>): Change[] {
   return out;
 }
 
+/** A forbidden cell of the re-match below: past any sum of point gains, far below FORBIDDEN. */
+const REMATCH_FORBIDDEN = 1e6;
+/** Ties keep the solve's matching (no churn in `swaps` when nothing is gained). */
+const REMATCH_STAY = 1e-7;
+
+/**
+ * The best lineup's changes, re-matched so that deciding each on its own keeps the most points
+ * (rule 1; the round-2 verification of QA-1-020/040). The solve fixes WHICH players start; which
+ * entrant takes which freed seat is a free choice among lineups of the same total — two bench RBs
+ * for an empty RB seat and the flex, say. Each change is decided on its own interval, so that choice
+ * decides what is made: the stronger entrant held behind a coin flip while the weaker one fills a
+ * seat that scores 0 keeps fewer points than the other way round, and the solve's own pick between
+ * equal totals is arbitrary. The freed seats — each entrant's seat with the chain of slot moves
+ * behind it and the starter at its end (or none) — are re-matched to the entrants by an exact
+ * assignment that maximises what the made changes gain; ties keep the solve's matching.
+ */
+function rematch(
+  flow: Flow,
+  a: Assignment,
+  slots: RosterSlots,
+  force: ReadonlySet<PlayerKey>,
+): { flow: Flow; a: Assignment } {
+  const heads = flow.pairs;
+  if (heads.length < 2) return { flow, a };
+  const cost = heads.map((own, i) =>
+    heads.map((h, j) => {
+      const slot = slotOf(slots, h.slot);
+      if (
+        slot === undefined ||
+        !canOccupy(slot, { positions: own.in.positions, status: own.in.status })
+      )
+        return REMATCH_FORBIDDEN;
+      const pr = { out: h.out, in: own.in };
+      const { de, interval } = pairDelta(pr);
+      const made =
+        verdictOf(freesZeroSeat(pr), de, interval, force.has(own.in.player_key)) === "made";
+      return -(made ? de : 0) - (i === j ? REMATCH_STAY : 0);
+    }),
+  );
+  const ans = solveAssignment(cost);
+  if (ans.every((j, i) => j === i)) return { flow, a };
+  const next = new Map(a);
+  const pairs = heads.map((own, i): FlowPair => {
+    const h = at(heads, at(ans, i));
+    next.set(own.in.player_key, h.slot);
+    return { in: own.in, slot: h.slot, out: h.out, movers: h.movers };
+  });
+  return { flow: { ...flow, pairs }, a: next };
+}
+
 /** The flow of only the `applied` changes (each change's pair / chain, exactly as in `flow`). */
 function appliedFlow(flow: Flow, applied: readonly Change[]): Flow {
   if (applied.length === flow.pairs.length + flow.leaverChains.length) return flow;
@@ -1010,7 +1060,14 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   const curStarters = curEval.starters;
   const recStarters = chosen.starters;
   const recKeys = new Set(recStarters.map((p) => p.player_key));
-  const flow = slotFlow(curA, chosen.a, curStarters, recStarters, slots);
+  // which entrant takes which freed seat: the matching whose changes, each decided on its own, keep
+  // the most points (the same starters, so the same total and P(win) as the solve's own seating)
+  const { flow, a: recA } = rematch(
+    slotFlow(curA, chosen.a, curStarters, recStarters, slots),
+    chosen.a,
+    slots,
+    force,
+  );
   const pairs = flow.pairs;
   const byKey = new Map(players.map((p) => [p.player_key, p]));
   const comparePairs: { out: LineupPlayer; in: LineupPlayer; slot: string }[] = [];
@@ -1042,7 +1099,7 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
       option_value:
         out === null
           ? null
-          : optionValue({ out, in: pr.in, slot: pr.slot }, recStarters, players, slots, chosen.a),
+          : optionValue({ out, in: pr.in, slot: pr.slot }, recStarters, players, slots, recA),
     };
   });
 
@@ -1054,14 +1111,14 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
     if (lockMs === null) continue;
     const decided = lockMs - INACTIVES_LEAD_MS;
     if (decided <= nowMs) continue;
-    const slotName = slotIn(chosen.a, x.player_key);
+    const slotName = slotIn(recA, x.player_key);
     const slot = slotOf(slots, slotName);
     if (slot === undefined) continue;
     const alt = players
       .filter(
         (y) =>
           !recKeys.has(y.player_key) &&
-          slotOf(slots, slotIn(chosen.a, y.player_key))?.class !== "ir" &&
+          slotOf(slots, slotIn(recA, y.player_key))?.class !== "ir" &&
           !exclude.has(y.player_key) &&
           (y.p_active ?? 1) > 0 &&
           y.points.mean > 0 &&
@@ -1139,10 +1196,10 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   const applied = all.filter((c) => c.verdict === "made");
   const kept = (() => {
     const f = appliedFlow(flow, applied);
-    if (f === flow) return { f, a: chosen.a, starters: recStarters };
+    if (f === flow) return { f, a: recA, starters: recStarters };
     const a = new Map(curA);
     for (const c of applied)
-      for (const p of c.members) a.set(p.player_key, slotIn(chosen.a, p.player_key));
+      for (const p of c.members) a.set(p.player_key, slotIn(recA, p.player_key));
     return { f, a: a as Assignment, starters: startersOf(a, players, slots) };
   })();
   const changes = kept.f.changes;
@@ -1241,7 +1298,7 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   const base = {
     objective_used: objective,
     current_lineup: view(curA),
-    recommended_lineup: view(chosen.a),
+    recommended_lineup: view(recA),
     mode,
     mode_basis: modeBasis,
     p_win_before: hasOpp ? round(curEval.pwin) : null,
