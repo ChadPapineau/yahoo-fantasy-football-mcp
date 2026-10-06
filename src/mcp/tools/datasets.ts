@@ -5,8 +5,14 @@
 // §6.4: news/injury text feeds analytics only as extracted structured features).
 import { z } from "zod/v4";
 import { freshnessClass, stampState } from "../../config/freshness.js";
-import { GAME_DAY_WINDOW_MS } from "../../domain/analytics/constants.js";
-import { pActive } from "../../domain/analytics/availability.js";
+import { GAME_DAY_WINDOW_MS, INJURY_REPORT } from "../../domain/analytics/constants.js";
+import {
+  pActive,
+  reportContext,
+  reportStates,
+  type Availability,
+  type ReportState,
+} from "../../domain/analytics/availability.js";
 import type { InjuryReport } from "../../domain/analytics/types.js";
 import { byeWeeks, kickoffMs, teamGame } from "../../domain/league/schedule.js";
 import { isIrEligibleStatus } from "../../domain/league/slots.js";
@@ -147,6 +153,42 @@ export const LINES_EXPIRED_WARNING =
 /** The fixed base-rate note (plan 07 D2). */
 export const BASE_RATES_NOTE = "Q → played 71 % 2017–2023 (05 §3.5)";
 
+/** The teams whose players' p_active rests on a carried, expired or pending-DNP report state. */
+interface NamedStates {
+  readonly carried: Set<string>;
+  readonly expired: Set<string>;
+  readonly dnp: Set<string>;
+}
+
+function noteAvailability(n: NamedStates, a: Availability, team: string | null): void {
+  if (team === null) return;
+  if (a.carried_from !== undefined) n.carried.add(team);
+  if (a.expired_from !== undefined) n.expired.add(team);
+  if (a.dnp_pending === true) n.dnp.add(team);
+}
+
+/**
+ * D2's warnings naming the report states behind p_active, as E1 names them in its assumptions
+ * (QA-1-021, QA-2-034): fixed text and team codes only.
+ */
+export function availabilityWarnings(w: Week, n: NamedStates): string[] {
+  const list = (s: Set<string>): string => [...s].sort().join(", ");
+  const out: string[] = [];
+  if (n.carried.size > 0)
+    out.push(
+      `week ${String(w)} game-status report not out yet for ${list(n.carried)}: the newest earlier designation is carried forward (p_active)`,
+    );
+  if (n.expired.size > 0)
+    out.push(
+      `week ${String(w)} availability unknown for ${list(n.expired)}: the newest designation is more than ${String(INJURY_REPORT.carryWeeks)} weeks old (p_active null)`,
+    );
+  if (n.dnp.size > 0)
+    out.push(
+      `week ${String(w)} game-status report not out yet for ${list(n.dnp)}: a player who did not practise for an injury and has no designation yet is not treated as cleared (p_active from the practice trend)`,
+    );
+  return out;
+}
+
 export const getInjuries = defineTool({
   name: "ff_get_injuries",
   family: "external",
@@ -175,7 +217,6 @@ export const getInjuries = defineTool({
     const reports = ctx.services.datasets.injuries.reports(season, w, gsis);
     const rIn = requiredSource(ctx, "nflverse:injuries", reports, lc.allowStale);
     if (rIn !== null) inputs.push(rIn);
-    const byGsis = new Map(reports.rows.map((r) => [r.gsis_id, r]));
     const games = seasonGames(ctx, season);
     const gIn = optionalDataset(games, ctx.nowMs, lc.allowStale);
     if (gIn !== null) inputs.push(gIn);
@@ -185,46 +226,57 @@ export const getInjuries = defineTool({
     const rrIn = optionalDataset(rr, ctx.nowMs, lc.allowStale);
     if (rrIn !== null && !inputs.some((i) => i.source === rrIn.source)) inputs.push(rrIn);
     const roster = new Map(rr.rows.map((r) => [r.gsis_id, r]));
-    // reports are published team by team (QA-1-021): "not listed" means cleared only once his team's
-    // report is out; before that, last week's designation carries — as the projection judges it
-    const teamsReported = (rows: readonly InjuryReport[], wk: Week): ReadonlySet<string> =>
-      new Set(rows.filter((r) => r.season === season && r.week === wk).map((r) => r.nfl_team));
-    const nowTeams =
-      reports.stamp === null
-        ? new Set<string>()
-        : teamsReported(ctx.services.datasets.injuries.reports(season, w, null).rows, w);
-    const prior = w - 1;
-    const priorReports =
-      prior >= 1 ? ctx.services.datasets.injuries.reports(season, prior, gsis) : null;
-    const priorTeams =
-      prior >= 1 && priorReports !== null && priorReports.stamp !== null
-        ? teamsReported(ctx.services.datasets.injuries.reports(season, prior, null).rows, prior)
-        : new Set<string>();
-    const priorByGsis = new Map(
-      (priorReports?.rows ?? [])
-        .filter((r) => r.season === season && r.week === prior)
-        .map((r) => [r.gsis_id, r]),
-    );
+    // The official report as the projection reads it (QA-1-021, QA-2-034): each week's report state
+    // per team (none / practice report only / game-status report out) from every team's rows, weeks
+    // 1..w, so a practice-only row is not "cleared" and a look-ahead week finds the newest
+    // game-status report before it; the players' own rows in those weeks.
+    const loaded = reports.stamp !== null;
+    const states = new Map<Week, ReadonlyMap<string, ReportState>>();
+    const mine = new Map<string, InjuryReport>();
+    const wanted = new Set(gsis);
+    for (let wk = 1; loaded && wanted.size > 0 && wk <= w; wk++) {
+      const r = ctx.services.datasets.injuries.reports(season, wk, null);
+      if (r.stamp === null) continue;
+      for (const rep of r.rows)
+        if (rep.season === season && rep.week === wk && wanted.has(rep.gsis_id))
+          mine.set(`${rep.gsis_id}:${String(wk)}`, rep);
+      const asOf = Date.parse(r.stamp.as_of);
+      states.set(
+        wk,
+        reportStates(r.rows, games.rows, season, wk, Number.isFinite(asOf) ? asOf : null),
+      );
+    }
+    const named = {
+      carried: new Set<string>(),
+      expired: new Set<string>(),
+      dnp: new Set<string>(),
+    };
     const src = (f: string): string => textSource(lc.ref.platform, f);
     const rows = targets.map((t) => {
-      const report = t.subject.kind === "player" ? (byGsis.get(t.subject.gsis_id) ?? null) : null;
       const g = t.nfl_team === null ? null : teamGame(t.nfl_team, weekRows);
       const kick = g === null ? null : kickoffMs(g.kickoff);
       const platformStatus = codeOrNull(t.platform?.status ?? null, STATUS_CODE_RE);
       const rosterStatus =
         t.subject.kind === "player" ? rosterStatusFor(roster.get(t.subject.gsis_id), w) : null;
+      const subject = t.subject;
+      const rc = reportContext(
+        w,
+        t.nfl_team,
+        loaded,
+        (wk, team) => states.get(wk)?.get(team) ?? "none",
+        (wk) =>
+          subject.kind === "player" ? (mine.get(`${subject.gsis_id}:${String(wk)}`) ?? null) : null,
+      );
+      const report = rc.report;
       const avail = pActive({
+        ...rc,
         rosterStatus,
-        report,
-        injuriesLoaded: reports.stamp !== null,
-        reportPublished: t.nfl_team !== null && nowTeams.has(t.nfl_team),
-        priorPublished: t.nfl_team !== null && priorTeams.has(t.nfl_team),
-        priorReport:
-          t.subject.kind === "player" ? (priorByGsis.get(t.subject.gsis_id) ?? null) : null,
+        injuriesLoaded: loaded,
         platformStatus,
         kickoffMs: kick,
         nowMs: ctx.nowMs,
       });
+      noteAvailability(named, avail, t.nfl_team);
       const official =
         report === null
           ? null
@@ -287,6 +339,7 @@ export const getInjuries = defineTool({
         game_day: gameDay,
       };
     });
+    warnings.push(...availabilityWarnings(w, named));
     const players = args.only_flagged
       ? rows.filter((r) => r.official !== null || r.platform?.status != null)
       : rows;

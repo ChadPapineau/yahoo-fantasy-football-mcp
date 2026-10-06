@@ -9,7 +9,12 @@
 //   is unknown (p null, named), never "cleared".
 import fc from "fast-check";
 import { beforeAll, describe, expect, it } from "vitest";
-import { pActive, reportStates } from "../../../src/domain/analytics/availability.js";
+import {
+  pActive,
+  reportContext,
+  reportStates,
+  type ReportState,
+} from "../../../src/domain/analytics/availability.js";
 import { INJURY_REPORT, P_ACTIVE } from "../../../src/domain/analytics/constants.js";
 import {
   projectPlayers,
@@ -112,7 +117,8 @@ describe("QA-2-034 — pActive: a practice-only row is not a clean bill of healt
     );
   });
 
-  it("not designated on the last game-status report: active, and a pending designation is flagged", () => {
+  it("not designated on the last game-status report, practised (or rested) this week: active, a pending designation flagged", () => {
+    const rest = { ...row(4, null, DNP), primary_injury: "Not injury related - resting player" };
     for (const prior of [null, row(3, null, FP), row(3, "", LP)]) {
       const common = {
         ...base,
@@ -121,16 +127,50 @@ describe("QA-2-034 — pActive: a practice-only row is not a clean bill of healt
         priorReport: prior,
         week: 4,
       };
-      expect(pActive({ ...common, report: row(4, null, DNP) })).toEqual({
-        p: 1,
-        basis: "designation_base_rate",
-        designation_pending: true,
-      });
+      for (const now of [row(4, null, LP), row(4, null, FP), row(4, null, null), rest]) {
+        expect(pActive({ ...common, report: now })).toEqual({
+          p: 1,
+          basis: "designation_base_rate",
+          designation_pending: true,
+        });
+      }
       expect(pActive({ ...common, report: null })).toEqual({
         p: 1,
         basis: "designation_base_rate",
       });
     }
+  });
+
+  it("property: a new did-not-practise for an injury is not cleared before the game-status report (never p 1)", () => {
+    const injuries = fc.constantFrom(
+      "Hamstring",
+      "Knee",
+      "Concussion",
+      "Not injury related - personal matter",
+      "Wrist",
+      "Chest",
+    );
+    const priors = fc.constantFrom(
+      { priorPublished: true, priorReport: null },
+      { priorPublished: true, priorReport: row(3, null, FP) },
+      { priorPublished: true, priorReport: row(3, "", LP) },
+      { priorPublished: false, priorReport: null },
+    );
+    fc.assert(
+      fc.property(injuries, priors, fc.integer({ min: 1, max: 6 }), (injury, prior, week) => {
+        const now = { ...row(week, null, DNP), primary_injury: injury };
+        const a = pActive({ ...base, report: now, reportFinal: false, ...prior, week });
+        expect(a.p).not.toBe(1);
+        expect(a).toEqual({
+          p: P_ACTIVE.questionableByPractice.dnp,
+          basis: "trend_model",
+          dnp_pending: true,
+        });
+        // his game-status report is out and does not designate him: cleared
+        expect(pActive({ ...base, report: now, reportFinal: true, ...prior, week }).p).toBe(1);
+      }),
+      { numRuns: 200, seed: 21 },
+    );
   });
 
   it("a designation on this week's row always wins, final or not", () => {
@@ -358,5 +398,68 @@ describe("QA-1-021 (reopened) — look-ahead weeks carry the newest designation,
       const w6 = project([t], [6], NOW()).players[0]?.weeks[0];
       expect(w6?.p_active, t.name).toBeNull();
     }
+  });
+});
+
+describe("reportContext — the one reading of the report every tool uses (D2 and E1, QA-2-034 / QA-1-021)", () => {
+  const states = (m: Record<number, ReportState>) => (w: number, team: NflTeam) =>
+    team === "HOU" ? (m[w] ?? "none") : "final";
+
+  it("the prior is the newest earlier FINAL week of his team, across practice-only and missing weeks", () => {
+    const rows: Record<number, InjuryReport> = {
+      2: row(2, "Out", DNP),
+      3: row(3, null, DNP), // practice report only
+      5: row(5, null, LP),
+    };
+    const rc = reportContext(
+      6,
+      "HOU",
+      true,
+      states({ 1: "final", 2: "final", 3: "practice", 4: "none", 5: "practice", 6: "none" }),
+      (w) => rows[w] ?? null,
+    );
+    expect(rc).toEqual({
+      report: null,
+      reportPublished: false,
+      reportFinal: false,
+      priorPublished: true,
+      priorReport: rows[2],
+      practiceReport: rows[5],
+      week: 6,
+    });
+  });
+
+  it("his team that week decides the prior's state (a traded player), and no team has no state", () => {
+    const traded = { ...row(3, "Questionable", LP), nfl_team: "DAL" as NflTeam };
+    const rc = reportContext(4, "HOU", true, states({ 3: "practice", 4: "practice" }), (w) =>
+      w === 3 ? traded : null,
+    );
+    expect(rc.priorReport).toBe(traded); // DAL's week 3 is final although HOU's is not
+    const none = reportContext(
+      4,
+      null,
+      true,
+      () => "final",
+      () => null,
+    );
+    expect(none).toMatchObject({
+      reportPublished: false,
+      reportFinal: false,
+      priorPublished: false,
+    });
+  });
+
+  it("nothing loaded: never published, never final, no prior", () => {
+    const rc = reportContext(
+      4,
+      "HOU",
+      false,
+      () => "final",
+      () => null,
+    );
+    expect(rc).toMatchObject({ reportPublished: false, reportFinal: false, priorPublished: false });
+    expect(
+      pActive({ ...rc, injuriesLoaded: false, platformStatus: null, kickoffMs: KO, nowMs: KO }),
+    ).toEqual({ p: null, basis: "none" });
   });
 });
