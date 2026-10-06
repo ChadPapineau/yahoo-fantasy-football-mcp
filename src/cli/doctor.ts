@@ -846,7 +846,9 @@ export function checkDatasets(io: CliIo, config: Config, ex: ExistingStore): Doc
   for (const s of list) {
     const omit = s.beyond_hard === "omit";
     let st: RowStatus = "ok";
-    if (s.state === "never_loaded" || s.state === "expired") st = omit ? "warn" : "fail";
+    // a current file that cannot be read is as unusable as one never loaded (QA-2-054, as G1 reads it)
+    if (s.state === "never_loaded" || s.state === "expired" || s.state === "unreadable")
+      st = omit ? "warn" : "fail";
     else if (s.state === "stale") st = "warn";
     if (st !== "ok") failing.push(s.source);
     if (st === "fail" || (st === "warn" && status === "ok")) status = st;
