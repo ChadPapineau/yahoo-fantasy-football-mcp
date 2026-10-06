@@ -1,6 +1,7 @@
 // engine.test.ts — src/domain/scoring/engine.ts `score`/`explain`: plan 08 §3.3 (gating), §4.1
 // (indicator vs count families, exclusivity, scalar bracketize), §4.2 (bonuses), §4.4 / E4 (floor
 // and verified-only rounding), §4.5 (complete / ignored / unmapped), hostile lines and settings.
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   appliedRounding,
@@ -8,6 +9,7 @@ import {
   explain,
   floorApplies,
   score,
+  scoreSamples,
   scoringEngine,
 } from "../../../src/domain/scoring/engine.js";
 import { ScoringError } from "../../../src/domain/scoring/errors.js";
@@ -242,6 +244,140 @@ describe("score — bonuses (plan 08 §4.2)", () => {
     const neg = sampleSettings({ bonuses: { "9": [{ target: -10, points: -2 }] } });
     expect(score(lineOf("O", { rush_yd: -5 }), neg).points).toBe(-2.5);
     expect(score(lineOf("O", { rush_yd: -11 }), neg).points).toBe(-1.1);
+  });
+});
+
+describe("score — bonuses on bracket members (plan 08 §4.2; QA-2-036)", () => {
+  // the sample league's FG-distance bins (a count family) and points-allowed bins (an indicator family)
+  const FG: readonly (readonly [string, string])[] = [
+    ["19", "fg_0_19"],
+    ["20", "fg_20_29"],
+    ["21", "fg_30_39"],
+    ["22", "fg_40_49"],
+    ["23", "fg_50p"],
+  ];
+  const PA: readonly (readonly [string, string])[] = [
+    ["50", "dst_pa_0"],
+    ["51", "dst_pa_1_6"],
+    ["52", "dst_pa_7_13"],
+    ["53", "dst_pa_14_20"],
+    ["54", "dst_pa_21_27"],
+    ["55", "dst_pa_28_34"],
+    ["56", "dst_pa_35p"],
+  ];
+  const bin = (pa: number): string =>
+    pa === 0
+      ? "dst_pa_0"
+      : pa <= 6
+        ? "dst_pa_1_6"
+        : pa <= 13
+          ? "dst_pa_7_13"
+          : pa <= 20
+            ? "dst_pa_14_20"
+            : pa <= 27
+              ? "dst_pa_21_27"
+              : pa <= 34
+                ? "dst_pa_28_34"
+                : "dst_pa_35p";
+
+  it("count family: a member's bonus pays exactly when its bin count reaches the target", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...FG),
+        fc.array(fc.integer({ min: 0, max: 4 }), { minLength: 5, maxLength: 5 }),
+        fc.integer({ min: 0, max: 4 }),
+        fc.integer({ min: -6, max: 12 }).filter((p) => p !== 0),
+        ([id, member], counts, target, points) => {
+          const values: Record<string, number> = { pat_made: 2 };
+          FG.forEach(([, c], i) => (values[c] = counts[i] ?? 0));
+          const line = lineOf("K", values);
+          const withBonus = sampleSettings({ bonuses: { [id]: [{ target, points }] } });
+          const fires = (values[member] ?? 0) >= target;
+          const r = score(line, withBonus);
+          expect(r.points_exact).toBe(score(line, S).points_exact + (fires ? points : 0));
+          expect(r.contributions.filter((c) => c.kind === "bonus")).toEqual(
+            fires
+              ? [
+                  {
+                    canonical: member,
+                    value: values[member],
+                    modifier: points,
+                    points,
+                    kind: "bonus",
+                  },
+                ]
+              : [],
+          );
+        },
+      ),
+    );
+  });
+
+  it("indicator family: a member's bonus pays exactly when the game falls in its bin (indicator or scalar line)", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...PA),
+        fc.integer({ min: 0, max: 60 }),
+        fc.integer({ min: -6, max: 12 }).filter((p) => p !== 0),
+        fc.boolean(),
+        ([id, member], pa, points, asIndicators) => {
+          const values: Record<string, number> = asIndicators
+            ? Object.fromEntries(PA.map(([, c]) => [c, c === bin(pa) ? 1 : 0]))
+            : { dst_pa: pa };
+          const line = lineOf("DT", { ...values, dst_sack: 2 });
+          const withBonus = sampleSettings({ bonuses: { [id]: [{ target: 1, points }] } });
+          const fires = bin(pa) === member;
+          expect(score(line, withBonus).points_exact).toBe(
+            score(line, S).points_exact + (fires ? points : 0),
+          );
+        },
+      ),
+    );
+  });
+
+  it("the QA-2-036 kicker: FGs of 20, 32, 55 and 58 yards + 3 PATs with a 2-FG 50+ bonus of 3 → 22", () => {
+    const s = sampleSettings({ bonuses: { "23": [{ target: 2, points: 3 }] } });
+    const week1 = { fg_0_19: 0, fg_20_29: 1, fg_30_39: 1, fg_40_49: 0, fg_50p: 2, pat_made: 3 };
+    expect(score(lineOf("K", week1), S).points).toBe(19);
+    expect(score(lineOf("K", week1), s).points).toBe(22);
+    const week2 = { fg_0_19: 0, fg_20_29: 0, fg_30_39: 0, fg_40_49: 0, fg_50p: 2, pat_made: 2 };
+    expect(score(lineOf("K", week2), s).points).toBe(15);
+    expect(score(lineOf("K", { ...week2, fg_50p: 1 }), s).points).toBe(7);
+  });
+
+  it("a member bonus keeps a provisional week open while its stat or family is absent", () => {
+    const fg = sampleSettings({
+      modifiers: { "23": null },
+      bonuses: { "23": [{ target: 1, points: 3 }] },
+    });
+    const rest = { fg_0_19: 0, fg_20_29: 0, fg_30_39: 0, fg_40_49: 0, pat_made: 0 };
+    expect(score(lineOf("K", rest, true), fg).complete).toBe(false);
+    expect(score(lineOf("K", { ...rest, fg_50p: 0 }, true), fg).complete).toBe(true);
+    const none = sampleSettings({
+      modifiers: {
+        "50": null,
+        "51": null,
+        "52": null,
+        "53": null,
+        "54": null,
+        "55": null,
+        "56": null,
+      },
+      bonuses: { "50": [{ target: 1, points: 5 }] },
+    });
+    expect(score(lineOf("DT", { dst_sack: 1 }, true), none).complete).toBe(false);
+    expect(score(lineOf("DT", { dst_pa: 0 }, true), none).points).toBe(5);
+  });
+
+  it("scoreSamples: P(member bonus) and E[points] count the member bonuses like any other", () => {
+    const s = sampleSettings({ bonuses: { "23": [{ target: 2, points: 3 }] } });
+    const lines = [0, 1, 2, 3].map((n) =>
+      lineOf("K", { fg_0_19: 0, fg_20_29: 0, fg_30_39: 0, fg_40_49: 0, fg_50p: n, pat_made: 0 }),
+    );
+    const r = scoreSamples(lines, s, "position_cv");
+    expect(r.bonus_probability.fg_50p).toBe(0.5);
+    expect(r.mean_of_exact).toBe((0 + 5 + 13 + 18) / 4);
+    expect(r.dist.mean).toBe((0 + 5 + 13 + 18) / 4);
   });
 });
 
