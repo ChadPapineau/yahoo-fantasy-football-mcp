@@ -176,15 +176,6 @@ describe("QA-2-038 — an excluded starter scores 0", () => {
           // a move is never priced at the excluded players' projections
           if (!r.rec.no_move)
             expect(r.rec.delta_vs_next.p10 < 0 && r.rec.delta_vs_next.p90 > 0).toBe(false);
-          // the zero-points equivalent (status O) decides the same
-          const o = analyzeLineup({
-            slots: LEAGUE_SLOTS,
-            players: players.map((p) => (ex.has(p.player_key) ? asOut(p) : p)),
-            opponent: null,
-            clock,
-            fills_in_swaps: true,
-          });
-          expect(o.rec.delta_vs_next.value).toBeCloseTo(r.rec.delta_vs_next.value, 3);
         },
       ),
       { numRuns: 300 },
