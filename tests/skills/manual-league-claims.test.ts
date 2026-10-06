@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parseLeagueYaml } from "../../src/providers/manual/index.js";
 import { FIXTURE_LEAGUE, TEAM_A, TEAM_B } from "../mcp/helpers/env.js";
 import { ROOT } from "./helpers.js";
-import { T0, dataOf, skillWorld, type Called, type SkillWorld } from "./world.js";
+import { T0, dataOf, sentences, skillWorld, type Called, type SkillWorld } from "./world.js";
 import { walkFiles } from "../../scripts/skills/_lib.mjs";
 
 interface Matchup {
@@ -111,6 +111,49 @@ const DOCS = walkFiles(path.join(ROOT, "skills"), path.join(ROOT, "skills"))
   .files.filter((f) => f.endsWith(".md"))
   .map((f) => ({ file: `skills/${f}`, text: readFileSync(path.join(ROOT, "skills", f), "utf8") }));
 
+/**
+ * Reopened QA-1-062: the ledger above matches set phrasings, so a paraphrase ("the manual league
+ * cannot give … transactions") slipped through. This vocabulary reads every sentence that says
+ * something is unavailable, in any wording, and names the read feature each item stands for.
+ */
+const FEATURE_TERMS: readonly (readonly [string, RegExp])[] = [
+  ["transactions", /\btransactions?\b|\btransaction history\b/i],
+  ["standings", /\bstandings\b/i],
+  ["matchups", /\bmatchups?\b|\bscoreboard\b/i],
+  ["other_rosters", /\bother teams'? rosters?\b|\bopponent(?:'s)? rosters?\b/i],
+  ["free_agent_pool", /\bfree[- ]agent pool\b|\bfree agents\b|\bwaiver wire\b/i],
+  ["player_stats", /\bplatform(?:'s own)? (?:fantasy )?points\b|\bplatform stat lines\b/i],
+];
+/** A sentence that says something is unavailable (any wording the Skills use or might use). */
+const UNAVAILABLE =
+  /\b(?:cannot (?:give|provide|offer|see|return)|can't (?:give|provide|offer|see|return)|not available|unavailable|never implied|there (?:is|are) no|(?:has|have|holds?|returns?|gives?) no|no (?:live|platform)|returns nothing|is empty|are empty|lacks?|missing)\b/i;
+/** Guardrail 7's form: "never imply X when the result says it is unavailable" claims nothing. */
+const CONDITIONED_ON_RESULT = /\bwhen the result says\b/i;
+/** An item that is unavailable only until the user enters it ("unless entered", "if pasted"). */
+const UNLESS_ENTERED =
+  /\b(?:unless|until|except|but|if|when)\b[^,;]*?\b(?:enter(?:s|ed)?|paste[sd]?|list(?:s|ed)?|add(?:s|ed)?|type[sd]?)\b|\blisted in the league file\b/i;
+
+/** Each (feature, conditional) an unavailability sentence claims, item by item. */
+function unavailableClaims(
+  sentence: string,
+): { feature: string; conditional: boolean; item: string }[] {
+  if (!UNAVAILABLE.test(sentence) || CONDITIONED_ON_RESULT.test(sentence)) return [];
+  return sentence
+    .replace(/\([^)]*\)/g, " ")
+    .split(/[,;:]\s*|\s+(?:and|or|nor)\s+/)
+    .flatMap((item) =>
+      FEATURE_TERMS.filter(([, re]) => re.test(item)).map(([feature]) => ({
+        feature,
+        conditional: UNLESS_ENTERED.test(item),
+        item: item.trim(),
+      })),
+    );
+}
+
+/** read_features with the league file's optional data entered, and without it. */
+let entered: Facts["readFeatures"];
+let bare: Facts["readFeatures"];
+
 let sw: SkillWorld;
 let facts: Facts;
 beforeAll(async () => {
@@ -135,6 +178,21 @@ beforeAll(async () => {
     standings: { n: (dataOf(stg).teams as unknown[]).length, warnings: warn(stg) },
     fileTx: file.transactions?.length ?? 0,
   };
+  entered = facts.readFeatures;
+  // the same league file with every optional section cut: other_teams, opponents, free_agents,
+  // waivers, transactions (they follow my_team, in that order, to the end of the file)
+  const yaml = readFileSync(FIXTURE_LEAGUE, "utf8");
+  const optional = yaml.slice(yaml.indexOf("\nother_teams:") + 1);
+  const bw = await skillWorld(T0, [[optional, ""]]);
+  try {
+    bare = (
+      dataOf(await bw.call("ff_get_status")) as {
+        capabilities: { read_features: Record<string, boolean> };
+      }
+    ).capabilities.read_features;
+  } finally {
+    await bw.close();
+  }
 }, 60_000);
 afterAll(async () => {
   await sw.close();
@@ -155,6 +213,61 @@ describe("QA-1-062: the Skills describe the manual league's scoreboard, transact
       }
     }
     expect([...wrong]).toEqual([]);
+  });
+
+  it("every 'not available' sentence, in any wording, agrees with the server with and without the data entered [QA-1-062]", () => {
+    // control: the fixture's optional data switches the data-dependent features on, its absence off
+    const dataDependent = ["transactions", "other_rosters", "matchups"];
+    expect(dataDependent.map((k) => entered[k])).toEqual([true, true, true]);
+    expect(dataDependent.map((k) => bare[k])).toEqual([false, false, false]);
+    const wrong = new Set<string>();
+    let seen = 0;
+    for (const { file, text } of DOCS) {
+      for (const s of sentences(text)) {
+        for (const c of unavailableClaims(s)) {
+          seen += 1;
+          // unconditional: never available; "unless entered": unavailable without, available with
+          const holds = c.conditional
+            ? bare[c.feature] === false && entered[c.feature] === true
+            : bare[c.feature] === false && entered[c.feature] === false;
+          if (!holds) wrong.add(`${file}: "${c.item}" (${c.feature}) in: ${s}`);
+        }
+      }
+    }
+    expect(seen, "the Skills do say what the manual league lacks (control)").toBeGreaterThan(0);
+    expect([...wrong]).toEqual([]);
+  });
+
+  it("the check reads any wording (control) [QA-1-062]", () => {
+    const wrongClaims = [
+      "Say what the manual league cannot give: a live free-agent pool, standings, transactions, and the platform's own points.",
+      "Under the manual league there is no transaction history.",
+      "The manual league has no transactions.",
+      "Transactions are not available under the manual league.",
+      "Matchups are unavailable under the manual league.",
+      "The manual league lacks other teams' rosters.",
+    ];
+    for (const s of wrongClaims) {
+      const bad = unavailableClaims(s).filter((c) =>
+        c.conditional
+          ? !(bare[c.feature] === false && entered[c.feature] === true)
+          : !(bare[c.feature] === false && entered[c.feature] === false),
+      );
+      expect(bad.length, s).toBeGreaterThan(0);
+    }
+    const trueClaims = [
+      "Say what the manual league cannot give: a live free-agent pool, other teams' rosters unless entered, standings, transactions unless listed in the league file, and the platform's own points.",
+      "Never imply a live free-agent pool or an opponent roster when the result says they are unavailable.",
+      "Standings are not available under the manual league.",
+    ];
+    for (const s of trueClaims) {
+      const bad = unavailableClaims(s).filter((c) =>
+        c.conditional
+          ? !(bare[c.feature] === false && entered[c.feature] === true)
+          : !(bare[c.feature] === false && entered[c.feature] === false),
+      );
+      expect(bad, s).toEqual([]);
+    }
   });
 
   it("the shared text says what the manual scoreboard and transactions DO return", () => {
