@@ -8,6 +8,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { LINEUP_TOO_DEEP_HINT } from "../../src/mcp/tools/analytics.js";
 import { ROOT } from "./helpers.js";
 import { T0, dataOf, sentences, skillWorld, type Called, type SkillWorld } from "./world.js";
 
@@ -325,5 +326,26 @@ describe("E2 with a starter who will not play and no one to replace him (QA-2-03
     );
     expect(claim).toBeDefined();
     expect(claim).toMatch(/stream/);
+  });
+});
+
+describe("E2 on a lineup too deep for one result (QA-1-080, interim)", () => {
+  /** The starting-seat depth the server's own refusal hint names. */
+  const depth = /about (\d+) starting seats/.exec(LINEUP_TOO_DEEP_HINT)?.[1];
+  const ONBOARD = read("skills/onboard/SKILL.md");
+
+  it("the server's hint names a depth", () => {
+    expect(depth).toBeDefined();
+  });
+
+  it("the cheat-sheet names the refusal reason and the depth", () => {
+    expect(E2_TEXT).toContain("`lineup_too_deep`");
+    expect(E2_TEXT).toContain(`${String(depth)} starting seats`);
+  });
+
+  it("onboard tells a league that deep that start/sit cannot answer for it yet", () => {
+    const claim = sentences(ONBOARD).find((s) => s.includes(`${String(depth)} starting seats`));
+    expect(claim).toBeDefined();
+    expect(claim).toMatch(/lineup_too_deep/);
   });
 });
