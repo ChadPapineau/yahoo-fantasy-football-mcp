@@ -4,6 +4,7 @@
 // here because config is the leaf layer every other layer may import (src/mcp/bounds.ts re-exports
 // them; domain/sources/providers import them directly). Secrets never come from config.json and are
 // never enumerable. config.json is additive: unknown keys warn, never fail (plan 03 §7).
+import { accessSync, constants as fsc, statSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod/v4";
 import {
@@ -676,17 +677,63 @@ export function readConfigFile(configDir: string): unknown {
   }
 }
 
+const errnoOf = (e: unknown): string | undefined => (e as NodeJS.ErrnoException | null)?.code;
+
+/** A value-free reason for a permission error (EACCES/EPERM), else null. */
+function permissionReason(e: unknown): string | null {
+  const code = errnoOf(e);
+  return code === "EACCES" || code === "EPERM"
+    ? "cannot be read or entered by you (check its permissions)"
+    : null;
+}
+
+/**
+ * Why the resolved config dir cannot be used as a directory, or null when it is a usable directory
+ * or does not exist yet (nothing configured). Value-free: never the path.
+ */
+export function configDirProblem(dir: string): string | null {
+  let isDir: boolean;
+  try {
+    // followed like the read that comes next: a symlinked config dir is doctor's row 4 to judge
+    isDir = statSync(dir).isDirectory();
+  } catch (e) {
+    if (errnoOf(e) === "ENOENT") return null;
+    if (errnoOf(e) === "ENOTDIR") return "is not a directory (a part of the path is a file)";
+    return permissionReason(e) ?? "could not be checked";
+  }
+  if (!isDir) return "exists but is not a directory";
+  try {
+    accessSync(dir, fsc.R_OK | fsc.X_OK);
+    return null;
+  } catch (e) {
+    return permissionReason(e) ?? "could not be checked";
+  }
+}
+
 /**
  * Resolves the config from the real process environment: config dir → config.json → loadConfig.
- * An unusable FF_CONFIG_DIR is not a config.json problem: config.json is then not read at all and
- * `loadConfig` reports the issue under FF_CONFIG_DIR, together with every other issue (QA-1-057).
+ * An unusable FF_CONFIG_DIR is not a config.json problem (QA-1-057, QA-1-096): config.json is then
+ * not read at all and the issue is reported under FF_CONFIG_DIR, together with every other issue.
+ * That holds for a value `resolveConfigDir` rejects (relative, `~user`) and for an absolute one that
+ * is a file, runs through a file, or cannot be read or entered.
  */
 export function loadConfigFromProcess(opts: { env: Env; home: string; repoRoot: string }): Config {
   let configDir: string | null;
   try {
     configDir = resolveConfigDir(opts.env, opts.home);
   } catch {
-    configDir = null;
+    configDir = null; // loadConfig reports it under FF_CONFIG_DIR
+  }
+  const dirProblem = configDir === null ? null : configDirProblem(configDir);
+  if (configDir !== null && dirProblem !== null) {
+    let rest: readonly ConfigIssue[] = [];
+    try {
+      loadConfig({ ...opts, file: undefined });
+    } catch (e) {
+      if (!(e instanceof ConfigError)) throw e;
+      rest = e.issues;
+    }
+    throw new ConfigError([{ key: "FF_CONFIG_DIR", reason: dirProblem }, ...rest]);
   }
   let file: unknown;
   if (configDir !== null) {
@@ -694,7 +741,7 @@ export function loadConfigFromProcess(opts: { env: Env; home: string; repoRoot: 
       file = readConfigFile(configDir);
     } catch (e) {
       if (e instanceof ConfigError) throw e;
-      throw new ConfigError([{ key: "config.json", reason: pathReason(e) }]);
+      throw new ConfigError([{ key: "config.json", reason: permissionReason(e) ?? pathReason(e) }]);
     }
   }
   return loadConfig({ ...opts, file });
