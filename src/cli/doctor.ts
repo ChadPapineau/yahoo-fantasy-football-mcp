@@ -3,8 +3,9 @@
 // a stable `--json` shape, exit code = worst finding, offline mode makes zero network calls). The
 // offline rows for Phase 1a are implemented; the Yahoo rows (5, 6, 7, 14, 15, 16, 18) report "not
 // applicable (no Yahoo access)" — Phase 1b is deferred. Doctor never creates, migrates or writes the
-// store; `--fix` only creates missing 0700 directories and tightens our own files' mode bits, and
-// only after `--yes` (or a y/N answer on a terminal).
+// store; `--fix` only creates missing 0700 directories and sets our own files and directories back
+// to 0600/0700 (group/other bits dropped, the owner's restored), and only after `--yes` (or a y/N
+// answer on a terminal).
 import {
   accessSync,
   chmodSync,
@@ -23,11 +24,15 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import {
+  backupDir,
+  datasetDir,
   datasetFilePath,
   ensureSecureDir,
   insecureAncestors,
   PathSecurityError,
   readSecureFile,
+  runTempDir,
+  storePath,
 } from "../config/paths.js";
 import { ConfigError, loadConfigFromProcess, type Config } from "../config/schema.js";
 import type { DatasetSourceId } from "../config/freshness.js";
@@ -623,6 +628,36 @@ const STORE_OPEN_FAILURE: Readonly<
   },
 };
 
+/**
+ * What a refresh, backup or prune writes in place inside the cache dir: store.sqlite, and the ds/,
+ * backups/ and tmp/ directories (plan 03 §5 row 8 "writable"). A read-only -wal/-shm file is not
+ * listed: SQLite replaces it with the store's own mode when it opens the store.
+ */
+export function writtenPaths(cacheDir: string): readonly { path: string; dir: boolean }[] {
+  return [
+    { path: storePath(cacheDir), dir: false },
+    ...[datasetDir(cacheDir), backupDir(cacheDir), runTempDir(cacheDir)].map((p) => ({
+      path: p,
+      dir: true,
+    })),
+  ];
+}
+
+/** Whether an EXISTING written path cannot be written (or, for a directory, entered) by us. */
+function readOnly(w: { path: string; dir: boolean }): boolean {
+  try {
+    lstatSync(w.path);
+  } catch {
+    return false; // not there yet: created by the next refresh
+  }
+  try {
+    accessSync(w.path, w.dir ? fsc.W_OK | fsc.X_OK : fsc.W_OK);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 /** Row 8: cache dir, free space, store integrity + schema, dataset files. */
 export function checkStore(config: Config, ex: ExistingStore): DoctorRow {
   const title = "Cache dir + store";
@@ -667,6 +702,19 @@ export function checkStore(config: Config, ex: ExistingStore): DoctorRow {
       `\`ff doctor --fix --yes\` restores 0700 on our own directory (chmod 700 ${config.cacheDir})`,
     );
   }
+  // ... and so must the store files and subdirectories themselves: node:sqlite opens a 0400 store
+  // read-only WITHOUT an error, so the open alone passes and the next refresh fails to publish
+  // (QA-1-053)
+  const blocked = writtenPaths(config.cacheDir).filter(readOnly);
+  if (blocked.length > 0)
+    return row(
+      8,
+      "store",
+      title,
+      "fail",
+      `read-only, so a refresh cannot publish: ${blocked.map((w) => w.path).join(", ")}`,
+      "`ff doctor --fix --yes` restores 0600 on our own store files and 0700 on our own directories (or chmod them yourself)",
+    );
   const free = freeBytes(config.cacheDir);
   if (free !== null && free < MIN_FREE_BYTES) {
     worse("warn");
@@ -1174,12 +1222,12 @@ export interface Fix {
   apply(): void;
 }
 
-function dirFix(dir: string, what: string): Fix | null {
+function dirFix(dir: string, what: string, create = true): Fix | null {
   let st;
   try {
     st = lstatSync(dir);
   } catch {
-    if (insecureAncestors(dir).length > 0) return null;
+    if (!create || insecureAncestors(dir).length > 0) return null;
     return {
       description: `create ${what} ${dir} (0700)`,
       apply: () => {
@@ -1226,6 +1274,31 @@ export function plannedFixes(config: Config): Fix[] {
   }
   const k = dirFix(config.cacheDir, "cache dir");
   if (k !== null) fixes.push(k);
+  // the store files and subdirectories a refresh writes, when they are ours (QA-1-053)
+  const uid = typeof process.getuid === "function" ? process.getuid() : null;
+  for (const w of writtenPaths(config.cacheDir)) {
+    if (w.dir) {
+      const d = dirFix(w.path, "directory", false);
+      if (d !== null) fixes.push(d);
+      continue;
+    }
+    try {
+      const st = lstatSync(w.path);
+      if (
+        st.isFile() &&
+        (uid === null || st.uid === uid) &&
+        ((st.mode & 0o077) !== 0 || (st.mode & 0o600) !== 0o600)
+      )
+        fixes.push({
+          description: `chmod 600 ${w.path}`,
+          apply: () => {
+            chmodSync(w.path, 0o600);
+          },
+        });
+    } catch {
+      // not there: nothing to fix
+    }
+  }
   return fixes;
 }
 
