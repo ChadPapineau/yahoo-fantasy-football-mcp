@@ -1,7 +1,8 @@
 // engine.ts — the pure scorer: plan 08 E1 (`score`, `scoreSamples`, `explain`; no I/O), §3.3
 // (position-type gating inside score), §4.1 (indicator families: Σ ≤ 1 asserted, Σ = 0 → family not
 // present, scalar → bracketize; count families linear per bin, critic C-09), §4.2 (threshold
-// bonuses, several entries sum), §4.4 / E4 (negative floor + verified-only rounding), §4.5 (missing
+// bonuses, several entries sum, on any rule — a bracket member's on its bin count or indicator,
+// QA-2-036), §4.4 / E4 (negative floor + verified-only rounding), §4.5 (missing
 // vs unknown; `complete`), §5 / E5 / E8 (distribution over SCORED SAMPLES, never the scaled mean;
 // `basis` stamped on the Dist).
 import { bracketize, familyScalar } from "./brackets.js";
@@ -39,15 +40,27 @@ interface CompiledFamily {
   readonly family: BracketFamily;
   /** Per member: the rule's modifier for this position type, or null (display-only / no rule). */
   readonly modifiers: readonly (number | null)[];
+  /**
+   * Per member: the rule's threshold bonuses (plan 08 §4.2), judged on the member's value — the
+   * bin's count, or the indicator's 0/1 (QA-2-036: they were dropped for bracket members).
+   */
+  readonly bonuses: readonly (readonly ScoringBonus[])[];
+  /** Per member: its index in CompiledType.bonusSlots, or -1 when it has no bonuses. */
+  readonly bonusSlot: readonly number[];
   /** The scalar canonical `bracketize` reads for an indicator family, or null. */
   readonly scalar: Canonical | null;
-  /** Whether any member carries points (an absent family then leaves a provisional week open). */
+  /** Whether any member carries points or bonuses (an absent family then leaves a provisional week open). */
   readonly scores: boolean;
 }
 
 interface CompiledType {
   readonly linear: readonly LinearRule[];
   readonly families: readonly CompiledFamily[];
+  /**
+   * The stats whose bonuses `bonusFired` tracks: slot i < linear.length is linear rule i; the
+   * slots after them are the bracket members that carry bonuses.
+   */
+  readonly bonusSlots: readonly { readonly canonical: Canonical; readonly hasBonuses: boolean }[];
   /** Every canonical a line of this type can use (rules, family members, family scalars). */
   readonly consumed: ReadonlySet<Canonical>;
   /** `bonusFired` of a line on which no bonus fired (shared: most samples fire none). */
@@ -93,23 +106,36 @@ function compile(settings: ScoringSettings): Compiled {
         rules.push({ canonical: r.canonical, rule: r });
       }
     }
-    const modifierOf = new Map<Canonical, number | null>();
-    for (const { canonical, rule } of rules) modifierOf.set(canonical, rule.modifier);
+    const ruleOf = new Map<Canonical, ScoringRule>();
+    for (const { canonical, rule } of rules) ruleOf.set(canonical, rule);
     const families: CompiledFamily[] = [];
     const members = new Set<Canonical>();
     const consumed = new Set<Canonical>();
+    const memberSlots: Canonical[] = [];
     for (const family of settings.brackets) {
       if (family.position_type !== pt) continue;
       if (family.members.length === 0)
         throw badSettings("bracket family has no members", [family.family]);
-      const modifiers = family.members.map((m) => modifierOf.get(m.canonical) ?? null);
+      const modifiers = family.members.map((m) => ruleOf.get(m.canonical)?.modifier ?? null);
+      const bonuses = family.members.map((m) => ruleOf.get(m.canonical)?.bonuses ?? []);
+      // slots are numbered after the linear rules once those are known (offset below)
+      const bonusSlot = bonuses.map((b, i) =>
+        b.length === 0 ? -1 : memberSlots.push(at(family.members, i).canonical) - 1,
+      );
       const scalar = family.kind === "indicator" ? familyScalar(family.family) : null;
       for (const m of family.members) {
         members.add(m.canonical);
         consumed.add(m.canonical);
       }
       if (scalar !== null) consumed.add(scalar);
-      families.push({ family, modifiers, scalar, scores: modifiers.some((m) => m !== null) });
+      families.push({
+        family,
+        modifiers,
+        bonuses,
+        bonusSlot,
+        scalar,
+        scores: modifiers.some((m) => m !== null) || bonuses.some((b) => b.length > 0),
+      });
     }
     const linear: LinearRule[] = [];
     for (const { canonical, rule: r } of rules) {
@@ -122,11 +148,20 @@ function compile(settings: ScoringSettings): Compiled {
         scores: r.modifier !== null || r.bonuses.length > 0,
       });
     }
+    const offset = linear.length;
+    const bonusSlots = [
+      ...linear.map((r) => ({ canonical: r.canonical, hasBonuses: r.bonuses.length > 0 })),
+      ...memberSlots.map((canonical) => ({ canonical, hasBonuses: true })),
+    ];
     byType[pt] = {
       linear,
-      families,
+      families: families.map((f) => ({
+        ...f,
+        bonusSlot: f.bonusSlot.map((k) => (k < 0 ? -1 : offset + k)),
+      })),
+      bonusSlots,
       consumed,
-      noneFired: Object.freeze(linear.map(() => false)),
+      noneFired: Object.freeze(bonusSlots.map(() => false)),
     };
   }
   const compiled: Compiled = { byType, unmapped: unmappedIds(settings) };
@@ -139,7 +174,7 @@ function compile(settings: ScoringSettings): Compiled {
 /** What `scoreSamples` needs beyond the result: which bonuses fired, which bins were hit. */
 interface Evaluation {
   readonly result: ScoreResult;
-  /** Per compiled linear rule: whether at least one of its bonuses fired. */
+  /** Per bonus slot (CompiledType.bonusSlots): whether at least one of its bonuses fired. */
   readonly bonusFired: readonly boolean[];
   /** Per compiled family index: member values (indicator 0/1, or counts); null = family absent. */
   readonly familyValues: readonly (readonly number[] | null)[];
@@ -212,8 +247,31 @@ function evaluate(line: StatLine, settings: ScoringSettings, detail: boolean): E
   const linearPts: number[] = [];
   const bonusPts: number[] = [];
   const bracketPts: number[] = [];
-  let bonusFired: boolean[] | null = null; // allocated on the first bonus that fires
+  // allocated on the first bonus that fires (a holder: payBonuses below writes it)
+  const fired: { slots: boolean[] | null } = { slots: null };
   let incomplete = false;
+
+  /** Pays every bonus of `canonical` whose target `v` reaches (§4.2), marking its slot fired. */
+  const payBonuses = (
+    canonical: Canonical,
+    v: number,
+    bonuses: readonly ScoringBonus[],
+    slot: number,
+  ): void => {
+    for (const b of bonuses) {
+      if (v < b.target) continue;
+      fired.slots ??= t.bonusSlots.map(() => false);
+      fired.slots[slot] = true;
+      bonusPts.push(b.points);
+      contributions?.push({
+        canonical,
+        value: v,
+        modifier: b.points,
+        points: b.points,
+        kind: "bonus",
+      });
+    }
+  };
 
   let li = -1;
   for (const r of t.linear) {
@@ -234,19 +292,7 @@ function evaluate(line: StatLine, settings: ScoringSettings, detail: boolean): E
         kind: "linear",
       });
     }
-    for (const b of r.bonuses) {
-      if (v < b.target) continue;
-      bonusFired ??= t.linear.map(() => false);
-      bonusFired[li] = true;
-      bonusPts.push(b.points);
-      contributions?.push({
-        canonical: r.canonical,
-        value: v,
-        modifier: b.points,
-        points: b.points,
-        kind: "bonus",
-      });
-    }
+    payBonuses(r.canonical, v, r.bonuses, li);
   }
 
   const familyValues: (readonly number[] | null)[] = [];
@@ -256,22 +302,25 @@ function evaluate(line: StatLine, settings: ScoringSettings, detail: boolean): E
     if (f.family.kind === "count") {
       vector = members.map((m) => (has(m.canonical) ? val(m.canonical) : 0));
       members.forEach((m, i) => {
+        const bonuses = at(f.bonuses, i);
         if (!has(m.canonical)) {
-          if (f.modifiers[i] !== null) incomplete = true;
+          if (f.modifiers[i] !== null || bonuses.length > 0) incomplete = true;
           return;
         }
-        const mod = at(f.modifiers, i);
-        if (mod === null) return;
         const v = val(m.canonical);
-        const points = denoise(mod * v);
-        bracketPts.push(points);
-        contributions?.push({
-          canonical: m.canonical,
-          value: v,
-          modifier: mod,
-          points,
-          kind: "bracket",
-        });
+        const mod = at(f.modifiers, i);
+        if (mod !== null) {
+          const points = denoise(mod * v);
+          bracketPts.push(points);
+          contributions?.push({
+            canonical: m.canonical,
+            value: v,
+            modifier: mod,
+            points,
+            kind: "bracket",
+          });
+        }
+        payBonuses(m.canonical, v, bonuses, at(f.bonusSlot, i));
       });
     } else {
       let idx = -1;
@@ -299,7 +348,8 @@ function evaluate(line: StatLine, settings: ScoringSettings, detail: boolean): E
         idx = bracketize(f.family, val(f.scalar));
       }
       if (idx >= 0) {
-        vector = members.map((_, i) => (i === idx ? 1 : 0));
+        const hit = members.map((_, i) => (i === idx ? 1 : 0));
+        vector = hit;
         const mod = at(f.modifiers, idx);
         if (mod !== null) {
           const member = at(members, idx).canonical;
@@ -312,6 +362,10 @@ function evaluate(line: StatLine, settings: ScoringSettings, detail: boolean): E
             kind: "bracket",
           });
         }
+        // a member's bonuses are judged on its indicator, 1 for the bin hit and 0 for the others
+        members.forEach((m, i) => {
+          payBonuses(m.canonical, at(hit, i), at(f.bonuses, i), at(f.bonusSlot, i));
+        });
       } else if (f.scores) {
         incomplete = true;
       }
@@ -341,7 +395,7 @@ function evaluate(line: StatLine, settings: ScoringSettings, detail: boolean): E
   };
   return {
     result,
-    bonusFired: bonusFired ?? t.noneFired,
+    bonusFired: fired.slots ?? t.noneFired,
     familyValues,
     parts: { linear, bonus, bracket },
   };
@@ -407,7 +461,7 @@ export function scoreSamples(
     let a = acc.get(line.position_type);
     if (a === undefined) {
       a = {
-        bonus: t.linear.map(() => 0),
+        bonus: t.bonusSlots.map(() => 0),
         fam: t.families.map((f) => f.family.members.map(() => 0)),
       };
       acc.set(line.position_type, a);
@@ -435,9 +489,9 @@ export function scoreSamples(
   const familyTotals = new Map<string, readonly number[]>();
   for (const [pt, a] of acc) {
     const t = compiled.byType[pt];
-    t.linear.forEach((r, i) => {
-      if (r.bonuses.length === 0) return;
-      bonusHits.set(r.canonical, (bonusHits.get(r.canonical) ?? 0) + at(a.bonus, i));
+    t.bonusSlots.forEach((slot, i) => {
+      if (!slot.hasBonuses) return;
+      bonusHits.set(slot.canonical, (bonusHits.get(slot.canonical) ?? 0) + at(a.bonus, i));
     });
     t.families.forEach((f, i) => familyTotals.set(f.family.family, at(a.fam, i)));
   }
