@@ -232,7 +232,7 @@ Build → full `ci.yml` jobs → `scripts/check-changelog.ts` (the tag's version
 
 ## 5. Branch protection recommendation for `main`
 
-Today: public, no protection, no rulesets [V-HANDOFF item 1]. Recommended ruleset (Chad applies it; nothing automated touches repo settings):
+Today (2026-10-06): public, and the "Now" column below is applied. Ruleset `24558591`, "main: no force-push, no deletion, linear history", is active on the default branch with the rules `deletion`, `non_fast_forward` and `required_linear_history` and **no bypass actors** (admins included); check it with `gh api repos/<owner>/<repo>/rulesets/24558591`. Product code has landed, but the "When product code lands" column is deliberately **not** applied yet: `main` still takes direct pushes, a required status check would reject a fresh direct push, and `docs.yml` is path-filtered (a required check that does not run blocks the push). Revisit when pull requests are required. (Until 2026-10-06: public, no protection, no rulesets [V-HANDOFF item 1].) Recommended ruleset (Chad applies it; nothing automated touches repo settings):
 
 | Now (docs phase) *(revised round 1, OBJ-13)* | When product code lands |
 |---|---|
