@@ -290,7 +290,7 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
   }
 
   const candidates: StreamingCandidate[] = [];
-  let hold: { streamability: number; current_starter_delta: number } | null = null;
+  let hold: WaiverAnalysis["hold_vs_stream"] = null;
   const scored: Scored[] = [];
 
   for (const pos of positions) {
@@ -355,6 +355,7 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
         if (c > 0) ratios.push(Math.max(...ranked.map((r) => meanOf(r.p, i))) / c);
       });
       const h = {
+        position: pos,
         streamability: round(
           ratios.length === 0 ? 0 : ratios.reduce((x, y) => x + y, 0) / ratios.length,
           3,

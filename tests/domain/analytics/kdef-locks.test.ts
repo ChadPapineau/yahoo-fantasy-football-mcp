@@ -130,3 +130,18 @@ describe("QA-1-022 — locked players are never moved or offered", () => {
     }
   });
 });
+
+describe("QA-2-004 — hold_vs_stream is labelled, so a locked position's numbers are not read as rec's", () => {
+  it("Friday, K and DEF in one call: the locked kicker's numbers say K while rec is about DEF", () => {
+    // my kicker (Thursday, on a reserve list) is locked; my defense is the best one still unlocked,
+    // so the kicker has by far the larger gain and rec — which skips a locked position — is DEF's
+    const best = run(FRI, { positions: ["DEF"], current: [] }).candidates[0];
+    const def = universe.find((u) => u.player_key === best?.player_key);
+    if (def === undefined) throw new Error("fixture: no unlocked DEF");
+    expect(kickoffOf(def.nfl_team)).toBeGreaterThan(Date.parse(FRI));
+    const a = run(FRI, { positions: ["K", "DEF"], current: [boswell, def] });
+    expect(a.rec.action).toMatch(/\bDEF\b/);
+    expect(a.hold_vs_stream?.position).toBe("K");
+    expect(a.hold_vs_stream).toEqual(run(FRI, { positions: ["K"] }).hold_vs_stream);
+  });
+});

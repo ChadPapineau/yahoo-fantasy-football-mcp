@@ -23,7 +23,7 @@ Every tool returns the same envelope: `data`, `meta` (`as_of`, `age_s`, `freshne
 | `ff_project_players` | per-player-week distributions | `projections[].weeks[].points` (Dist), `p_active`, `implied_total`, `drivers[]` | per (players, horizon, week) |
 | `ff_analyze_lineup` | start/sit as an assignment | `recommended_lineup[]`, `mode`, `swaps[]` (`out` — null when the swap fills an empty seat —, `in`, `delta_e`, `delta_pwin`, `interval`, `coin_flip`, `option_value`), `comparisons[]` (the `compare` pairs asked for, apart from the advice), `conditionals[]`, `lock_schedule[]`, `rec` | when an input changed |
 | `ff_analyze_matchup` | win probability before games (`mode: "pre"`) | `p_win`, `interval`, `mu_m`, `mu_o`, `actionable_slots[]`, `rec` | when an input changed |
-| `ff_analyze_waivers` | K/DEF streaming (`positions` ⊆ K, DEF) | `candidates[]` (`kdef`, `availability`), `hold_vs_stream`, `waiver_clearing_time`, `rec` | when an input changed |
+| `ff_analyze_waivers` | K/DEF streaming (`positions` ⊆ K, DEF) | `candidates[]` (`kdef`, `availability`), `hold_vs_stream` (`position`, `streamability`, `current_starter_delta`: one position — with K and DEF in one call, the one named by `position`, which can differ from `rec`'s), `waiver_clearing_time`, `rec` | when an input changed |
 | `ff_record_recommendation` | log a recommendation before showing it | `log_id`, `recorded_at`, `deduplicated` | never repeat (dedup on league + season + week + kind + `client_ref`) |
 | `ff_analyze_retrospective` | score last week's logged calls | `final`, `calls[]`, `metrics`, `n_by_metric[]`, `sample_size_caveats[]` | once per week |
 | `ff_list_recommendations` | browse the log | `items[]` (`action_summary` is untrusted) | per page |

@@ -198,3 +198,60 @@ describe("analyzeKdef", () => {
     expect(out.analysis.rec.distribution.p_zero).toBe(1);
   });
 });
+
+describe("QA-2-004: hold_vs_stream names the position its numbers describe", () => {
+  /** One position of the universe ordered by week-3 expected points, best first. */
+  const byMean = (pos: "K" | "DEF"): KdefCandidateInput[] => {
+    const members = universe.filter((u) => u.position === pos);
+    const proj = projectPlayers({
+      targets: members.map((m) => ({ ...m, platform_status: null })),
+      season: 2026,
+      weeks: [3],
+      settings,
+      readers: fixtureReaders(data),
+      clock: fixedClock(beforeWeek(data, 3)),
+      rng: seededRng(5),
+      n_sims: 1000,
+    });
+    const mean = proj.result.projections.map((p) => p.weeks[0]?.points.mean ?? 0);
+    return members
+      .map((m, i) => ({ m, e: mean[i] ?? 0 }))
+      .sort((a, b) => b.e - a.e)
+      .map((x) => x.m);
+  };
+
+  it("a two-position call labels it, and its numbers equal that position's own call", () => {
+    const k = byMean("K");
+    const d = byMean("DEF");
+    const seen = new Set<string>();
+    for (const pair of [
+      [k[0], d[d.length - 1]], // a strong kicker, a weak defense: the defense gains most
+      [k[k.length - 1], d[0]], // a weak kicker, a strong defense: the kicker gains most
+    ]) {
+      const current = pair.filter((c): c is KdefCandidateInput => c !== undefined);
+      expect(current).toHaveLength(2);
+      const both = analyzeKdef(req({ positions: ["K", "DEF"], current })).analysis.hold_vs_stream;
+      if (both === null) throw new Error("no hold_vs_stream with both starters");
+      expect(["K", "DEF"]).toContain(both.position);
+      seen.add(both.position);
+      const alone = analyzeKdef(
+        req({
+          positions: [both.position],
+          current: current.filter((c) => c.position === both.position),
+        }),
+      ).analysis.hold_vs_stream;
+      expect(alone).toEqual(both);
+    }
+    // the label follows the numbers, never the order of `positions`
+    expect([...seen].sort()).toEqual(["DEF", "K"]);
+  });
+
+  it("a one-position call labels it with that position", () => {
+    for (const pos of ["K", "DEF"] as const) {
+      const mine = byMean(pos).at(-1);
+      if (mine === undefined) throw new Error(`no ${pos}`);
+      const h = analyzeKdef(req({ positions: [pos], current: [mine] })).analysis.hold_vs_stream;
+      expect(h?.position).toBe(pos);
+    }
+  });
+});

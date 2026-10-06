@@ -1058,8 +1058,9 @@ const e5Data = z.strictObject({
   candidates: z.array(e5Candidate).max(96),
   /** compact: the candidates' shared invalidators, once (fixed vocabulary). */
   invalidators: z.array(z.string().regex(/^[a-z_]{1,48}$/)).max(40),
+  /** `position`: the position these numbers describe, which may not be rec's (QA-2-004). */
   hold_vs_stream: z
-    .strictObject({ streamability: z.number(), current_starter_delta: z.number() })
+    .strictObject({ position, streamability: z.number(), current_starter_delta: z.number() })
     .nullable(),
   waiver_clearing_time: iso.nullable(),
   rec: recSchema,
