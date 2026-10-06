@@ -10,6 +10,7 @@ import { z } from "zod/v4";
 import { GSIS_ID_RE, isNflTeam, NFL_TEAMS } from "../../config/schema.js";
 import { normalizeTeam } from "../../domain/crosswalk/teams.js";
 import { KNOWN_CANONICAL } from "../../domain/scoring/types.js";
+import { defineSlot } from "../../domain/league/slots.js";
 import { SLOT_NAME_RE, STATUS_CODE_RE } from "../../domain/league/types.js";
 import type { LeagueFileIssue } from "../platform.js";
 
@@ -58,8 +59,35 @@ const nflTeam = z
   .refine((s) => isNflTeam(s), {
     error: (iss) => teamCodeReason(typeof iss.input === "string" ? iss.input : ""),
   });
+/** Fixed hint for a slot name the model cannot classify (ESPN/Sleeper `FLEX`, `D/ST`; QA-1-047). */
+export const UNKNOWN_SLOT_HINT =
+  "a flex is named by its positions (W/R/T, W/R, W/T, Q/W/R/T) or given an eligible list; " +
+  "the team defence slot is DEF, the bench BN, injured reserve IR";
+
+/**
+ * Why a slot name is refused, for a name SLOT_NAME_RE rejects. A name that is only in the wrong case
+ * gets the same help as its upper-case spelling (QA-1-047): the slot it means when that is in the
+ * vocabulary (`wr` → use WR, `w/r/t` → use W/R/T), else the vocabulary hint (`Flex`, `d/st`). Only
+ * vocabulary is ever named, never the value itself.
+ */
+export function slotNameReason(s: string): string {
+  const up = s.toUpperCase();
+  if (SLOT_NAME_RE.test(up)) {
+    const known = typeof defineSlot({ name: up, count: 0 }) === "object";
+    return known
+      ? `not a slot name: slot names are upper case (use ${up})`
+      : `not a slot name: slot names are upper case; ${UNKNOWN_SLOT_HINT}`;
+  }
+  return `not a slot name (upper-case letters, / or +, at most 10); ${UNKNOWN_SLOT_HINT}`;
+}
+
 const gsisId = z.string().max(10).regex(GSIS_ID_RE, { message: "not a gsis id (00-0012345)" });
-const slotName = z.string().max(10).regex(SLOT_NAME_RE, { message: "not a slot name" });
+const slotName = z
+  .string()
+  .max(10)
+  .refine((s) => SLOT_NAME_RE.test(s), {
+    error: (iss) => slotNameReason(typeof iss.input === "string" ? iss.input : ""),
+  });
 const statusCode = z.string().max(8).regex(STATUS_CODE_RE, { message: "not a status code" });
 const week = z.int().min(1).max(22);
 const teamId = z.int().min(1).max(32);
