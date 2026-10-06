@@ -224,6 +224,30 @@ describe("assertNotSynced (iCloud Desktop & Documents, iCloud Drive, CloudStorag
       }),
     ).toBe("synced_folder");
   });
+  it("a refusal names the folder it refused, for every folder the guard refuses [QA-2-001]", () => {
+    // the guard's own list, including a dynamic entry, so a folder added to the guard without
+    // a name in the message fails here; a name is `~/<folder>` or a `~/<prefix>*` wildcard
+    mkdirSync(path.join(tmp.dir, "OneDrive - Example Org"));
+    const roots = syncedFolders(tmp.dir);
+    expect(roots).toContain(path.join(tmp.dir, "OneDrive - Example Org"));
+    const unnamed: string[] = [];
+    for (const root of roots) {
+      let detail = "";
+      try {
+        assertNotSynced(path.join(root, "ff"), tmp.dir);
+      } catch (e) {
+        if (!(e instanceof PathSecurityError) || e.reason !== "synced_folder") throw e;
+        detail = e.detail;
+      }
+      expect(detail, `${root} is refused`).not.toBe("");
+      const rel = path.relative(tmp.dir, root);
+      const wildcards = [...detail.matchAll(/~\/([^,;()*]+)\*/g)].map((m) => m[1] ?? "");
+      const named =
+        detail.includes(`~/${rel}`) || wildcards.some((w) => w !== "" && rel.startsWith(w));
+      if (!named) unnamed.push(rel);
+    }
+    expect(unnamed).toEqual([]);
+  });
   it.each([
     "Documents/ff",
     "Desktop",

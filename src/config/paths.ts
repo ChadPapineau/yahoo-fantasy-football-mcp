@@ -82,6 +82,34 @@ export class PathSecurityError extends Error {
   }
 }
 
+/**
+ * The cloud-synced folders under a macOS home, relative to it: iCloud "Desktop & Documents",
+ * iCloud Drive, CloudStorage, and the Dropbox, Google Drive and OneDrive clients' own folders
+ * (QA-1-044/067). `prefix` also covers every sibling whose name starts with `rel` (a business
+ * OneDrive is "OneDrive - <organisation>"). The guard (`syncedFolders`) and the refusal message
+ * both read this one list, so the message names every folder the guard refuses (QA-2-001).
+ */
+const SYNCED_FOLDERS: readonly {
+  readonly rel: string;
+  /** What the user knows the folder as, when its path alone does not say. */
+  readonly name?: string;
+  readonly prefix?: true;
+}[] = [
+  { rel: "Documents" },
+  { rel: "Desktop" },
+  { rel: "Library/Mobile Documents", name: "iCloud Drive" },
+  { rel: "Library/CloudStorage" },
+  { rel: "Dropbox" },
+  { rel: "Google Drive" },
+  { rel: "OneDrive", prefix: true },
+];
+
+/** How a refusal names a synced folder: `~/<rel>`, `~/<rel>*` for a prefix, after its name. */
+function syncedFolderLabel(f: (typeof SYNCED_FOLDERS)[number]): string {
+  const where = `~/${f.rel}${f.prefix === true ? "*" : ""}`;
+  return f.name === undefined ? where : `${f.name} at ${where}`;
+}
+
 const REFUSAL_TEXT: Record<PathRefusal, string> = {
   empty: "path is empty",
   nul_byte: "path contains a NUL byte",
@@ -89,8 +117,7 @@ const REFUSAL_TEXT: Record<PathRefusal, string> = {
   home_user_form: "the ~user form is not supported; use ~/ or an absolute path",
   inside_repo:
     "path is inside the repository checkout; secrets and league data must live outside it",
-  synced_folder:
-    "path is inside a cloud-synced folder (Documents, Desktop, iCloud Drive, CloudStorage); use ~/.config or ~/.cache",
+  synced_folder: `path is inside a cloud-synced folder (${SYNCED_FOLDERS.map(syncedFolderLabel).join(", ")}); use ~/.config or ~/.cache`,
   symlink: "refusing to follow a symbolic link",
   not_directory: "exists but is not a directory",
   not_regular_file: "exists but is not a regular file",
@@ -233,30 +260,22 @@ export function assertOutsideRepo(p: string, repoRoot: string, what = "path"): v
 }
 
 /**
- * The cloud-synced folders under a macOS home: iCloud "Desktop & Documents", iCloud Drive,
- * CloudStorage, and the Dropbox, Google Drive and OneDrive clients' own folders.
+ * The cloud-synced folders under a macOS home (`SYNCED_FOLDERS`): each fixed folder, then every
+ * existing sibling a prefix entry covers (a business OneDrive is "OneDrive - <organisation>").
  */
 export function syncedFolders(home: string): readonly string[] {
-  // the desktop sync clients' own folders (QA-1-044/067), including a business OneDrive, which is
-  // named "OneDrive - <organisation>"
-  let oneDrives: string[] = [];
-  try {
-    oneDrives = readdirSync(home)
-      .filter((n) => n.startsWith("OneDrive") && n !== "OneDrive")
-      .map((n) => path.join(home, n));
-  } catch {
-    // no readable home: the fixed names still apply
+  let names: string[] = [];
+  if (SYNCED_FOLDERS.some((f) => f.prefix === true)) {
+    try {
+      names = readdirSync(home);
+    } catch {
+      // no readable home: the fixed names still apply
+    }
   }
-  return [
-    path.join(home, "Documents"),
-    path.join(home, "Desktop"),
-    path.join(home, "Library", "Mobile Documents"),
-    path.join(home, "Library", "CloudStorage"),
-    path.join(home, "Dropbox"),
-    path.join(home, "Google Drive"),
-    path.join(home, "OneDrive"),
-    ...oneDrives.sort(),
-  ];
+  const prefixed = SYNCED_FOLDERS.filter((f) => f.prefix === true).flatMap((f) =>
+    names.filter((n) => n.startsWith(f.rel) && n !== f.rel).map((n) => path.join(home, n)),
+  );
+  return [...SYNCED_FOLDERS.map((f) => path.join(home, f.rel)), ...prefixed.sort()];
 }
 
 /** Throws `synced_folder` when `p` lies in a cloud-synced folder (secrets and league data would upload). */
