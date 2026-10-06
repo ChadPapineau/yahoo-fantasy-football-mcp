@@ -493,7 +493,14 @@ export interface StreamingCandidate {
 /** `ff_analyze_waivers` data (plan 07 E5). */
 export interface WaiverAnalysis {
   readonly candidates: readonly StreamingCandidate[];
+  /**
+   * My starter against the best option, for ONE position: the requested position whose best
+   * option gains most over its starter. With several positions in one call it can be another
+   * position than `rec`'s (a locked starter's position is listed but never called), so `position`
+   * names the position these numbers describe (QA-2-004).
+   */
   readonly hold_vs_stream: {
+    readonly position: string;
     readonly streamability: number;
     readonly current_starter_delta: number;
   } | null;
