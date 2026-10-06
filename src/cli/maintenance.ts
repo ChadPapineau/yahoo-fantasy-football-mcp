@@ -50,7 +50,8 @@ export const DEBRIS_MIN_AGE_MS = PUBLISH_LOCK_STALE_MS;
 const WEEKLY_RE = /^store-\d{4}-\d{2}-\d{2}(?:-\d{6})?\.sqlite$/;
 const DS_DEBRIS_RE =
   /^[a-z][a-z0-9_]*__[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+\.[0-9a-f]{12}\.tmp(?:-journal)?$/;
-const RUN_TMP_RE = /^[A-Za-z0-9_]{1,80}-[A-Za-z0-9]{6}$/;
+/** The name of a run temp directory: `<source>-XXXXXX` (mkdtemp under `<cache>/tmp`). */
+export const RUN_TMP_RE = /^[A-Za-z0-9_]{1,80}-[A-Za-z0-9]{6}$/;
 
 /** What a prune removed. */
 export interface PruneReport {
@@ -87,6 +88,21 @@ function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
 const ownUid = (): number | null =>
   typeof process.getuid === "function" ? process.getuid() : null;
 
+/**
+ * Whether an entry of `<cache>/tmp` is a run directory this program made: a real directory (never a
+ * symlink) owned by this user with no group/other bits, which is what mkdtemp creates (0700). A
+ * folder a person made there (0755 under the usual umask) or someone else's is left alone, so prune
+ * and `uninstall --purge` never recursively delete a tree they did not create (QA-1-087, QA-2-029).
+ */
+export function isOwnRunTempDir(st: {
+  isDirectory(): boolean;
+  uid: number;
+  mode: number;
+}): boolean {
+  const uid = ownUid();
+  return st.isDirectory() && (uid === null || st.uid === uid) && (st.mode & 0o077) === 0;
+}
+
 function oldEntries(dir: string, re: RegExp, nowMs: number): { name: string; dir: boolean }[] {
   let names: string[];
   try {
@@ -94,15 +110,13 @@ function oldEntries(dir: string, re: RegExp, nowMs: number): { name: string; dir
   } catch {
     return [];
   }
-  const uid = ownUid();
   const out: { name: string; dir: boolean }[] = [];
   for (const n of names.sort()) {
     if (!re.test(n)) continue;
     const st = lstatSync(path.join(dir, n));
     if (nowMs - st.mtimeMs < DEBRIS_MIN_AGE_MS) continue;
     if (st.isFile() || st.isSymbolicLink()) out.push({ name: n, dir: false });
-    // a run temp dir is ours (mkdtemp under our 0700 tmp/); one owned by anyone else is left alone
-    else if (st.isDirectory() && (uid === null || st.uid === uid)) out.push({ name: n, dir: true });
+    else if (isOwnRunTempDir(st)) out.push({ name: n, dir: true });
   }
   return out;
 }
@@ -123,8 +137,9 @@ export function pruneFiles(
   };
   const debris = has.ds ? oldEntries(ds, DS_DEBRIS_RE, nowMs).filter((e) => !e.dir) : [];
   for (const e of debris) rmSync(path.join(ds, e.name), { force: true });
-  const runs = has.tmp ? oldEntries(tmp, RUN_TMP_RE, nowMs) : [];
-  for (const e of runs) rmSync(path.join(tmp, e.name), { recursive: e.dir, force: true });
+  // only run directories of ours: the program never puts a plain file directly in tmp/
+  const runs = has.tmp ? oldEntries(tmp, RUN_TMP_RE, nowMs).filter((e) => e.dir) : [];
+  for (const e of runs) rmSync(path.join(tmp, e.name), { recursive: true, force: true });
   return {
     dataset_debris: debris.map((e) => e.name),
     run_temp: runs.map((e) => e.name),

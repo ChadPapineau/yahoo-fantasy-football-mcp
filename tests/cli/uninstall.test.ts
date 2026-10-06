@@ -1,13 +1,15 @@
 // uninstall.test.ts — plan 03 L8, §8: LaunchAgents booted out and removed; user data deleted only
 // with --purge AND --yes, by exact name (a foreign file keeps its directory); client configs are
 // printed, never edited.
-import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { EXIT } from "../../src/cli/exit.js";
 import { LAUNCHCTL, labelOf, launchAgentsDir, plistPath } from "../../src/cli/launchd.js";
 import { main } from "../../src/cli/main.js";
 import { executePurge, purgePlan } from "../../src/cli/uninstall.js";
+import { runTempDir } from "../../src/config/paths.js";
+import { fsTempArea } from "../../src/sources/runner.js";
 import { fakeExec, makeIo, sandbox, type Sandbox } from "./helpers.js";
 
 let sb: Sandbox | undefined;
@@ -22,8 +24,9 @@ async function populated(): Promise<Sandbox> {
   expect(await main(["backup"], makeIo(s))).toBe(EXIT.OK);
   mkdirSync(path.join(s.cacheDir, "ds"), { recursive: true, mode: 0o700 });
   writeFileSync(path.join(s.cacheDir, "ds", "nflverse__injuries.sqlite"), "x");
-  mkdirSync(path.join(s.cacheDir, "tmp", "nflverse_injuries-AbC123"), { recursive: true });
-  writeFileSync(path.join(s.cacheDir, "tmp", "nflverse_injuries-AbC123", "f"), "x");
+  // a run directory exactly as `ff refresh` leaves one behind (0700 tmp/, mkdtemp 0700 entry)
+  const run = await fsTempArea(runTempDir(s.cacheDir)).create("nflverse:injuries");
+  writeFileSync(path.join(run, "f"), "x");
   writeFileSync(path.join(s.configDir, "league.yaml"), "x", { mode: 0o600 });
   mkdirSync(launchAgentsDir(s.home), { recursive: true });
   writeFileSync(plistPath(s.home, "weather"), "x");
@@ -115,7 +118,7 @@ describe("purge plan", () => {
     const s = sandbox();
     sb = s;
     expect(purgePlan(path.join(s.dir, "none"), ["a"], [])).toEqual([]);
-    mkdirSync(path.join(s.dir, "d", "sub"), { recursive: true });
+    mkdirSync(path.join(s.dir, "d", "sub"), { recursive: true, mode: 0o700 });
     writeFileSync(path.join(s.dir, "d", "sub", "ok.x"), "");
     writeFileSync(path.join(s.dir, "d", "sub", "nope.y"), "");
     writeFileSync(path.join(s.dir, "d", "f"), "");
@@ -129,5 +132,104 @@ describe("purge plan", () => {
     const r = executePurge(plan);
     expect(r.kept.map((p) => path.relative(s.dir, p))).toEqual(["d/sub", "d"]);
     expect(existsSync(path.join(s.dir, "d", "sub", "nope.y"))).toBe(true);
+    // a pattern directory that is not our private one is kept whole, with the reason (QA-2-029)
+    chmodSync(path.join(s.dir, "d", "sub"), 0o755);
+    const loose = purgePlan(path.join(s.dir, "d"), [], [{ name: "sub", re: /\.y$/ }]);
+    expect(loose[0]).toMatchObject({ path: path.join(s.dir, "d", "sub"), action: "keep" });
+    expect(executePurge(loose).removed).toEqual([]);
+    expect(existsSync(path.join(s.dir, "d", "sub", "nope.y"))).toBe(true);
+  });
+});
+
+describe("purge never deletes a directory tree it did not create (QA-2-029)", () => {
+  /** FF_CACHE_DIR on a shared directory that already holds a `tmp/` with a person's own folder. */
+  async function sharedCache(tmpMode: number, entryMode: number) {
+    const s = sandbox({ create: true });
+    sb = s;
+    const shared = path.join(s.dir, "shared");
+    mkdirSync(shared, { mode: 0o700 });
+    const tmp = path.join(shared, "tmp");
+    mkdirSync(tmp);
+    chmodSync(tmp, tmpMode);
+    // ordinary names that happen to fit the run-temp grammar (`<word>-<6 chars>`)
+    const docs = ["client-report", "notes-backup"].map((n) => {
+      const d = path.join(tmp, n);
+      mkdirSync(d);
+      writeFileSync(path.join(d, "q3-numbers.txt"), "user document\n");
+      chmodSync(d, entryMode);
+      return path.join(d, "q3-numbers.txt");
+    });
+    const io = makeIo(s, { env: { FF_CACHE_DIR: shared } });
+    const rc = await main(["uninstall", "--purge", "--yes"], io);
+    return { rc, io, docs, tmp };
+  }
+
+  // every layout except the program's own (0700 tmp/ holding a 0700 directory of ours)
+  const layouts: [number, number][] = [
+    [0o755, 0o755],
+    [0o755, 0o700],
+    [0o750, 0o700],
+    [0o705, 0o700],
+    [0o770, 0o700],
+    [0o700, 0o755],
+    [0o700, 0o750],
+    [0o700, 0o705],
+    [0o700, 0o711],
+  ];
+  for (const [tmpMode, entryMode] of layouts) {
+    it(`tmp/ ${tmpMode.toString(8)}, entry ${entryMode.toString(8)}: the person's files survive`, async () => {
+      const r = await sharedCache(tmpMode, entryMode);
+      expect(r.rc).toBe(EXIT.OK);
+      for (const d of r.docs) expect(existsSync(d)).toBe(true);
+      expect(r.io.out.text).not.toMatch(/^deleted .*client-report/m);
+      // the person is told what was left and why, not only that a directory was not empty
+      expect(r.io.out.text).toMatch(/^kept \(not ours/m);
+    });
+  }
+
+  it("--purge without --yes lists the person's directories as kept, not as deletions", async () => {
+    const s = sandbox({ create: true });
+    sb = s;
+    const tmp = runTempDir(s.cacheDir);
+    mkdirSync(tmp, { mode: 0o755 });
+    chmodSync(tmp, 0o755);
+    mkdirSync(path.join(tmp, "client-report"));
+    const io = makeIo(s);
+    expect(await main(["uninstall", "--purge"], io)).toBe(EXIT.USAGE);
+    const [del, keep] = io.err.text.split(/It would leave alone/);
+    expect(del).not.toContain("client-report");
+    expect(keep).toContain(tmp);
+  });
+
+  it("positive control: the run directories `ff refresh` leaves are still deleted", async () => {
+    const s = sandbox({ create: true });
+    sb = s;
+    const area = fsTempArea(runTempDir(s.cacheDir));
+    const runs = [
+      await area.create("nflverse:injuries"),
+      await area.create("nflverse:stats_player_week"),
+      await area.create("weather:open_meteo"),
+    ];
+    for (const r of runs) writeFileSync(path.join(r, "part"), "x");
+    const io = makeIo(s);
+    expect(await main(["uninstall", "--purge", "--yes"], io)).toBe(EXIT.OK);
+    for (const r of runs) expect(existsSync(r)).toBe(false);
+    expect(existsSync(s.cacheDir)).toBe(false);
+  });
+
+  it("a run-temp-shaped symlink or file in tmp/ is never followed or removed", async () => {
+    const s = sandbox({ create: true });
+    sb = s;
+    const tmp = runTempDir(s.cacheDir);
+    mkdirSync(tmp, { mode: 0o700 });
+    const outside = path.join(s.dir, "outside");
+    mkdirSync(outside, { mode: 0o700 });
+    writeFileSync(path.join(outside, "keep.txt"), "keep");
+    symlinkSync(outside, path.join(tmp, "linked-AbC123"));
+    writeFileSync(path.join(tmp, "notes-backup"), "a person's file");
+    const io = makeIo(s);
+    expect(await main(["uninstall", "--purge", "--yes"], io)).toBe(EXIT.OK);
+    expect(existsSync(path.join(outside, "keep.txt"))).toBe(true);
+    expect(existsSync(path.join(tmp, "notes-backup"))).toBe(true);
   });
 });
