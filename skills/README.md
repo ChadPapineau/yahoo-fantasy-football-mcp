@@ -9,7 +9,7 @@ Agent Skills that teach Claude how to use the fantasy-football MCP server (plan 
 | Skill | Use it for | Tools it calls, in order |
 |---|---|---|
 | [start-sit](start-sit/SKILL.md) | who to start, sit or flex; Questionable players; conditional lineups; the game-day branch once any slot has locked | status → league → roster → (scoreboard, opponent roster) → injuries → projections → lineup → record |
-| [stream-kdef](stream-kdef/SKILL.md) | which kicker or defense to start or stream, two weeks ahead | status → league → roster → schedule → K or DEF pool → waivers → record, once per position |
+| [stream-kdef](stream-kdef/SKILL.md) | which kicker or defense to start or stream, two weeks ahead | status → league → roster → schedule → K or DEF pool → waivers → projections of the alternatives → record, once per position |
 | [retro](retro/SKILL.md) | how last week's advice did; calibration; decision quality versus luck | status → league → scoreboard → retrospective → (transactions) → record |
 | [onboard](onboard/SKILL.md) | writing and checking the private league file (manual-league mode) | status → leagues → interview, or league → roster → player stats → record |
 
@@ -51,6 +51,7 @@ Shared text is written once, in `_shared/references/`. `node scripts/skills/buil
 - `expect` lists the outcomes a step may have on the fixture league: `"ok"` (default) or error codes such as `"NOT_FOUND"` (for example, no opponent roster under the manual league).
 - `{ "$ref": "<step id>.<path>" }` stands for a value from an earlier step's full result envelope, e.g. `"lineup.data.rec"` or `"league.meta.as_of"`.
 - `{ "$source_calls": ["<step id>", …] }` stands for `[{ "tool": <that step's tool>, "request_id": <its meta.request_id> }, …]`.
+- `{ "$alternatives": { "from": "<analytics step id>", "projections": "<ff_project_players step id>" } }` stands for the `alternatives[]` the log contract (`_shared/references/log.md`) builds from that lineup or K/DEF result, with each brought-in player's numbers from that projection; `{ "$alternative_keys": "<analytics step id>" }` stands for the player keys those alternatives bring in (what the projection step projects). A lineup or K/DEF `rec` is always logged with `$alternatives` (`check-skills` refuses a hand-written list).
 - Every sequence starts with `ff_get_status` and, when it records, ends with `ff_record_recommendation` (log before rendering).
 - The dry run loads every Skill's sequences with `loadToolSequences()` (which refuses any file `check-skills` would reject), builds each step's arguments with `resolveArgs(step.args, results)`, and checks each outcome with `outcomeAllowed(step, outcome)` — all three from `scripts/skills/tool-sequences.mjs`.
 

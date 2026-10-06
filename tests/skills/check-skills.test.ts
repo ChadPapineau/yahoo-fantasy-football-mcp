@@ -834,7 +834,88 @@ describe("QA-1-065: a recommendation is logged under the kind of the tool that p
     );
     const ok = structuredClone(seq);
     (ok.sequences[0]!.steps[2]!.args as Json).kind = "stream";
+    (ok.sequences[0]!.steps[2]!.args as Json).alternatives = {
+      $alternatives: { from: "rank", projections: "rank" },
+    };
     expect(validateToolSequence(ok, ctx).errors).toEqual([]);
+    // QA-2-041: a K/DEF (or lineup) rec logged with a hand-written list — [] once in all six — is
+    // refused: the review could score no regret for it
+    for (const alternatives of [
+      [],
+      undefined,
+      { $alternatives: { from: "status", projections: "rank" } },
+    ]) {
+      const bad = structuredClone(ok);
+      (bad.sequences[0]!.steps[2]!.args as Json).alternatives = alternatives;
+      expect(validateToolSequence(bad, ctx).errors.join("\n")).toMatch(
+        /alternatives other than \{ \$alternatives: \{ from: "rank"/,
+      );
+    }
+  });
+
+  it.each<[string, unknown, RegExp]>([
+    [
+      "$alternatives naming a later step",
+      { $alternatives: { from: "record", projections: "rank" } },
+      /\$alternatives\.from names no earlier step "record"/,
+    ],
+    [
+      "$alternatives without projections",
+      { $alternatives: { from: "rank" } },
+      /\$alternatives must be \{ from: <step>, projections: <step> \}/,
+    ],
+    [
+      "$alternatives with an extra key",
+      { $alternatives: { from: "rank", projections: "rank", x: 1 } },
+      /\$alternatives must be/,
+    ],
+    [
+      "$alternative_keys naming a later step",
+      { $alternative_keys: "record" },
+      /\$alternative_keys must name an earlier step/,
+    ],
+    [
+      "$alternative_keys not a step id",
+      { $alternative_keys: ["rank"] },
+      /\$alternative_keys must name an earlier step/,
+    ],
+  ])("validateToolSequence rejects %s", (_l, value, re) => {
+    const seq = {
+      schema_version: 1,
+      skill: "x",
+      tool_contract: 1,
+      fixture: { league_key: "manual.l.example" },
+      sequences: [
+        {
+          id: "a",
+          when: "always",
+          steps: [
+            { id: "status", tool: "ff_get_status", args: {} },
+            { id: "rank", tool: "ff_analyze_waivers", args: { positions: ["K"] } },
+            {
+              id: "record",
+              tool: "ff_record_recommendation",
+              args: {
+                kind: "stream",
+                week: 4,
+                rec: { $ref: "rank.data.rec" },
+                source_calls: [],
+                alternatives: value,
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const ctx = {
+      skill: "x",
+      where: "w",
+      tools: ["ff_get_status", "ff_analyze_waivers", "ff_record_recommendation"],
+      writeTools: [],
+      toolContract: 1,
+      errorCodes: [],
+    };
+    expect(validateToolSequence(seq, ctx).errors.join("\n")).toMatch(re);
   });
 
   it("rejects a SKILL.md that logs a kind no sequence records, and a sequence kind the body never names", () => {

@@ -121,6 +121,12 @@ export const REC_KIND_BY_TOOL = Object.freeze(
   }),
 );
 
+/**
+ * The analytics tools whose rec is logged with the alternatives the log contract builds from the
+ * result (log.md `alternatives[]`; QA-2-041): the swap rows of a lineup, the shown K/DEF candidates.
+ */
+export const ALTERNATIVES_FROM = new Set(["ff_analyze_lineup", "ff_analyze_waivers"]);
+
 /** The kinds a SKILL.md body tells the model to log (`ff_record_recommendation` … `kind: "x"`). */
 const BODY_KIND_RE = /ff_record_recommendation`?[^\n`]*?`kind: "([a-z_]+)"`/g;
 
@@ -478,8 +484,10 @@ const STEP_ID_RE = /^[a-z][a-z0-9_]{0,31}$/;
 const REF_RE = /^([a-z][a-z0-9_]{0,31})((?:\.[A-Za-z0-9_]+)+)$/;
 
 /**
- * Walk `args` checking every `$`-object: `{ $ref: "<earlier step>.<path>" }` or
- * `{ $source_calls: [earlier step ids] }`; any other `$` key is an error.
+ * Walk `args` checking every `$`-object: `{ $ref: "<earlier step>.<path>" }`,
+ * `{ $source_calls: [earlier step ids] }`, `{ $alternative_keys: "<earlier step>" }` or
+ * `{ $alternatives: { from: "<earlier step>", projections: "<earlier step>" } }` (the log
+ * contract's alternatives, scripts/skills/tool-sequences.mjs); any other `$` key is an error.
  * @param {unknown} v
  * @param {Set<string>} earlier
  * @param {string} where
@@ -516,7 +524,23 @@ function checkRefs(v, earlier, where, errors) {
           }
         }
       }
-    } else errors.push(`${where}: unknown ${String(k)} (only $ref and $source_calls)`);
+    } else if (k === "$alternative_keys") {
+      if (typeof val !== "string" || !earlier.has(val))
+        errors.push(`${where}: $alternative_keys must name an earlier step`);
+    } else if (k === "$alternatives") {
+      const keys = isRecord(val) ? Object.keys(val).sort().join(",") : "";
+      if (!isRecord(val) || keys !== "from,projections")
+        errors.push(`${where}: $alternatives must be { from: <step>, projections: <step> }`);
+      else
+        for (const f of ["from", "projections"]) {
+          const id = val[f];
+          if (typeof id !== "string" || !earlier.has(id))
+            errors.push(`${where}: $alternatives.${f} names no earlier step "${String(id)}"`);
+        }
+    } else
+      errors.push(
+        `${where}: unknown ${String(k)} (only $ref, $source_calls, $alternative_keys and $alternatives)`,
+      );
     return;
   }
   for (const [k, x] of Object.entries(v)) checkRefs(x, earlier, `${where}.${k}`, errors);
@@ -646,6 +670,19 @@ export function validateToolSequence(raw, ctx) {
         errors.push(
           `${sw}: logs ${String(producer)}'s rec as kind "${String(kind)}" — it is a "${want}" rec`,
         );
+      }
+      // QA-2-041: a lineup or K/DEF call logs the options shown beside it, shaped like the call, or
+      // the review has no regret for it — never a hand-written list (all six once logged [])
+      if (producer !== undefined && ALTERNATIVES_FROM.has(producer)) {
+        const alts = p.args["alternatives"];
+        const from =
+          isRecord(alts) && isRecord(alts["$alternatives"])
+            ? alts["$alternatives"]["from"]
+            : undefined;
+        if (from !== m?.[1])
+          errors.push(
+            `${sw}: ${String(producer)}'s rec is logged with alternatives other than { $alternatives: { from: "${String(m?.[1])}", … } } (log.md; QA-2-041)`,
+          );
       }
     });
     sequences.push({ id: String(id), steps: parsed });

@@ -37,7 +37,7 @@ If the user named players, resolve each name with `fantasy-football-mcp-server:f
 3. `fantasy-football-mcp-server:ff_get_injuries` for the user's roster (and the opponent's, when known). Use `p_active` — never "50/50" for Questionable.
 4. `fantasy-football-mcp-server:ff_project_players` for both rosters, `horizon: "week"`, the week.
 5. `fantasy-football-mcp-server:ff_analyze_lineup` with `objective: "mean"` (the default in this version). Use `objective: "pwin"` only when the user asks to maximise the chance of winning and an opponent roster exists. When the user named a pair ("A or B at flex?"), pass it as `compare: [{ "out": <key of the current starter>, "in": <key of the alternative> }]` and put that row first.
-6. `fantasy-football-mcp-server:ff_record_recommendation` with `kind: "lineup"` and the result's `rec` — before answering ([log](references/log.md)).
+6. `fantasy-football-mcp-server:ff_record_recommendation` with `kind: "lineup"`, the result's `rec`, and one alternative per swap or comparison row, shaped as [log](references/log.md) says for a lineup, with the numbers of step 4's projections — before answering.
 7. Render with the output contract below, plus the additions in §5.
 
 **Ask only when it matters:** (a) news the user has that the data lacks — treat it as an unconfirmed claim and show what would confirm it; (b) whether points-for matters this week (a tiebreaker) — only if standings are available and show it could.
@@ -48,7 +48,7 @@ If the user named players, resolve each name with `fantasy-football-mcp-server:f
 3. `fantasy-football-mcp-server:ff_get_roster` may be re-read once with `force_refresh: true`; `fantasy-football-mcp-server:ff_get_scoreboard` is re-read on every call in this branch.
 4. `fantasy-football-mcp-server:ff_project_players` for the players whose games have not started only (`is_editable` true on the roster).
 5. **Live win probability is not available in this version** — say "live odds are not available yet". When an opponent roster exists, `fantasy-football-mcp-server:ff_analyze_matchup` with `mode: "pre"` gives the pre-game number; label it pre-game, and treat every in-game score as provisional.
-6. `fantasy-football-mcp-server:ff_record_recommendation` with `kind: "lineup"` and the `rec` of the `ff_analyze_lineup` call in step 1 — a game-day swap is a lineup change, and the weekly review scores swap regret only for lineup entries. The pre-game `ff_analyze_matchup` number is context for the answer, not the logged call.
+6. `fantasy-football-mcp-server:ff_record_recommendation` with `kind: "lineup"`, the `rec` of the `ff_analyze_lineup` call in step 1 and its alternatives (one per swap row, shaped as [log](references/log.md) says for a lineup, with step 4's projections) — a game-day swap is a lineup change, and the weekly review scores swap regret only for lineup entries. The pre-game `ff_analyze_matchup` number is context for the answer, not the logged call.
 7. Output: the slots still open — the roster's players whose `is_editable` is true, each with its `lock_at` (the later groups of `lock_schedule[]`) — then the single best swap among unlocked slots, or **"Nothing actionable: every slot is locked."** This list comes from `ff_get_roster`, so it is there with or without an opponent.
 
 ### 5. Output additions (on top of the contract)

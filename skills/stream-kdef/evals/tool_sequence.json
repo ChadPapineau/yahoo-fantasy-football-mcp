@@ -1,5 +1,5 @@
 {
-  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7): the calls this Skill promises, in order, with example arguments on the fixture manual league. Format: skills/README.md#tool-sequences. One sequence per position: ff_analyze_waivers returns one hold_vs_stream and one rec per call, so each position is ranked and logged on its own (a question about both runs `kicker`, then `defense`).",
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7): the calls this Skill promises, in order, with example arguments on the fixture manual league. Format: skills/README.md#tool-sequences. One sequence per position: ff_analyze_waivers returns one hold_vs_stream and one rec per call, so each position is ranked and logged on its own (a question about both runs `kicker`, then `defense`). `alt_proj` projects the players the logged alternatives bring in (log.md), whose numbers come from it.",
   "schema_version": 1,
   "skill": "stream-kdef",
   "tool_contract": 1,
@@ -20,14 +20,23 @@
           "args": { "positions": ["K"], "look_ahead": 2 }
         },
         {
+          "id": "alt_proj",
+          "tool": "ff_project_players",
+          "args": {
+            "players": { "player_keys": { "$alternative_keys": "rank" } },
+            "horizon": "week",
+            "week": 4
+          }
+        },
+        {
           "id": "record",
           "tool": "ff_record_recommendation",
           "args": {
             "kind": "stream",
             "week": 4,
             "rec": { "$ref": "rank.data.rec" },
-            "alternatives": [],
-            "source_calls": { "$source_calls": ["roster", "schedule", "rank"] },
+            "alternatives": { "$alternatives": { "from": "rank", "projections": "alt_proj" } },
+            "source_calls": { "$source_calls": ["roster", "schedule", "rank", "alt_proj"] },
             "followed_hint": "unknown",
             "client_ref": "stream-kdef-2026-w4-k"
           }
@@ -53,14 +62,23 @@
           "args": { "positions": ["DEF"], "look_ahead": 2 }
         },
         {
+          "id": "alt_proj",
+          "tool": "ff_project_players",
+          "args": {
+            "players": { "player_keys": { "$alternative_keys": "rank" } },
+            "horizon": "week",
+            "week": 4
+          }
+        },
+        {
           "id": "record",
           "tool": "ff_record_recommendation",
           "args": {
             "kind": "stream",
             "week": 4,
             "rec": { "$ref": "rank.data.rec" },
-            "alternatives": [],
-            "source_calls": { "$source_calls": ["roster", "schedule", "rank"] },
+            "alternatives": { "$alternatives": { "from": "rank", "projections": "alt_proj" } },
+            "source_calls": { "$source_calls": ["roster", "schedule", "rank", "alt_proj"] },
             "followed_hint": "unknown",
             "client_ref": "stream-kdef-2026-w4-def"
           }

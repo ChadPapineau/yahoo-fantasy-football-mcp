@@ -114,6 +114,77 @@ describe("resolveArgs", () => {
     expect(() => resolveArgs(template, r)).toThrow(re);
   });
 
+  it("builds the log contract's alternatives and the keys they bring in (QA-2-041)", () => {
+    const r = new Map(results);
+    r.set("rank", {
+      tool: "ff_analyze_waivers",
+      result: {
+        data: {
+          rec: {
+            subjects: [
+              {
+                player_key: "manual.p.def-det",
+                gsis_id: null,
+                nfl_team: "DET",
+                role: "start",
+                slot: null,
+              },
+            ],
+          },
+          candidates: [
+            { player_key: "manual.p.def-min", gsis_id: null, nfl_team: "MIN" },
+            { player_key: "manual.p.def-gb", gsis_id: null, nfl_team: "GB" },
+          ],
+        },
+      },
+    });
+    const dist = {
+      mean: 9.7,
+      p10: 3,
+      p25: 6,
+      p50: 9,
+      p75: 13,
+      p90: 17,
+      p_zero: 0,
+      basis: "position_cv",
+    };
+    r.set("proj", {
+      tool: "ff_project_players",
+      result: {
+        data: {
+          projections: ["manual.p.def-min", "manual.p.def-gb"].map((k) => ({
+            player_key: k,
+            gsis_id: null,
+            weeks: [{ week: 4, points: dist }],
+          })),
+        },
+      },
+    });
+    expect(resolveArgs({ $alternative_keys: "rank" }, r)).toEqual([
+      "manual.p.def-min",
+      "manual.p.def-gb",
+    ]);
+    const alts = resolveArgs({ $alternatives: { from: "rank", projections: "proj" } }, r) as {
+      subjects: { role: string; nfl_team: string | null }[];
+      point_estimate: number;
+      distribution: unknown;
+      decision_metric_value: number;
+    }[];
+    expect(alts.map((a) => a.subjects.map((s) => `${s.role}:${String(s.nfl_team)}`))).toEqual([
+      ["stream:MIN", "drop:DET"],
+      ["stream:GB", "drop:DET"],
+    ]);
+    for (const a of alts) {
+      expect(a.distribution).toEqual(dist);
+      expect([a.point_estimate, a.decision_metric_value]).toEqual([9.7, 9.7]);
+    }
+    expect(() => resolveArgs({ $alternatives: { from: "rank", projections: "x" } }, r)).toThrow(
+      /must have results/,
+    );
+    expect(() => resolveArgs({ $alternative_keys: "x" }, r)).toThrow(/step x has no result/);
+    expect(() => resolveArgs({ $alternative_keys: "roster" }, r)).toThrow(/no data/);
+  });
+
   it("does not follow prototype keys", () => {
     expect(() => resolveArgs({ a: { $ref: "lineup.constructor" } }, results)).toThrow(
       /no `constructor`/,
