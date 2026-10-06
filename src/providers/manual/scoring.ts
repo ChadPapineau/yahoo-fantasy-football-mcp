@@ -1,8 +1,12 @@
 // scoring.ts — league.yaml scoring → the normalised ScoringSettings every provider emits (plan 01
 // §8.1 "the same normalised shape the Yahoo normaliser produces"; plan 08 §2 types, §3.1 canonical
 // names, §4.1 bracket families). A preset (`standard` | `half_ppr` | `ppr`, Yahoo's public default
-// values) plus explicit per-canonical-stat overrides and threshold bonuses. The manual platform's
-// stat id IS the canonical name. `rounding`/`negative_floor` stay unverified (plan 10 A1a).
+// values) plus explicit per-canonical-stat overrides and threshold bonuses; the overrides may also
+// state missed-FG bins (`fg_miss_*`) and yards-allowed bins (`dst_ya_*`), which the engine scores
+// as its bracket families (QA-2-045). A per-position value (a TE premium) cannot be stated: rules
+// apply per position type. The manual platform's stat id IS the canonical name.
+// `rounding`/`negative_floor` stay unverified (plan 10 A1a).
+import { parseBinCanonical } from "../../domain/scoring/brackets.js";
 import { normalizeSettings, type RuleDraft } from "../../domain/scoring/settings.js";
 import {
   KNOWN_CANONICAL,
@@ -10,7 +14,7 @@ import {
   type ScoringBonus,
   type ScoringSettings,
 } from "../../domain/scoring/types.js";
-import type { LeagueFile } from "./schema.js";
+import { DST_YA_BINS, FG_MISS_BINS, type LeagueFile } from "./schema.js";
 
 /** A scoring preset name. */
 export type ScoringPreset = LeagueFile["scoring"]["preset"];
@@ -68,6 +72,23 @@ export function positionTypeOf(canonical: string): PositionType {
   return "O";
 }
 
+/**
+ * Why the yards-allowed bins a file lists cannot score, or null (QA-2-045): they must run from 0 to
+ * an open-ended bin with no gap or overlap — the engine scores a yardage past a closed last bin in
+ * that bin, so `dst_ya_0_99` alone would pay a 450-yard defence. Value-free.
+ */
+export function yardsAllowedProblem(s: LeagueFile["scoring"]): string | null {
+  const bins = DST_YA_BINS.filter((b) => typeof s.overrides?.[b] === "number")
+    .map((b) => parseBinCanonical(b))
+    .filter((b) => b !== null)
+    .sort((a, b) => a.lower - b.lower);
+  if (bins.length === 0) return null;
+  const contiguous = bins.every((b, i) => i === 0 || (bins[i - 1]?.upper ?? -1) + 1 === b.lower);
+  return bins[0]?.lower === 0 && contiguous && bins.at(-1)?.upper === null
+    ? null
+    : "yards-allowed brackets (dst_ya_*) must run from 0 (dst_ya_0_99) to one open-ended bin (dst_ya_500p or dst_ya_550p) with no gap or overlap; list the bins worth 0 too";
+}
+
 /** Canonical JSON (sorted keys, no whitespace) — the scoring engine's one definition. */
 export { canonicalJson } from "../../domain/scoring/settings.js";
 
@@ -82,6 +103,9 @@ export function buildScoringSettings(s: LeagueFile["scoring"]): ScoringSettings 
   const values = new Map<string, number>(Object.entries(BASE_SCORING));
   const rec = PRESET_REC[s.preset];
   if (rec !== 0) values.set("rec", rec);
+  // a missed-FG penalty on some bins: the others score 0, so the family stays contiguous
+  if (FG_MISS_BINS.some((b) => typeof s.overrides?.[b] === "number"))
+    for (const b of FG_MISS_BINS) values.set(b, 0);
   for (const [k, v] of Object.entries(s.overrides ?? {}))
     if (typeof v === "number") values.set(k, v);
   const bonuses = new Map<string, ScoringBonus[]>();
@@ -92,7 +116,7 @@ export function buildScoringSettings(s: LeagueFile["scoring"]): ScoringSettings 
     if (!values.has(b.stat)) values.set(b.stat, 0);
   }
   const rules: RuleDraft[] = [];
-  for (const c of KNOWN_CANONICAL) {
+  for (const c of [...KNOWN_CANONICAL, ...FG_MISS_BINS, ...DST_YA_BINS]) {
     const modifier = values.get(c);
     if (modifier === undefined) continue;
     rules.push({

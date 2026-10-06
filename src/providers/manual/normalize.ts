@@ -35,7 +35,7 @@ import {
   type LeagueFileIssue,
 } from "../platform.js";
 import { UNKNOWN_SLOT_HINT, type LeagueFile, type RosterEntryInput } from "./schema.js";
-import { buildScoringSettings } from "./scoring.js";
+import { buildScoringSettings, yardsAllowedProblem } from "./scoring.js";
 
 /** Default league slug when the file names none. */
 export const DEFAULT_LEAGUE_SLUG = "league";
@@ -259,6 +259,10 @@ export function normalizeLeague(f: LeagueFile): NormalizeResult {
     if (po.num_teams > f.league.num_teams)
       issue("league.playoffs.num_teams", "must not exceed league.num_teams");
   }
+
+  // --- scoring (QA-2-045: bins the engine would score wrongly are refused, not guessed) ---
+  const ya = yardsAllowedProblem(f.scoring);
+  if (ya !== null) issue("scoring.overrides", ya);
 
   // --- slots ---
   const defs: RosterSlot[] = [];

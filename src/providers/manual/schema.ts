@@ -131,9 +131,56 @@ const players = z.array(rosterEntrySchema).max(60);
 const scoringValue = z.number().min(-MAX_SCORING_MAGNITUDE).max(MAX_SCORING_MAGNITUDE);
 const canonicalEnum = z.enum(KNOWN_CANONICAL);
 
+/**
+ * Missed-FG bins (plan 08 §3.1 `fg_miss_*`, the `fg_miss_distance` count family): the five bins
+ * nflverse reports per kicker (`fg_missed_0_19` … `fg_missed_50_59` + `fg_missed_60_`), the same
+ * edges as the made-FG bins (QA-2-045).
+ */
+export const FG_MISS_BINS = [
+  "fg_miss_0_19",
+  "fg_miss_20_29",
+  "fg_miss_30_39",
+  "fg_miss_40_49",
+  "fg_miss_50p",
+] as const;
+
+/**
+ * Yards-allowed bins (plan 08 §3.1 `dst_ya_*`, the `dst_yards_allowed` indicator family, scored
+ * from the defence's yards allowed): Yahoo's 100-yard bins and ESPN's and Sleeper's finer ones.
+ * A file lists one contiguous set from 0 to an open-ended bin (QA-2-045).
+ */
+export const DST_YA_BINS = [
+  "dst_ya_0_99",
+  "dst_ya_100_199",
+  "dst_ya_200_299",
+  "dst_ya_300_399",
+  "dst_ya_300_349",
+  "dst_ya_350_399",
+  "dst_ya_400_499",
+  "dst_ya_400_449",
+  "dst_ya_450_499",
+  "dst_ya_500p",
+  "dst_ya_500_549",
+  "dst_ya_550p",
+] as const;
+
+/** What `scoring.overrides` accepts and what it cannot state, for an unknown key (QA-2-045). */
+export const OVERRIDES_HINT =
+  "overrides take the canonical stat names (pass_yd, rec, fg_40_49, dst_pa_7_13 …), missed-FG " +
+  "bins fg_miss_0_19 … fg_miss_50p and yards-allowed bins dst_ya_0_99 … dst_ya_500p (or ESPN's " +
+  "dst_ya_300_349 … dst_ya_550p); a per-position value such as a TE premium cannot be stated yet, " +
+  "so leave it out and expect that league's TE points to read low";
+
 /** Per-canonical-stat overrides of the preset (`pass_td: 4`). */
 const overridesSchema = z
-  .object(Object.fromEntries(KNOWN_CANONICAL.map((c) => [c, scoringValue.optional()])))
+  .object(
+    Object.fromEntries(
+      [...KNOWN_CANONICAL, ...FG_MISS_BINS, ...DST_YA_BINS].map((c) => [
+        c,
+        scoringValue.optional(),
+      ]),
+    ),
+  )
   .strict();
 
 export const scoringSchema = z
@@ -326,8 +373,10 @@ function reasonOf(issue: z.core.$ZodIssue, absent: boolean, path: readonly Prope
       const defense = path[path.length - 1] === "position" ? `; ${DEFENSE_FORM_HINT}` : "";
       return `not an allowed value${listed}${defense}`;
     }
-    case "unrecognized_keys":
-      return `unknown key(s) (${String(issue.keys.length)})`;
+    case "unrecognized_keys": {
+      const n = `unknown key(s) (${String(issue.keys.length)})`;
+      return formatPath(path) === "scoring.overrides" ? `${n}: ${OVERRIDES_HINT}` : n;
+    }
     case "invalid_union":
       return "does not match any allowed shape (player: name/team/position, or defense: team)";
     case "not_multiple_of":
