@@ -1,6 +1,6 @@
 # Adversarial log — challenges to the plan
 
-**Plan state attacked:** `docs/plan/01-*` … `10-*` as on `main` at `7663b6a` (2026-09-30), plus `docs/HANDOFF.md`, `docs/research/02-*` … `06-*`, `01-*`'s verdict table, and the mcp-builder `mcp_best_practices.md` reference.
+**Plan state attacked:** `docs/plan/01-*` … `10-*` as on `main` at `c397ef5` (2026-09-30), plus `docs/HANDOFF.md`, `docs/research/02-*` … `06-*`, `01-*`'s verdict table, and the mcp-builder `mcp_best_practices.md` reference.
 
 **How this log works.** Each round opens with objections; `## Round N — defence` follows it (justify with evidence, or concede and edit the plan); the next round opens with a verdict table over every prior objection (withdrawn / conceded-by-defence / pressed) and then raises anything the revisions broke. Rounds end when the challenge declares the remainder marginal. Severity vocabulary: **blocking** = the plan cannot be trusted or acted on until this is answered; **significant** = a decision or claim is wrong or unjustified and will cost real time, tokens or trust if built as written; **marginal** = worth a line in the plan, not a redesign.
 
@@ -272,7 +272,7 @@ _Round 1 ends here. `## Round 1 — defence` follows below this line._
 
 ## Round 1 — defence
 
-**Date:** 2026-09-30 · Plan revision that answers this defence: the revision commits that follow (`docs(plan): round-1 revisions — …`), diffed against `7663b6a`.
+**Date:** 2026-09-30 · Plan revision that answers this defence: the revision commits that follow (`docs(plan): round-1 revisions — …`), diffed against `c397ef5`.
 
 **Method.** Each objection gets one of: **CONCEDE** (the plan changes as asked), **CONCEDE-MODIFIED** (the plan changes, but not exactly as asked — with the reason), **JUSTIFY** (the plan stands — with evidence). Where the challenge could not verify something, it was verified at source before ruling (§D.0). Then §D.2 asks what the defended position should strengthen beyond what was attacked.
 
@@ -284,7 +284,7 @@ _Round 1 ends here. `## Round 1 — defence` follows below this line._
 | Arrow R `write_parquet` default `compression = "snappy"` ("if available, otherwise uncompressed") | arrow.apache.org/docs/r/reference/write_parquet.html | **OBJ-20 closes**: hyparquet reads snappy natively; no sixth package |
 | fast-xml-parser source default `processEntities: true`, `htmlEntities: false` | `src/xmlparser/OptionsBuilder.js` lines 42–43 (GitHub API) | **The plan's A-9 was inverted**, as the challenge suspected; OBJ-14's entity half is confirmed |
 | `node:sqlite` on Node 22.23.2 prints `ExperimentalWarning` | HANDOFF "Stack facts" (run locally) | OBJ-09 confirmed |
-| `docs`/`secrets` workflows green on `main` without `.npmrc` today | GitHub Actions runs on `f3a0a48`, `e995228` | OBJ-12's prediction is about Phase 0, not today |
+| `docs`/`secrets` workflows green on `main` without `.npmrc` today | GitHub Actions runs on `c30b997`, `df97acb` | OBJ-12's prediction is about Phase 0, not today |
 
 ### D.1 Rulings
 
@@ -380,7 +380,7 @@ The question: *what could be optimized about the position being defended?*
 
 ### D.3 What round 2 should check
 
-Diff `docs/plan/*` and `.github/workflows/docs.yml` against `7663b6a`; confirm each ruling landed where this defence says; look for what the revisions broke (the Phase 1a/1b split, the `ManualLeagueProvider`, the `live` fold, the toolset switch, and the Node 24 floor are the largest changes). Say explicitly when what remains is marginal.
+Diff `docs/plan/*` and `.github/workflows/docs.yml` against `c397ef5`; confirm each ruling landed where this defence says; look for what the revisions broke (the Phase 1a/1b split, the `ManualLeagueProvider`, the `live` fold, the toolset switch, and the Node 24 floor are the largest changes). Say explicitly when what remains is marginal.
 
 _Round 1 defence ends here. `## Round 2 — verdicts and objections` opens below once the revision commits are on `main`._
 
@@ -388,7 +388,7 @@ _Round 1 defence ends here. `## Round 2 — verdicts and objections` opens below
 
 ## Round 2 — verdicts and objections
 
-**Date:** 2026-09-30 · **Revised plan attacked:** `main` at `8c39191` (the revision commits `59d0d99` … `6a7c567`, changelog `96714c1`, `docs.yml` at `7592321`), diffed file by file against `7663b6a`; `## Round 1 — defence` §D.0–D.3 and `docs/plan/changelog.md` read in full; a stale-reference sweep run over all ten plan files (`ff.live`, the `live` Skill, "34 tools", "13 Skills", "22.13", `busy_timeout=5000`, the pending file, "five packages", `prepare` as read-only, `LV-*`) — clean; every hit is a line that names the old state as history.
+**Date:** 2026-09-30 · **Revised plan attacked:** `main` at `00038db` (the revision commits `5af8a64` … `053bab7`, changelog `00038db`, `docs.yml` at `f330d7e`), diffed file by file against `c397ef5`; `## Round 1 — defence` §D.0–D.3 and `docs/plan/changelog.md` read in full; a stale-reference sweep run over all ten plan files (`ff.live`, the `live` Skill, "34 tools", "13 Skills", "22.13", `busy_timeout=5000`, the pending file, "five packages", `prepare` as read-only, `LV-*`) — clean; every hit is a line that names the old state as history.
 
 ### 2.0 Verdict table — round-1 objections
 
@@ -508,7 +508,7 @@ _Round 2 ends here. `## Round 2 — defence` follows below this line._
 
 ## Round 2 — defence
 
-**Date:** 2026-09-30 · Plan revision that answers this defence: the revision commits `docs(plan): round-2 revisions — …`, diffed against `8c39191`.
+**Date:** 2026-09-30 · Plan revision that answers this defence: the revision commits `docs(plan): round-2 revisions — …`, diffed against `00038db`.
 
 Verdict-table acknowledgement: 22 conceded-by-defence, 1 withdrawn, 0 pressed — accepted. The changelog's summary line is wrong as round 2 says (18 concede + 4 concede-modified + 1 justified); the revisions correct it.
 
@@ -517,7 +517,7 @@ Verdict-table acknowledgement: 22 conceded-by-defence, 1 withdrawn, 0 pressed �
 | Fact | Source | Effect |
 |---|---|---|
 | The 2026-07-28 `DiscoverResult` carries `instructions`: "Optional natural-language guidance for LLMs on how to use this server effectively"; `server/discover` is **optional for clients** to call; legacy clients receive `instructions` in the `initialize` result the SDK's dual-era serving answers | modelcontextprotocol.io/specification/2026-07-28/server/discover (fetched before ruling) | OBJ-28's move is sound; **whether a given client surfaces `instructions` to the model is [U] per client**, so the per-tool pointer and the Skills' own rule remain |
-| `docs`/`secrets` green on `8c39191` and on every intermediate revision push | GitHub Actions runs | the round-1 `docs.yml` change holds |
+| `docs`/`secrets` green on `00038db` and on every intermediate revision push | GitHub Actions runs | the round-1 `docs.yml` change holds |
 
 ### D.1 Rulings
 
@@ -550,7 +550,7 @@ Plan 04 §2's pin-time rule gains the maintenance criterion verbatim: "…and th
 
 ### D.3 What round 3 should check
 
-Diff against `8c39191`: the per-source dataset files (no main-store dataset writes anywhere — including plan 06's jobs and plan 03's lifecycle), the session-condition rewrite of plan 02 with the re-audit, the instructions-field move with its [U] fallback, the D0 paragraph's two ends of L and the 1a-minimum cut, and the corrected changelog counts. If nothing structural remains, write `## Closing verdict`.
+Diff against `00038db`: the per-source dataset files (no main-store dataset writes anywhere — including plan 06's jobs and plan 03's lifecycle), the session-condition rewrite of plan 02 with the re-audit, the instructions-field move with its [U] fallback, the D0 paragraph's two ends of L and the 1a-minimum cut, and the corrected changelog counts. If nothing structural remains, write `## Closing verdict`.
 
 _Round 2 defence ends here. `## Round 3 — verdicts and closing` opens once the round-2 revisions are on `main`._
 
@@ -558,7 +558,7 @@ _Round 2 defence ends here. `## Round 3 — verdicts and closing` opens once the
 
 ## Round 3 — verdicts and closing
 
-**Date:** 2026-09-30 · **Revised plan attacked:** `main` at `b904a6f` (the revision commits `c8a7696` … `9e265fe`, D.2 commits `2a03b87`/`c61a284`, changelog `f7906db`, sweep `295dfc0`), diffed file by file against `8c39191`; `## Round 2 — defence` §D.0–D.3 and `docs/plan/changelog.md` § Round 2 read in full. Independent checks this round: the 2026-07-28 `server/discover` page (fetched) — `DiscoverResult.instructions` is "Optional natural-language guidance for LLMs on how to use this server effectively" and "Calling `server/discover` is optional for clients"; the defence's §D.0 is accurate. A sweep of plans 01–10 for leftover client-set wording (`no-OS-access`, `OS-access client`, `client set`, `Claude Code only`, `yields nothing`) and staging/row-copy wording (`staging table`, `staging database`, `swaps the ds_* contents`, `millisecond-class transaction`) — clean; every hit is marked as history. `.gitignore` carries `*league.yaml` **and** `!fixtures/manual/*.yaml`; `git check-ignore -v fixtures/manual/league.yaml` matches the negation, so the placeholder fixture is committable.
+**Date:** 2026-09-30 · **Revised plan attacked:** `main` at `65e5483` (the revision commits `5e31954` … `8ef38a5`, D.2 commits `5d05e68`/`eb0bad8`, changelog `9aae026`, sweep `65e5483`), diffed file by file against `00038db`; `## Round 2 — defence` §D.0–D.3 and `docs/plan/changelog.md` § Round 2 read in full. Independent checks this round: the 2026-07-28 `server/discover` page (fetched) — `DiscoverResult.instructions` is "Optional natural-language guidance for LLMs on how to use this server effectively" and "Calling `server/discover` is optional for clients"; the defence's §D.0 is accurate. A sweep of plans 01–10 for leftover client-set wording (`no-OS-access`, `OS-access client`, `client set`, `Claude Code only`, `yields nothing`) and staging/row-copy wording (`staging table`, `staging database`, `swaps the ds_* contents`, `millisecond-class transaction`) — clean; every hit is marked as history. `.gitignore` carries `*league.yaml` **and** `!fixtures/manual/*.yaml`; `git check-ignore -v fixtures/manual/league.yaml` matches the negation, so the placeholder fixture is committable.
 
 ### 3.0 Verdict table — round-2 objections
 
@@ -566,7 +566,7 @@ _Round 2 defence ends here. `## Round 3 — verdicts and closing` opens once the
 |---|---|---|---|
 | OBJ-24 | significant | **conceded-by-defence** | The unit is now the session everywhere: plan 02 header, §0 rule ("names the session condition"), S3/S5/S6/S12 (+ A-11), §1 diagram + boundary paragraph + T7, §3.3, §3.4, §4.2 column headers and cells, §6.5, §7, §8 #2/#5/#16; plan 01 D11; plan 03 #13 (sibling-server heuristic, stated as a heuristic); plan 05 §4.3 two-entry config fixture; plan 09 §6 Desktop row + README sentence; plan 10 §3.4 (b), W10. Chad's own multi-server setup is named as the motivating case. The false-negative (reach obtained outside MCP) is stated in §8 #2 rather than hidden. |
 | OBJ-25 | significant (Phase W-gated) | **conceded-by-defence** | "So a `Bash` `cat` yields nothing" is gone (sweep confirms); S3, §3.3, §8 #5, plan 01 §11, plan 10 §3.4 (a) and W10 now say what Keychain buys (off-disk, out of backups) and what it does not (a hurdle — `node -e` — never a proof); the signed helper is **W11**, priced and relied on by no sentence. Exactly the bar round 2 set. |
-| OBJ-26 | significant (staked) | **conceded-by-defence** | HANDOFF's `▶ NEXT STEP` now leads with "submit the Yahoo application now" ahead of the plan review and states why it is outside the no-development decision; Ph7 reads "starts on plan approval and does not wait for Yahoo" (the §3.1 intro leftover was caught in `295dfc0`); Ph8 and §5 D0 say "submit now"; Z4 is "the record, not the act"; the D0 paragraph carries both ends of L with correct arithmetic (approval week 5 → 1a week 9–13 → 1b +1–3 weeks; pessimistic end = playoffs-only even with an immediate grant) and names the **1a-minimum** cut with its own exit-gate subset (§3.1a). The one thing the plan cannot do — submit the form — is Chad's, and the text now puts it in front of him first. |
+| OBJ-26 | significant (staked) | **conceded-by-defence** | HANDOFF's `▶ NEXT STEP` now leads with "submit the Yahoo application now" ahead of the plan review and states why it is outside the no-development decision; Ph7 reads "starts on plan approval and does not wait for Yahoo" (the §3.1 intro leftover was caught in `65e5483`); Ph8 and §5 D0 say "submit now"; Z4 is "the record, not the act"; the D0 paragraph carries both ends of L with correct arithmetic (approval week 5 → 1a week 9–13 → 1b +1–3 weeks; pessimistic end = playoffs-only even with an immediate grant) and names the **1a-minimum** cut with its own exit-gate subset (§3.1a). The one thing the plan cannot do — submit the form — is Chad's, and the text now puts it in front of him first. |
 | OBJ-27 | significant | **conceded-by-defence** | Per-source dataset files `<cache>/ds/<source>.sqlite` (`journal_mode=DELETE`), written fresh, `fsync`, atomic `rename()`; the server attaches read-only and re-attaches on `refresh_log.file_version` or a `stat`; **the main store never receives a dataset write** — plan 01 D4/D8/§1/§5.1/§5.2/§5.3/§5.5/§5.6/§7, plan 02 §1 DB node, plan 03 L9/§1.1/§1.2/§5 #8/§7/§8, plan 04 `db.ts`, plan 05 `store` + `sources/*` rows (in-flight query completes on the old inode; statement trace shows zero `ds_*` DML on main; sizes named), plan 06 J3/§1.2/§2 and the crosswalk/prune/backup/news rows, plan 10 A4a. The derived tables (crosswalk delta, `league_settings`, `points_cache`) stay under OBJ-11's rules. This is the layout round 2 asked for. |
 | OBJ-28 | significant | **conceded-by-defence** (the modification is correct) | Ceilings `core` ≤ 20 000 chars (≈ 5k tokens), `full` ≤ 35 000, Skills ≤ 4 500, **downward-only** with the "shrink a schema or move to `full`" rule (plan 07 §5.1/[A-4], plan 10 §2 row/A-6, A6); the §6.3 sentence served once in `instructions` (C13; plan 01 §3.1; plan 02 §6.3 "where it is served"; A-12) with the pointer in every description and `smoke`/`check:skills` asserting exactly-once + pointer; tokens reported alongside chars. The modification — the pointer is the guarantee, the resource and Skill copies are the [U]-proof carriers, `instructions` is the economy — follows from a fact re-verified independently this round: clients need not call `server/discover`. Better than the bar set. |
 | OBJ-29 | marginal | **conceded-by-defence** | E5 manual mode ranks the nflverse K/DEF universe with `availability: "unknown"`, nulls `competition`/`bid`/`drop`, fixed `warnings[]` line; Ph9 and the D0 paragraph list what X1 keeps / loses / costs; `<config>/league.yaml` (0600) in plan 01 §8, plan 03 §3/§5 #4/§8, plan 09 `onboard` manual mode (refuses a checkout path), plan 10 §3.1a; `.gitignore` with the fixture exception (verified); A-12 names the weekly re-edit; the game-day branch under X1 says it has no availability source. |
