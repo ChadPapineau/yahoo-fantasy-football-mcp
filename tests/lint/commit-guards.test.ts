@@ -1,7 +1,8 @@
 // commit-guards.test.ts — the two local commit paths (.githooks/pre-commit for a plain `git commit`,
-// scripts/dev/commit-paths.sh for agents) must scan EVERY staged blob whatever its name or previous
-// type (QA-1-088), and must refuse an author/committer address that is not a no-reply or reserved
-// placeholder (QA-1-095): CLAUDE.md Security — never commit a credential, token or email address.
+// scripts/dev/commit-paths.sh for explicit-path commits) must scan EVERY staged blob whatever its
+// name or previous type (QA-1-088), and must refuse an author/committer address that is not a
+// no-reply or reserved placeholder (QA-1-095): CONTRIBUTING.md Security — never commit a
+// credential, token or email address.
 // Each test builds a throwaway repository (and a bare `origin` for commit-paths.sh) in a temp dir,
 // with git's global/system config isolated, so nothing here touches the real clone or its config.
 import { spawnSync } from "node:child_process";

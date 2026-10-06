@@ -151,7 +151,7 @@ export type StatsQuery =
  * not import src/mcp, so it throws Errors carrying `ffCode` — e.g. LeagueFileError). Every read
  * resolves to `Stamped<T>`; a type test pins that no read returns a bare value.
  *
- * Identifier obligation (CLAUDE.md security; critic C-23b): on every load, an implementation
+ * Identifier obligation (CONTRIBUTING.md Security; critic C-23b): on every load, an implementation
  * registers the operator's identifying strings — league name, team names, manager names, and a
  * user-chosen `manual.l.<slug>` — with the logger's `registerSecret("identifier", …)` BEFORE any of
  * them can reach a log line, so debug fields and echoed arguments are redacted.

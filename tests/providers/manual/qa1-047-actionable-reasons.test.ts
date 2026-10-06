@@ -1,4 +1,4 @@
-// qa1-047-actionable-reasons.test.ts — Stage C QA round 1 regression: QA-1-047 the reasons for common copied spellings are actionable and still value-free (plan 02
+// qa1-047-actionable-reasons.test.ts — QA round 1 regression: QA-1-047 the reasons for common copied spellings are actionable and still value-free (plan 02
 // §5; plan 03 doctor "a path and a reason"; critic C-13b).
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NFL_TEAMS } from "../../../src/config/schema.js";

@@ -1,4 +1,4 @@
-// lineup.test.ts — E2 (plan 07 E2/C11; plan 10 A7 (c)/(e)): the properties the brief names —
+// lineup.test.ts — E2 (plan 07 E2/C11; plan 10 A7 (c)/(e)): the required properties —
 // lineups always legal, locked players never moved, with `mean` a strictly higher projection never
 // sits behind a lower one in the same eligible slot set, deterministic, ΔP(win) never a bare number
 // under position_cv, mode = sign(μ_m − μ_o) — plus pwin/blend, option value, conditionals, stacks,

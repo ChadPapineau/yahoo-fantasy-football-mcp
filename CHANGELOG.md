@@ -34,6 +34,9 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
   - CI: `process` (ubuntu on every push; macOS weekly/on demand), `smoke` (the MCP Inspector CLI
     pinned to 2.8.0 plus `npm run smoke`), and the `docs` → `skills` job; package scripts
     `test:process`, `test:all`, `smoke`, `build:skills`, `check:skills`.
+- `CONTRIBUTING.md`: the rules every change follows — security (no secrets, identifiers or
+  machine-derived commit emails), the two commit paths, the one-checkout and heavy-job workflow,
+  tests and docs with every change.
 
 ### Fixed
 
@@ -80,8 +83,8 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
     scan of what `npm pack` would ship. Each one has a test proving it fails on bad input.
   - `ci.yml`: lint, typecheck, test (with coverage gate), supply-chain and pack jobs on every
     push and pull request, actions pinned by commit SHA, read-only permissions.
-- The shared contract layer every module codes against (Stage A, adversarially critiqued — 46
-  issues, 44 applied): the `FantasyPlatform` seam and its types (`src/providers/platform.ts`,
+- The shared contract layer every module codes against (foundation stage, adversarially reviewed —
+  46 issues, 44 applied): the `FantasyPlatform` seam and its types (`src/providers/platform.ts`,
   `src/domain/league/types.ts`), the `DataSource` contract publishing immutable per-source dataset
   files (`src/sources/source.ts`), scoring, analytics, reclog, crosswalk and store types, a
   deterministic `Clock`/seeded `Rng` (`src/domain/clock.ts`), the output envelope with

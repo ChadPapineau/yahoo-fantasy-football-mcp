@@ -9,8 +9,8 @@ package-lock.json
 # Self-test fixtures are byte-exact on purpose (their checkers assert exact verdicts).
 scripts/docs-check-selftest/
 scripts/gitleaks-selftest/
-# Pre-existing docs-phase tooling, written before prettier existed and owned by other agents;
-# reformatting it is its owners' call (a whole-file reformat would churn review diffs).
+# Pre-existing docs-phase tooling, written before prettier existed; it is left unformatted on
+# purpose (a whole-file reformat would churn review diffs).
 scripts/check-links.mjs
 scripts/check-mermaid.mjs
 scripts/dev/

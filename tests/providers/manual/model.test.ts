@@ -1,7 +1,7 @@
 // model.test.ts — the pieces under ManualLeagueProvider: scoring presets → ScoringSettings (plan 08
 // §2/§4.1), player keys (manualPlayerKeyFor + the deterministic name key; critic C-13), value-free
 // issue formatting, and identifier registration → redaction in a captured log line (plan 01 §8
-// identifier obligation; CLAUDE.md security).
+// identifier obligation; CONTRIBUTING.md Security).
 import fc from "fast-check";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createLogger } from "../../../src/cli/log.js";

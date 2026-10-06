@@ -1,6 +1,6 @@
 #!/bin/zsh
 # commit-paths.sh — commit EXPLICIT owned paths on the current build branch and push it,
-# without touching the shared index or any other agent's uncommitted work.
+# without touching the shared index or anyone else's uncommitted work in the same checkout.
 #
 # Usage (any cwd):  scripts/dev/commit-paths.sh "<conventional commit message>" <path>...
 #   <path> may be a file or a directory you own; additions, edits and deletions under it
@@ -84,5 +84,5 @@ for attempt in 1 2 3 4; do
   print -u2 "commit-paths: push attempt $attempt failed: $(tail -1 "$ERR")"
   sleep $((attempt * 3))
 done
-print -u2 "commit-paths: committed locally but the push failed — report this; the orchestrator will push"
+print -u2 "commit-paths: committed locally but the push failed — fix the cause, then run: git push origin $branch"
 exit 5

@@ -157,7 +157,7 @@ function absOption(io: CliIo, v: string | undefined, name: string): string | und
   }
 }
 
-/** The `serve` handler's contract (src/cli/serve.ts, owned by the MCP engineer). */
+/** The `serve` handler's contract (implemented in src/cli/serve.ts). */
 export type ServeFn = (opts: {
   argv: readonly string[];
   env: Readonly<Record<string, string | undefined>>;

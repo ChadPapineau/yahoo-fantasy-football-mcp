@@ -1,6 +1,6 @@
 # 04 — Repository structure and CI
 
-**Author:** `architecture-planner-core` · **Date:** 2026-09-29 · **Brief:** `docs/scratch/briefs/architecture-planner-core.md`
+**Part of:** the structural plan (01–06) · **Date:** 2026-09-29
 **Inputs:** plans 01–03 (module map, supply-chain controls, doctor); `docs/HANDOFF.md` (public repo, no identifiers, no branch protection today); `docs/research/02-prior-art-lessons.md` §4 #8–#12; the mcp-builder `node_mcp_server.md` project-structure and tsconfig guidance (adapted, not copied — it targets SDK v1 and Node 16 module resolution); TypeScript SDK v2 README (`zod/v4`, Node ≥ 20 [V-npm]). Legend as in plan 01.
 **Yahoo-dependency:** **`none`** — repo layout and CI need no Yahoo access; the `secrets` rules only *scan* for Yahoo credential and key shapes; fixtures are recorded elsewhere (plan 05 §3.1). *(tag added round 1, D.2 item 1: what survives a Yahoo denial is visible at a glance.)*
 
@@ -16,10 +16,10 @@
 | R4 | **Conventional Commits, checked by a 30-line script in CI** (PR title + every commit on the PR) | changelog and release notes derive from it; a `commitlint` install brings ~100 transitive dev packages for a regex | commitlint | Nothing |
 | R5 | **CI on every push and PR: ubuntu, Node 24 only** (25 is added to the matrix when it becomes LTS); macOS job weekly and on release only *(revised round 1, OBJ-09: was a 22 + 24 matrix)* | Linux minutes are cheap and cover everything but launchd/`osascript`; macOS covers those on a cadence; testing on 22 would test a `node:sqlite` API the maintainers may still change and admit a floor the product rejects | macOS on every push; a 22 + 24 matrix | a macOS-only bug slipping through more than once; Node 25 LTS |
 | R6 | **Secret scanning = gitleaks** (pinned action) with repo-specific rules for Yahoo credential shapes **and** Yahoo league/team keys | single binary, no runtime, custom TOML rules, scans history; the two leaked prior-art repos would have been caught [V-01 #1, #7]; league ids are identifiers this public repo must not carry [V-HANDOFF] | trufflehog (heavier, verification calls out); GitHub push protection alone (secret shapes only, no custom "identifier" rules) | Nothing — both can coexist; push protection should also be turned on |
-| R7 | **Mermaid validation with `@mermaid-js/mermaid-cli` pinned — and its `puppeteer` peer pinned beside it, Chrome installed explicitly, `--ignore-scripts=false` on `npx` — run only when `docs/**` changes** *(revised round 1, OBJ-12: the project `.npmrc`'s `ignore-scripts=true` would otherwise skip puppeteer's Chrome-downloading postinstall, §4.2)* | it is the reference renderer (what GitHub's renderer agrees with most closely); the docs are the plan, and a diagram that does not render is a failed deliverable (brief) | `@mermaid-js/parser` (covers a subset of diagram types); a third-party Mermaid action (one more supply-chain item) | a lighter parser covering flowchart, sequence, and state diagrams |
-| R8 | **Release = tag `vX.Y.Z` → CI builds, tests, checks CHANGELOG, `npm pack --dry-run`, scans the tarball for identifiers, publishes a GitHub Release with the tarball**; npm publish is manual by Chad with `--provenance` (deferred) | no agent publishes anything (docs/15 rule); the tarball scan is the last line against shipping a fixture with a real id | automated `npm publish` from CI | Chad deciding to publish to npm at all |
-| R9 | **Branch protection on `main` via a ruleset: no force-push, no deletion, linear history, secret-scanning push protection (already on) — and no required status checks** until PRs are required when product code lands; the docs-phase substitute is the `ci-vigilance` obligation (§5) *(revised round 1, OBJ-13: the earlier row required `docs`/`secrets` checks on direct pushes)* | the agent program pushes directly to `main` today (HANDOFF); requiring PRs now would break it. Required checks would break it too: GitHub's rule is "After all required status checks pass, any commits must either be pushed to another branch and then merged or pushed directly to the protected branch" [V-web docs.github.com about-protected-branches, 2026-09-30 — log §1.0], so a commit that has not run the checks anywhere is **rejected** on a direct push — exactly at a usage cutoff, when "push before teardown" matters most; and `docs.yml` is path-filtered, so a required check that does not run would block the push as well. `ci-bootstrap` reached the same conclusion independently (HANDOFF 2b) | require PRs + review now; required checks without PRs (the earlier draft) | the moment product code exists: require PRs with CI green; Chad (admin) merges without review — solo maintainer |
-| R10 | **Coverage gate lives in CI, never lowered to pass** — value and rationale in plan 05 §7 | SOTARA's standing rule, carried over | — | — |
+| R7 | **Mermaid validation with `@mermaid-js/mermaid-cli` pinned — and its `puppeteer` peer pinned beside it, Chrome installed explicitly, `--ignore-scripts=false` on `npx` — run only when `docs/**` changes** *(revised round 1, OBJ-12: the project `.npmrc`'s `ignore-scripts=true` would otherwise skip puppeteer's Chrome-downloading postinstall, §4.2)* | it is the reference renderer (what GitHub's renderer agrees with most closely); the docs are the plan, and a diagram that does not render is a failed deliverable | `@mermaid-js/parser` (covers a subset of diagram types); a third-party Mermaid action (one more supply-chain item) | a lighter parser covering flowchart, sequence, and state diagrams |
+| R8 | **Release = tag `vX.Y.Z` → CI builds, tests, checks CHANGELOG, `npm pack --dry-run`, scans the tarball for identifiers, publishes a GitHub Release with the tarball**; npm publish is manual by Chad with `--provenance` (deferred) | publishing is the owner's decision and never automated; the tarball scan is the last line against shipping a fixture with a real id | automated `npm publish` from CI | Chad deciding to publish to npm at all |
+| R9 | **Branch protection on `main` via a ruleset: no force-push, no deletion, linear history, secret-scanning push protection (already on) — and no required status checks** until PRs are required when product code lands; the docs-phase substitute is the CI-vigilance obligation (§5) *(revised round 1, OBJ-13: the earlier row required `docs`/`secrets` checks on direct pushes)* | commits are pushed directly to `main` today (HANDOFF); requiring PRs now would break that. Required checks would break that too: GitHub's rule is "After all required status checks pass, any commits must either be pushed to another branch and then merged or pushed directly to the protected branch" [V-web docs.github.com about-protected-branches, 2026-09-30 — log §1.0], so a commit that has not run the checks anywhere is **rejected** on a direct push; and `docs.yml` is path-filtered, so a required check that does not run would block the push as well. The CI setup work reached the same conclusion independently (HANDOFF 2b) | require PRs + review now; required checks without PRs (the earlier draft) | the moment product code exists: require PRs with CI green; Chad (admin) merges without review — solo maintainer |
+| R10 | **Coverage gate lives in CI, never lowered to pass** — value and rationale in plan 05 §7 | a standing testing rule (plan 05 intro) | — | — |
 | R11 | **The runtime allow-list is the full `npm ls --omit=dev --all` tree with its count, diffed at every depth in CI; at pin time prefer the smaller tree — if that line is maintained (a release in the last 6 months or the maintainer's declared LTS); otherwise the current line, count recorded** (§2, §4.1) *(added round 1, OBJ-14; maintenance criterion round 2, OBJ-30)* | a `--depth=0` list undercounted the tree by more than half (`fast-xml-parser` 5.x alone adds six packages) and could never see a transitive addition; a smaller tree that no longer receives fixes is research 02 §4 #9's dead-transitive-library mistake reintroduced deliberately | direct-dependency allow-list (the earlier draft) | Nothing |
 
 ---
@@ -38,10 +38,10 @@ yahoo-fantasy-football-mcp/
 ├── .gitleaks.toml               # custom rules (§4.3)
 ├── .gitignore                   # exists today; round 2 (OBJ-29) added `*league.yaml` + `!fixtures/manual/*.yaml` — the real manual-league file lives in <config>/, never here
 ├── .env.example                 # exists today — untouched by this plan
-├── README.md                    # docs-writer's file (attribution + logo live here)
+├── README.md                    # public summary (attribution + logo live here)
 ├── CHANGELOG.md                 # Keep a Changelog; CI checks a tag has an entry
 ├── LICENSE                      # to be recommended in the docs phase (HANDOFF item 3)
-├── SECURITY.md                  # docs-writer's file
+├── SECURITY.md                  # security policy
 ├── .claude-plugin/              # T3 (round 1), only if plan 10 D3 = yes (default yes): plugin.json, marketplace.json
 ├── .mcp.json                    # T3/T7: the plugin-scoped server entry — ${CLAUDE_PLUGIN_ROOT}/dist/cli.js, FF_CONFIG_DIR=${CLAUDE_PLUGIN_DATA}; variables only, no secrets, no absolute user paths
 ├── src/
@@ -57,13 +57,13 @@ yahoo-fantasy-football-mcp/
 │   │   ├── envelope.ts          # meta/attribution/untrusted_text/page/truncation
 │   │   ├── errors.ts            # error-code table (plan 01 §4.3)
 │   │   ├── bounds.ts            # numeric/string bounds (plan 02 §5)
-│   │   ├── tools/               # one file per tool family (product planner fills)
+│   │   ├── tools/               # one file per tool family (plan 07 fills)
 │   │   ├── resources/
 │   │   └── prompts/
 │   ├── domain/                  # pure
 │   │   ├── league/              # league model, slots, rules predicates
 │   │   ├── scoring/             # engine (05 §15) + stat canonical names
-│   │   ├── analytics/           # projections, start/sit, waivers … (product planner)
+│   │   ├── analytics/           # projections, start/sit, waivers … (plans 07–08)
 │   │   ├── crosswalk/           # matcher (04 §D), overrides loader
 │   │   ├── gate/                # PreparedWrite, ticket, precondition, channels (plan 02 §4)
 │   │   └── reclog/              # recommendation log (05 §12)
@@ -115,11 +115,11 @@ yahoo-fantasy-football-mcp/
 │   ├── nflverse/                # tiny parquet/csv.gz excerpts (≤ 50 rows) for schema tests
 │   ├── news/                    # RSS samples incl. injection attempts
 │   └── golden/                  # scoring-engine expected outputs
-├── skills/                      # the Skills bundle (product planner / skills researcher own content)
+├── skills/                      # the Skills bundle (content: plan 09, research 06)
 │   └── <skill-name>/SKILL.md (+ resources/)
 ├── scripts/                     # zero-token tooling (plan 06): record-fixture, scrub, gen-config-docs,
 │   │                            # check-commits, check-licenses, check-no-scripts, check-mermaid, check-skills, scan-tarball
-├── docs/                        # research/, plan/, scratch/, HANDOFF.md (as today)
+├── docs/                        # research/, plan/, HANDOFF.md (as today)
 └── .github/
     ├── workflows/ci.yml · docs.yml · release.yml · scheduled.yml
     ├── dependabot.yml           # security updates only
@@ -169,11 +169,11 @@ That is it: **four direct runtime packages** (`@modelcontextprotocol/server`, `z
 
 `noUncheckedIndexedAccess` is the one that matters for this codebase: Yahoo collections and parquet rows are index-accessed everywhere, and 03 §B.6's shape traps are exactly "index 1 may not exist".
 
-**ESLint (flat):** `typescript-eslint` `strictTypeChecked` + `stylisticTypeChecked`; `@typescript-eslint/no-explicit-any: error` (an inline `// eslint-disable-next-line … -- reason` is the only escape, as in SOTARA); `@typescript-eslint/no-floating-promises: error`; `no-console: error` with an override allowing it under `src/cli/**`; **import boundaries** via `import-x/no-restricted-paths` zones mirroring plan 01 §1.1 (e.g. `src/domain/**` may not import `src/providers/**`, `src/sources/**`, `src/store/**`, `src/mcp/**`, `@modelcontextprotocol/*`; `src/mcp/**` may not import `src/store/**` or `node:fs`); `no-restricted-imports` bans `child_process`'s `exec`/`execSync` (argument-array `execFile` only) and `eval`.
+**ESLint (flat):** `typescript-eslint` `strictTypeChecked` + `stylisticTypeChecked`; `@typescript-eslint/no-explicit-any: error` (an inline `// eslint-disable-next-line … -- reason` is the only escape); `@typescript-eslint/no-floating-promises: error`; `no-console: error` with an override allowing it under `src/cli/**`; **import boundaries** via `import-x/no-restricted-paths` zones mirroring plan 01 §1.1 (e.g. `src/domain/**` may not import `src/providers/**`, `src/sources/**`, `src/store/**`, `src/mcp/**`, `@modelcontextprotocol/*`; `src/mcp/**` may not import `src/store/**` or `node:fs`); `no-restricted-imports` bans `child_process`'s `exec`/`execSync` (argument-array `execFile` only) and `eval`.
 
 **Prettier** for format; `format:check` in CI. **EditorConfig** for the rest.
 
-**Commits:** Conventional Commits (`feat|fix|docs|test|chore|refactor|perf|ci|build(scope): subject`), `scripts/check-commits.ts` validates every commit on a PR and the PR title; `Co-Authored-By` trailers allowed. Roadmap-ID references are not required (this repo has no roadmap ids; the SOTARA convention does not transfer).
+**Commits:** Conventional Commits (`feat|fix|docs|test|chore|refactor|perf|ci|build(scope): subject`), `scripts/check-commits.ts` validates every commit on a PR and the PR title. Roadmap-ID references are not required (this repo has no roadmap ids).
 
 ---
 
@@ -232,16 +232,18 @@ Build → full `ci.yml` jobs → `scripts/check-changelog.ts` (the tag's version
 
 ## 5. Branch protection recommendation for `main`
 
-Today: public, no protection, no rulesets [V-HANDOFF item 1]. Recommended ruleset (Chad applies it; agents do not touch repo settings):
+Today: public, no protection, no rulesets [V-HANDOFF item 1]. Recommended ruleset (Chad applies it; nothing automated touches repo settings):
 
 | Now (docs phase) *(revised round 1, OBJ-13)* | When product code lands |
 |---|---|
 | Block force-pushes and deletion of `main`; require linear history | same |
-| **No required status checks.** GitHub rejects a direct push of a commit that has not passed the required checks somewhere (R9), which would break every agent's "commit and push before teardown" at the moment it exists for. The substitute is the **`ci-vigilance` obligation**: every agent that pushes verifies its push's `docs` and `secrets` runs (`gh run list --branch main`, `gh run watch <id> --exit-status`) and fixes or reverts a red `main` **before replying**; a red `main` is never left standing, and success reported with a red or unverified run is a failed report | Require a PR; required checks: all `ci.yml` jobs; linear history; conversation resolution; **no required reviewers** (solo maintainer); admins bypass allowed for Chad only |
+| **No required status checks.** GitHub rejects a direct push of a commit that has not passed the required checks somewhere (R9), which would refuse every direct push of a fresh commit. The substitute is the **CI-vigilance obligation**: whoever pushes verifies the push's `docs` and `secrets` runs (`gh run list --branch main`, `gh run watch <id> --exit-status`) and fixes or reverts a red `main` **before moving on**; a red `main` is never left standing, and a change reported done with a red or unverified run is not done | Require a PR; required checks: all `ci.yml` jobs; linear history; conversation resolution; **no required reviewers** (solo maintainer); admins bypass allowed for Chad only |
 | Secret-scanning push protection (already enabled — HANDOFF 2b) | same |
 | Dependabot security updates only | same; version updates monthly, grouped |
 
-Chad's exact `gh api` command for the ruleset is in `docs/scratch/ci-bootstrap.md` § "For Chad" (agents do not touch repo settings).
+The "Now" column is one repository ruleset on the default branch with the rule types `deletion`, `non_fast_forward` and `required_linear_history`, created with `gh api -X POST repos/<owner>/<repo>/rulesets`; Chad applies it (nothing automated touches repo settings). Its target is `~DEFAULT_BRANCH`; `bypass_actors` is `[]` on purpose, so nobody, admin included, can force-push `main` without first editing the ruleset (the escape-hatch alternative is a repository-admin bypass: `actor_id` 5, `actor_type` `RepositoryRole`, `bypass_mode` `always`); `enforcement` is `active` (`evaluate`, the dry run, is documented as an Enterprise feature), and if a legitimate push is ever rejected the ruleset is switched off with `gh api -X PATCH repos/<owner>/<repo>/rulesets/<id> -f enforcement=disabled`.
+
+When product code lands, the same ruleset is replaced (`gh api -X PUT …/rulesets/<id>`) with the right-hand column: add `pull_request` (0 required approvals, conversation resolution) and `required_status_checks` (strict: the branch must be up to date with `main`), with an admin bypass. The check contexts are the job names GitHub records, not `docs / mermaid`: `mermaid`, `links`, `secrets`, `secrets-selftest`, plus the `ci.yml` jobs (`integration_id` 15368 = GitHub Actions); `secrets-history` runs only on schedule and dispatch, so it is never a required check. Before requiring any `docs.yml` check, remove that workflow's `paths:` filters — a required check that does not run blocks the merge.
 
 ---
 
@@ -249,7 +251,7 @@ Chad's exact `gh api` command for the ruleset is in `docs/scratch/ci-bootstrap.m
 
 - README config table ← `src/config/schema.ts` (`scripts/gen-config-docs.ts`), checked in CI.
 - `ff print-config` output ← the same schema.
-- The tool reference in `docs/` ← `tools/list` output in fixture mode (`scripts/gen-tool-docs.ts`), so the docs cannot drift from the registry; `docs-writer` owns the prose around it.
+- The tool reference in `docs/` ← `tools/list` output in fixture mode (`scripts/gen-tool-docs.ts`), so the docs cannot drift from the registry; the prose around it is written by hand.
 
 ---
 
@@ -264,6 +266,6 @@ The tests inside each job (plan 05); the schedule and inputs of every zero-token
 |---|---|---|
 | ~~A-1~~ | ~~`fast-xml-parser` current major is 5.x and has the no-DTD default~~ — **resolved round 1**: 5.x is current (5.11.2 [V-npm 2026-09-30]) and its entity default is expansion **on**; the flags are set explicitly (plan 02 §5) and the §2 pin-time rule decides 4.x vs 5.x | closed |
 | A-2 | Skills frontmatter rules (`name`, `description` ≤ 1024) | `docs/research/06` |
-| A-3 | Yahoo app ids start with `dj0yJmk9` (= base64 of `v=2&i=`; derivation corrected round 1, OBJ-23 d) — stays [U] until checked | one real id, checked locally, never committed; the gitleaks rule is already live (`ci-bootstrap`), so a wrong prefix means a silent non-match, not a false positive |
+| A-3 | Yahoo app ids start with `dj0yJmk9` (= base64 of `v=2&i=`; derivation corrected round 1, OBJ-23 d) — stays [U] until checked | one real id, checked locally, never committed; the gitleaks rule is already live (`.gitleaks.toml`), so a wrong prefix means a silent non-match, not a false positive |
 | ~~A-4~~ | ~~GitHub rulesets can require passing checks on direct pushes to `main`~~ — **resolved round 1 (OBJ-13), and the answer is the problem**: they can, and an unchecked commit is then rejected on a direct push (docs.github.com, read 2026-09-30 — log §1.0); §5 therefore requires no checks in the docs phase | closed |
 | A-5 | `import-x/no-restricted-paths` expresses the plan 01 §1.1 zones | write the config; a boundary test imports the wrong module and expects a lint error |

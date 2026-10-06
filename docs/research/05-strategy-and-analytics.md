@@ -1,6 +1,5 @@
 # 05 — Strategy and analytics methodology
 
-Author: `fantasy-strategy-analyst` (wave 2). Brief: `docs/scratch/briefs/fantasy-strategy-analyst.md`.
 Companion docs: `03-yahoo-api.md` (what Yahoo exposes — read §B.4, §B.5, §E first) and
 `04-data-sources.md` (which source supplies each *kind* of data named here; written in parallel,
 so this document refers to data by kind only).
@@ -13,7 +12,7 @@ so this document refers to data by kind only).
 - Evidence markers on claims: **[V]** a cited page was fetched and says this; **[S]** only a
   search summary said it (never used for a number); **[F]** folk wisdom / community practice
   with no published evidence found — stated as such so the plan can treat it as a hypothesis.
-  The full source log with URLs and dates is in `docs/scratch/fantasy-strategy-analyst.md`.
+  The full source log with URLs and dates is the appendix at the end of this document.
 - **Nothing here is hard-coded to a format.** Three parameters appear everywhere:
   - `S` — the league's stat modifiers (`stat_modifiers.stats[] {stat_id, value}` plus any
     `bonuses[{target, points}]`), read from `league/{key}/settings` (03 §B.5).
@@ -930,7 +929,7 @@ if available); the §6 cascade state.
 **10.1 Structure every item.** Extract `{player, claim_type, direction, magnitude,
 source, time}` where `claim_type ∈ {availability, role/usage, health-detail, coaching
 intent ("will get more work"), transaction}`. Text is untrusted input to a classifier; it
-carries no authority of its own (the program's ground rule: news is data, not
+carries no authority of its own (the project's ground rule: news is data, not
 instructions).
 
 **10.2 Score the source and the claim type separately.** Maintain a per-source calibration
@@ -1196,7 +1195,7 @@ seasons under the league's `S`.
 
 ---
 
-## 14. Decision types the brief did not list (added)
+## 14. Decision types added beyond the initial list
 
 Each is small, but each has produced a bad recommendation in prior-art tools when missing:
 
@@ -1343,7 +1342,7 @@ scaled averages into a model and makes §12 possible. #13 last.
 17. **Scoring the product by outcomes** — regret and proper scoring rules only (§12).
 18. **Hard-coding stat ids, brackets, or rounding** — read them; verify against
     `player_points.total` (§15).
-19. **Acting on news text as if it were an instruction** — §10; the program ground rule.
+19. **Acting on news text as if it were an instruction** — §10; the project's ground rule.
 20. **Recommending something that cannot be executed before lock** — §14.
 
 ---
@@ -1392,3 +1391,41 @@ jump held two games" threshold [F]; post-return role residuals for backups [F].
    trades, Brier/CRPS/regret for the product itself. This makes a recommendation log with
    `log_id`, alternatives and `as_of` timestamps a first-class store, not an afterthought
    (§0 contract, §12).
+
+## Appendix — source log
+
+All fetched 2026-09-29. V = the page was fetched and says this; S = only a search-summary said it (not used for numbers).
+
+- V https://github.com/ffverse/ffopportunity — expected fantasy points = xgboost on nflverse pbp (2006–2020), "how many points the average player would score given the situation and opportunity".
+- V https://sumersports.com/the-zone/sticky-football-stats-predictive-nfl-metrics/ — since 2021, players w/ 100 key snaps in consecutive seasons: target share r≈0.70 (stickiest), YPRR r>0.60, QB EPA/att r≈0.60, RB EPA/rush "virtually negligible", RB TFL% ≈0.40.
+- V https://www.sharpfootballanalysis.com/fantasy/wide-receiver-stats-that-matter-fantasy-football-2024/ — 10 seasons, WR YoY R²: PPR pts/g 0.57, targets/g 0.54, rec yds/g 0.49, team target share 0.40, TPRR 0.39, air yds/target 0.38, YPRR 0.28, YAC/rec 0.14, catch% 0.11, yds/target 0.03, TD/target 0.008.
+- V https://www.4for4.com/2026/preseason/do-defenses-repeat-fantasy-football-performances — Eakins, 2015–2025, YoY correlation of fantasy points allowed: QB 0.27, RB 0.22, WR ≈0.15, TE 0.16; top-5 repeat 20–30%; "SOS shows weak predictive power across most positions"; use aFPA not raw.
+- V https://www.4for4.com/2014/preseason/learning-love-schedule-adjusted-fantasy-points-allowed-afpa and support FAQ — aFPA = fantasy points allowed adjusted for the opponents faced, rolling 10 weeks.
+- V https://www.pff.com/news/fantasy-football-quantifying-weathers-impact-on-fantasy-performance — Spratt 2018: wind 10+ mph QB comp% −1.8, YPA −0.30; <30°F comp% −3.1, RB YPC +0.26; light rain comp% −2.3, catch rate −2.3%; "apply as multipliers".
+- V https://www.4for4.com/2018/preseason/weather-effects-and-fantasy-football-part-1 — wind >13 mph: deep passes (>15 air yds) −6.2%, air yards −2.0 to −5.3% across weather; snow pass attempts −8.3%; RB targets +7.7% in bad weather; actual totals fell short of Vegas totals in rain/wind/snow.
+- V https://establishtherun.com/pass-rate-over-expectation/ — PROE = called pass rate − xpass; "a bit more stable" than game script; NO numbers given (claim is folk-level).
+- V https://underdognetwork.com/football/best-ball-research/weekly-variance-by-position-a-key-to-best-ball — half-PPR 2015–2021, weekly CV: QB 0.36–0.39, RB 0.54–0.63, WR 0.58–0.67, TE 0.63–0.70; SD ≈ 6.4–7.6 for top players.
+- V https://fantasyfootballanalytics.net/2014/07/weekly-variability-simulation.html — per-category weekly SDs (pass yds 82, pass TD 0.8, rush yds 11.3, rec yds 15.9, rec TD 0.4); normal-per-category simulation; commenters flag averaging across talent levels as a weakness.
+- V https://www.footballguys.com/article/bryant_vbd — Bryant VBD (1995): value = points above a baseline ("worst starter"); X-number sort.
+- V https://www.footballguys.com/article/stuart_expected_vbd_by_adp — Expected VBD truncates sub-baseline outcomes at 0; ADP 2000–2012 log-curve fits; RB steepest dropoff (−32.5), WR −24.8, DEF −2.5; top K <5 VBD.
+- V https://arxiv.org/abs/1604.01455 — Hunter, Vielma, Zaman 2016: lineups as jointly Gaussian; maximise mean s.t. variance lower bound and correlation cap; top-heavy payoffs want variance.
+- S https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3393127 — Haugh & Singal, "How to Play Fantasy Sports Strategically (and Win)" (403 on fetch; cite title only for the double-up-vs-top-heavy framing).
+- V https://www.rotowire.com/football/article/does-stacking-work-in-fantasy-football-what-four-years-of-data-say-about-drafting-correlated-players-2026-131409 — 2022–2025 full-PPR: QB–WR1 +0.31, QB–TE +0.27, QB–RB +0.07, same-team WR–WR −0.02; QB–WR stack ≈ +1.8 ceiling / −1.6 floor per week; season total unchanged.
+- V https://www.footballguys.com/article/2024-injury-index-chance-to-play-questionable-vs-doubtful — 2017–2023, >2,000 injuries: 71% of final-report Questionable played; team-specific usage differs.
+- V https://fantasyindex.com/2022/10/11/viva-murillo/the-limited-value-of-questionable — no numbers; "limited" is undefined (10–90% reps); rely on beat reports + contingency.
+- V https://www.4for4.com/2023/preseason/debunking-randomness-kickers-fantasy-football — 10+ pt kicker games more than doubled when implied total ≥27 vs ≤26; stream in redraft.
+- V https://subvertadown.com/article/components-contributing-to-kicker-predictability — FG volume + long FGs predictive; XPs highly predictable; missed kicks and "bad in the red zone" have little/no forward value.
+- S kicker dome 8.7 vs wind 7.7 ppg and "FG attempts negative out-of-sample R²" — search summary only; NOT used.
+- S https://www.scienceoffantasyfootball.com/... and RotoWire DST streaming — DST projection = points-allowed bracket from opponent implied total + 1/sack + 2/takeaway + ~0.6 league-average allowance for TDs/safeties/blocks; "points allowed most predictable, fumble recoveries least".
+- V https://www.fantasypros.com/2026/09/fantasy-football-trade-value-chart-week-2-2026/ (via search) — charts assume 1-for-1; 2-for-1 needs a 5–20% haircut on the multi-player side (sources disagree on size).
+- S https://www.thefantasyfootballers.com/analysis/fantasy-football-101-faab-strategies/ ; https://en.wikipedia.org/wiki/First-price_sealed-bid_auction — FAAB is a first-price sealed-bid auction → bid shading is rational.
+- S ESPN vacated-targets piece (DeVonta Smith TPRR 20%→30% without A.J. Brown) — example only; no published redistribution study found.
+- S handcuff strategy — no rigorous study found in this pass; treat as contested/folk.
+- V http://www.borischen.co/ — tiers = Gaussian mixture model over FantasyPros ECR.
+- V https://www.rotoviz.com/2013/11/zero-rb-antifragility-and-the-myth-of-value-based-drafting/ — Siegele 2013 Zero RB.
+- S JJ Zachariason late-round QB; PFF "Roster Maximization: the case for QB streaming" — QB replacement level is high in 1-QB leagues.
+- V https://sites.stat.washington.edu/raftery/Research/PDF/Gneiting2007jasa.pdf — strictly proper scoring rules; Brier; CRPS = integral of Brier over thresholds; decomposition into uncertainty/reliability/resolution.
+- V https://www.fantasypros.com/about/faq/football-inseason-accuracy-methodology/ — FantasyPros scores experts by |rank-slot expected points − actual|.
+- V https://www.actionnetwork.com/education/weighted-opportunity-rating-definition-... — WOPR = 1.5×target share + 0.7×air-yards share (Hermsmeyer).
+- Yahoo facts: `docs/research/03-yahoo-api.md` §B.2 (settings), §B.4 (no player projections; team_projected_points, win_probability), §B.5 (stat ids/modifiers, bonuses), §E (gaps).
+

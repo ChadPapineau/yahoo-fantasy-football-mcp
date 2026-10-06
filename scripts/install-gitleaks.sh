@@ -7,7 +7,7 @@
 # exists.
 #
 # CI only. It refuses to run anywhere but Linux x86_64 — nothing from this repo's CI is ever
-# installed on a developer machine (docs/scratch/briefs/ci-bootstrap.md, hard rules).
+# installed on a developer machine (scripts/README.md, rule 1).
 #
 # Usage: bash scripts/install-gitleaks.sh <dest-dir>   (adds <dest-dir> to GITHUB_PATH when present)
 set -euo pipefail

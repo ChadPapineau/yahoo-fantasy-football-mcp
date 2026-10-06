@@ -57,7 +57,7 @@ Four facts shape everything on this page, and the plan carries them openly:
 
 | Area | State | Evidence |
 |---|---|---|
-| Research pack (00–06) | ✅ complete, verified by the orchestrator | [`docs/research/`](docs/README.md) |
+| Research pack (00–06) | ✅ complete, each doc verified against at least one load-bearing claim at source | [`docs/research/`](docs/README.md) |
 | Refined plan (01–10) | ✅ complete, adversarially reviewed, **awaiting owner approval** | [`docs/plan/00-index.md`](docs/plan/00-index.md) |
 | Docs CI — every Mermaid block renders, every internal link resolves | ✅ live on every push | [`docs.yml`](.github/workflows/docs.yml) |
 | Secrets CI — gitleaks with Yahoo-specific rules, weekly full-history scan | ✅ live on every push | [`secrets.yml`](.github/workflows/secrets.yml), [`.gitleaks.toml`](.gitleaks.toml) |
@@ -834,7 +834,7 @@ The threat model ([plan 02 §8](docs/plan/02-security-architecture.md#8-threat-m
 
 ## Testing
 
-From [`docs/plan/05-testing-strategy.md`](docs/plan/05-testing-strategy.md). The standard: everything ships with tests, adversarial by default, the coverage gate is never lowered to pass, and a regression test counts only once it has been shown red against the un-fixed code (mutation-verified). Two lessons from the owner's other project shape it: *fake the native seam with its failure modes* (2,376 green tests once shipped a broken run because the fake modelled the API they wished for) and *test the property, not the value* (four of ten field findings were regressions from fixes that passed their own tests). 📋
+From [`docs/plan/05-testing-strategy.md`](docs/plan/05-testing-strategy.md). The standard: everything ships with tests, adversarial by default, the coverage gate is never lowered to pass, and a regression test counts only once it has been shown red against the un-fixed code (mutation-verified). Two lessons from earlier field experience shape it: *fake the native seam with its failure modes* (2,376 green tests once shipped a broken run because the fake modelled the API one wished for) and *test the property, not the value* (four of ten field findings were once regressions from fixes that passed their own tests). 📋
 
 | Level | Tool | In CI | Yahoo credentials | Model tokens |
 |---|---|---|---|---|
@@ -862,13 +862,15 @@ From [`docs/plan/05-testing-strategy.md`](docs/plan/05-testing-strategy.md). The
 
 The build has not started; contributions of the *plan* — a claim that is wrong, an assumption that can be verified, an objection the adversarial round missed — are welcome now as issues. Once code exists ([`docs/plan/04-repo-structure-and-ci.md`](docs/plan/04-repo-structure-and-ci.md)):
 
-- **Conventional Commits** (`feat|fix|docs|test|chore|refactor|perf|ci|build(scope): subject`), checked by a script on every PR commit and the PR title; `Co-Authored-By` trailers are fine.
+- **Conventional Commits** (`feat|fix|docs|test|chore|refactor|perf|ci|build(scope): subject`), checked by a script on every PR commit and the PR title.
 - **Stage explicit paths only** — never `git add -A`, `-u` or a directory. The PR template asks you to confirm it.
 - **No secrets, no identifiers, ever** — not a real client id, token, GUID, league or team key, e-mail, username or team name. The repository is public; the `secrets` workflow (gitleaks with Yahoo-specific rules) and GitHub push protection run on every push, and a weekly job scans the whole history.
 - **Fixtures are anonymised** through the scrubber; only the placeholder id range may appear.
 - **Everything ships with tests**; the coverage gate is untouched.
 - **Adding a runtime dependency** needs a row in plan 04 §2 with the reason and the rejected alternative, and it must pass the no-install-scripts, licence and full-tree allow-list checks.
 - **Docs move with the code:** the plan or research doc a change touches, `docs/HANDOFF.md` if status changed, `CHANGELOG.md` (Keep a Changelog) once it exists.
+
+The full working rules — security, commit identity, branches, the Node wrapper, tests — are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 **CI checks that gate a PR** (what exists today is marked):
 
@@ -883,7 +885,7 @@ The build has not started; contributions of the *plan* — a claim that is wrong
 | `ci.yml` → `supply-chain`, `pack` | A high/critical runtime advisory, an install script, a licence outside the allow-list, a package at any depth not on the allow-list; a tarball that carries fixtures, tests, `.env*`, `*.sqlite` or a key outside the placeholder range | 📋 |
 | `docs` → `skills`, `docs-current` | A Skill failing Lane 1; a generated README table or tool reference that differs from the code | 📋 |
 
-**Branch rules:** `main` gets a ruleset (no force-push, no deletion, linear history) and **no required status checks** during the docs phase — a required check would reject every direct push that has not run the check somewhere, which breaks the "push before you are torn down" rule the agent program runs on. The substitute is an obligation on every pusher: verify the push's `docs` and `secrets` runs and fix or revert a red `main` before reporting. When product code lands, PRs with all `ci.yml` jobs green become required (no required reviewers — solo maintainer).
+**Branch rules:** `main` gets a ruleset (no force-push, no deletion, linear history) and **no required status checks** during the docs phase — a required check would reject every direct push that has not run the check somewhere, and the docs phase pushes directly to `main`. The substitute is an obligation on every pusher: verify the push's `docs` and `secrets` runs and fix or revert a red `main` before reporting. When product code lands, PRs with all `ci.yml` jobs green become required (no required reviewers — solo maintainer).
 
 **Running the Skills evals** (📋): `npm run check:skills` runs Lane 1 with zero tokens (it is the `docs` → `skills` job); `npm run eval:skills` runs Lane 2 — the cases in each `skills/<name>/evals/cases.json` against the fixture league in `FF_FIXTURE_DIR`, with the Skill body as the system prompt — and writes the report to `docs/evals/<date>.md`. The 10-question read-only eval is `python scripts/evaluation.py -t stdio -c node -a dist/cli.js serve -e FF_FIXTURE_DIR=<abs path> -o docs/evals/<date>.md tests/evals/read-only.xml` (needs `pip install anthropic mcp` and an `ANTHROPIC_API_KEY`). Both consume tokens; run them before a release and after any tool-description or Skill change, never on every push.
 
@@ -891,7 +893,7 @@ The build has not started; contributions of the *plan* — a claim that is wrong
 
 ## Roadmap
 
-From [`docs/plan/10-phasing-and-acceptance.md`](docs/plan/10-phasing-and-acceptance.md). Effort: S ≈ days, M ≈ 1–3 weeks, L ≈ 4–8 weeks of one senior engineer with agents; **no dates**. Every acceptance criterion is a test, a CI job, a fixture assertion or a one-line manual check with named evidence; soft gates report a number and must not regress, hard gates block the tag. Phase 1 is split so the Yahoo-free half proceeds while the access application is pending; a **dated decision gate** (4 weeks after the application or NFL week 9, whichever is earlier) names the fallbacks instead of waiting indefinitely.
+From [`docs/plan/10-phasing-and-acceptance.md`](docs/plan/10-phasing-and-acceptance.md). Effort: S ≈ days, M ≈ 1–3 weeks, L ≈ 4–8 weeks of one senior engineer (tool-assisted); **no dates**. Every acceptance criterion is a test, a CI job, a fixture assertion or a one-line manual check with named evidence; soft gates report a number and must not regress, hard gates block the tag. Phase 1 is split so the Yahoo-free half proceeds while the access application is pending; a **dated decision gate** (4 weeks after the application or NFL week 9, whichever is earlier) names the fallbacks instead of waiting indefinitely.
 
 | Phase | Scope in one line | Effort | Exit gate (summary) | Status |
 |---|---|---|---|---|

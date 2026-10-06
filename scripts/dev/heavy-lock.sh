@@ -1,5 +1,5 @@
 #!/bin/zsh
-# heavy-lock.sh — run ONE heavy job at a time across every agent on this Mac.
+# heavy-lock.sh — run ONE heavy job at a time across every process on this machine.
 #
 # Usage:  scripts/dev/heavy-lock.sh <command> [args…]
 #   e.g.  scripts/dev/heavy-lock.sh scripts/dev/with-node.sh npm run test:coverage
@@ -7,13 +7,16 @@
 # Heavy = `npm ci`/`npm install`, full test/coverage runs, `npm run build`, process
 # tests, bulk data passes. Unit tests for one module are NOT heavy.
 #
-# Why: the owner's Mac rebooted twice on 2026-09-29 under overlapping heavy jobs from
-# parallel agents. The lock path is shared machine-wide with the owner's other project
-# (same default as its own heavy-lock.sh), so the two never overlap either.
+# Why: the development machine rebooted twice on 2026-09-29 under overlapping heavy jobs.
+# The default lock path is outside the checkout and shared machine-wide, so heavy jobs from
+# other checkouts that use the same lock never overlap with these either. Set HEAVY_LOCK_DIR
+# (or, per clone and untracked, `git config dev.heavyLockDir <path>`) to share one lock with any
+# other script that serialises heavy jobs the same way.
 # The lock is an atomic `mkdir`; a lock whose owner PID is dead is stolen; the wait is
 # bounded (MAX_WAIT_S, default 90 min) — every wait ends. Released on exit, even on failure.
 set -uo pipefail
-LOCK=${HEAVY_LOCK_DIR:-$HOME/Developer/sotara-data/.heavy.lock}
+LOCK=${HEAVY_LOCK_DIR:-$(git -C "${0:A:h}" config --get dev.heavyLockDir 2>/dev/null || true)}
+LOCK=${LOCK:-$HOME/.cache/heavy-lock/.heavy.lock}
 MAX_WAIT_S=${MAX_WAIT_S:-5400}
 mkdir -p "${LOCK:h}"
 waited=0
