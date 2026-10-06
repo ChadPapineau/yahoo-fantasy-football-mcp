@@ -596,6 +596,8 @@ export function parseVersion(text) {
 /** stdout kept from one run; a transcript of this check is a few kilobytes. */
 const MAX_STDOUT_BYTES = 32 * 1024 * 1024;
 const MAX_STDERR_CHARS = 64 * 1024;
+/** From SIGTERM to SIGKILL for the CLI's process group. */
+export const KILL_GRACE_MS = 3000;
 /** Signals that interrupt the check; each stops the CLI's group before the script ends. */
 const STOP_SIGNALS = /** @type {const} */ (["SIGINT", "SIGTERM", "SIGHUP"]);
 
@@ -606,7 +608,9 @@ const STOP_SIGNALS = /** @type {const} */ (["SIGINT", "SIGTERM", "SIGHUP"]);
  * pipes is gone by then. So nothing that holds the pipes outlives the check, and a completed run
  * whose leftover child ignores SIGTERM still gets its verdict about 3 s after the CLI exits, not
  * at the limit. A process that closes the pipes and ignores SIGTERM is not waited for.
- * @param {{ bin: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number }} o
+ * `killGraceMs` (default KILL_GRACE_MS) is a test seam: a longer grace lets a test hold the window
+ * between the CLI's exit and the SIGKILL open past the time limit on a loaded machine.
+ * @param {{ bin: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, killGraceMs?: number }} o
  * @returns {Promise<RunResult>}
  */
 export function runClaude(o) {
@@ -641,7 +645,7 @@ export function runClaude(o) {
       killGroup("SIGTERM");
       hardKill ??= setTimeout(() => {
         killGroup("SIGKILL");
-      }, 3000);
+      }, o.killGraceMs ?? KILL_GRACE_MS);
     };
     const onSignal = () => {
       interrupted = true;
@@ -747,6 +751,7 @@ export function parseOptions(argv) {
  *   nodePath?: string,
  *   env?: NodeJS.ProcessEnv,
  *   now?: Date,
+ *   killGraceMs?: number,
  *   out?: (s: string) => void,
  *   err?: (s: string) => void,
  * }} Deps
@@ -826,6 +831,7 @@ export async function main(argv, deps = {}) {
         cwd: work,
         env,
         timeoutMs: opts.timeoutS * 1000,
+        ...(deps.killGraceMs === undefined ? {} : { killGraceMs: deps.killGraceMs }),
       });
       if (saveFd !== undefined) {
         // a failed save is reported, never allowed to cost the verdict

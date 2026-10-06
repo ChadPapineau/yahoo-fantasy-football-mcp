@@ -17,6 +17,7 @@ import {
   AUTH_RE,
   DEFAULT_TIMEOUT_S,
   EXIT,
+  KILL_GRACE_MS,
   MAX_TURNS,
   PROMPT,
   SERVER_NAME,
@@ -769,11 +770,12 @@ function harness(opts: { built?: boolean } = {}) {
   chmodSync(stub, 0o755);
   const out: string[] = [];
   const err: string[] = [];
-  const go = (argv: string[], env: Record<string, string> = {}) =>
+  const go = (argv: string[], env: Record<string, string> = {}, killGraceMs?: number) =>
     main(["--claude", stub, ...argv], {
       repoRoot: repo,
       nodePath: "/opt/node/bin/node",
       now: new Date(2026, 9, 6, 9, 30),
+      ...(killGraceMs === undefined ? {} : { killGraceMs }),
       env: { ...process.env, A17_STUB_DIR: rec, ...env },
       out: (s) => out.push(s),
       err: (s) => err.push(s),
@@ -924,8 +926,9 @@ describe("main() end to end with a stub claude (the real CLI is never run)", () 
     const h = harness();
     const n = hex12();
     h.transcript(run(TEXT_ONLY, "NO NONCE", record(n)));
-    // the CLI exits at once; the SIGTERM-ignoring child holds the pipes ~3 s, past the 2 s limit
-    const code = await h.go(["--timeout", "2"], { A17_STUB_MODE: "linger-hard" });
+    // the CLI exits at once (well inside the 6 s limit, even on a loaded machine); its
+    // SIGTERM-ignoring child then holds the pipes until the SIGKILL 10 s later, past the limit
+    const code = await h.go(["--timeout", "6"], { A17_STUB_MODE: "linger-hard" }, 10_000);
     expect(code).toBe(EXIT.ANSWERED);
     expect(h.out.join("")).toContain("structuredContent visible to the model: no");
     expect(await gone(pidIn(h.rec, "child.pid"))).toBe(true);
@@ -936,7 +939,7 @@ describe("main() end to end with a stub claude (the real CLI is never run)", () 
     const t0 = Date.now();
     const code = await h.go(["--timeout", "2"], { A17_STUB_MODE: "hang-hard" });
     expect(code).toBe(EXIT.TIMEOUT);
-    expect(Date.now() - t0).toBeLessThan(2_000 + 3_000 + 4_000);
+    expect(Date.now() - t0).toBeLessThan(2_000 + KILL_GRACE_MS + 5_000);
     expect(await gone(pidIn(h.rec, "child.pid"))).toBe(true);
   });
 
