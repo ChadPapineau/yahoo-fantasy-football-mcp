@@ -1,8 +1,9 @@
-// commit-guards.test.ts — the two local commit paths (.githooks/pre-commit for a plain `git commit`,
-// scripts/dev/commit-paths.sh for explicit-path commits) must scan EVERY staged blob whatever its
-// name or previous type (QA-1-088), and must refuse an author/committer address that is not a
-// no-reply or reserved placeholder (QA-1-095): CONTRIBUTING.md Security — never commit a
-// credential, token or email address.
+// commit-guards.test.ts — the two local commit paths (.githooks/pre-commit + .githooks/commit-msg for
+// a plain `git commit`, scripts/dev/commit-paths.sh for explicit-path commits) must scan EVERY staged
+// blob whatever its name or previous type (QA-1-088), must refuse an author/committer address that is
+// not a no-reply or reserved placeholder (QA-1-095), and must scan the commit message, which is
+// published with the commit (QA-2-026): CONTRIBUTING.md Security — never commit a credential, token,
+// email address or the owner's league/team names.
 // Each test builds a throwaway repository (and a bare `origin` for commit-paths.sh) in a temp dir,
 // with git's global/system config isolated, so nothing here touches the real clone or its config.
 import { spawnSync } from "node:child_process";
@@ -75,6 +76,7 @@ function makeRepo(): Repo {
   };
   for (const rel of [
     ".githooks/pre-commit",
+    ".githooks/commit-msg",
     "scripts/dev/scan-secrets.mjs",
     "scripts/dev/commit-paths.sh",
   ]) {
@@ -301,5 +303,162 @@ describe.skipIf(!HAS_ZSH)("scripts/dev/commit-paths.sh (macOS dev tool; zsh)", (
     expect(r.status).toBe(9);
     expect(`${r.stdout}${r.stderr}`).toContain("[github-token]");
     expect(head(repo)).toBe(before);
+  });
+});
+
+/** A deny-list next to the repository, as `FF_SCAN_DENYLIST` (the real list never enters a test). */
+function denyList(repo: Repo, ...terms: string[]): Record<string, string> {
+  const file = path.join(path.dirname(repo.dir), "deny-list.txt");
+  writeFileSync(file, `${terms.join("\n")}\n`);
+  return { FF_SCAN_DENYLIST: file };
+}
+
+/** Message parts (`-m` paragraphs) that must never be committed, by the rule that refuses them. */
+const BAD_MESSAGES: [string, string[]][] = [
+  ["github-token", ["docs: notes", `token ${TOKEN}`]],
+  ["email-address", ["docs: notes", `Reviewed-by: Someone <${MACHINE_EMAIL}>`]],
+  ["personal-identifier", ["docs: notes", "for the Example Gridiron\nGurus league, week 3"]],
+  ["yahoo-league-or-team-key", [`docs: league ${["nfl", "l", "424242"].join(".")}`]],
+];
+const DENY_TERM = "example gridiron gurus";
+
+describe(".githooks/commit-msg scans the commit message (QA-2-026)", () => {
+  it.each(BAD_MESSAGES)(
+    "a plain git commit refuses %s in the message and commits nothing",
+    (rule, parts) => {
+      const repo = makeRepo();
+      const env = denyList(repo, DENY_TERM);
+      const before = head(repo);
+      repo.write("a.txt", "hello\n");
+      repo.git(["add", "a.txt"]);
+      const r = repo.git(["commit", "-q", ...parts.flatMap((p) => ["-m", p])], env);
+      expect(r.status, r.out).not.toBe(0);
+      expect(r.out).toContain(`[${rule}]`);
+      expect(r.out).not.toContain(TOKEN); // the value is never printed
+      expect(r.out).not.toContain(MACHINE_EMAIL);
+      expect(head(repo)).toBe(before);
+    },
+  );
+
+  it("scans the editor flow: a token typed into the message is refused, and the `-v` diff that removes a tracked token is not the message", () => {
+    const repo = makeRepo();
+    repo.write("leak.txt", `keep\ntoken = ${TOKEN}\n`);
+    repo.git(["add", "leak.txt"]);
+    // the token got in some other way (hooks off for this one setup commit)
+    expect(repo.git(["-c", "core.hooksPath=/dev/null", "commit", "-qm", "slipped in"]).status).toBe(
+      0,
+    );
+    repo.write("leak.txt", "keep\n");
+    repo.git(["add", "leak.txt"]);
+    const before = head(repo);
+    const editor = (lines: string) => {
+      const file = path.join(path.dirname(repo.dir), "editor.sh");
+      writeFileSync(
+        file,
+        `#!/bin/sh\n{ printf '${lines}'; cat "$1"; } > "$1.new" && mv "$1.new" "$1"\n`,
+      );
+      chmodSync(file, 0o755);
+      return { GIT_EDITOR: file };
+    };
+    const bad = repo.git(["commit", "-q", "-v"], editor(`fix: remove it\\n\\nwas ${TOKEN}\\n`));
+    expect(bad.status, bad.out).not.toBe(0);
+    expect(bad.out).toContain("[github-token]");
+    expect(head(repo)).toBe(before);
+    const good = repo.git(["commit", "-q", "-v"], editor("fix: remove the token\\n\\n"));
+    expect(good.status, good.out).toBe(0);
+    expect(repo.git(["log", "-1", "--format=%B"]).out.trim()).toBe("fix: remove the token");
+  });
+
+  it("refuses a value below a scissors line typed into -m (without -v, git keeps it in the commit)", () => {
+    const repo = makeRepo();
+    const before = head(repo);
+    repo.write("a.txt", "hello\n");
+    repo.git(["add", "a.txt"]);
+    const scissors = "# ------------------------ >8 ------------------------";
+    const r = repo.git(["commit", "-q", "-m", `docs: notes\n${scissors}\ntoken ${TOKEN}`]);
+    expect(r.status, r.out).not.toBe(0);
+    expect(head(repo)).toBe(before);
+  });
+
+  it("passes a clean message with placeholder addresses, a version pin and finding ids", () => {
+    const repo = makeRepo();
+    const env = denyList(repo, DENY_TERM);
+    repo.write("a.txt", "hello\n");
+    repo.git(["add", "a.txt"]);
+    const trailer = "Reviewed-by: Probe <1234567+probe@users.noreply.github.com>";
+    const r = repo.git(
+      [
+        "commit",
+        "-q",
+        "-m",
+        "fix(tooling): scan messages (QA-2-026)",
+        "-m",
+        "Pins x@1.2.3; league 461.l.1000.",
+        "-m",
+        trailer,
+      ],
+      env,
+    );
+    expect(r.status, r.out).toBe(0);
+    expect(repo.git(["log", "-1", "--format=%B"]).out).toContain(trailer);
+  });
+});
+
+describe.skipIf(!HAS_ZSH)("scripts/dev/commit-paths.sh scans the commit message (QA-2-026)", () => {
+  function withOrigin(repo: Repo) {
+    const bare = path.join(path.dirname(repo.dir), "origin.git");
+    expect(spawnSync("git", ["init", "-q", "--bare", bare]).status).toBe(0);
+    repo.git(["remote", "add", "origin", bare]);
+    expect(repo.git(["push", "-q", "origin", "build/probe"]).status).toBe(0);
+    return bare;
+  }
+  const originHead = (bare: string) =>
+    spawnSync("git", ["--git-dir", bare, "rev-parse", "build/probe"], {
+      encoding: "utf8",
+    }).stdout.trim();
+  const commitPaths = (repo: Repo, args: string[], extra: Record<string, string> = {}) =>
+    spawnSync("zsh", [path.join(repo.dir, "scripts/dev/commit-paths.sh"), ...args], {
+      cwd: repo.dir,
+      encoding: "utf8",
+      env: isolatedEnv(path.join(path.dirname(repo.dir), "home"), {
+        TMPDIR: path.dirname(repo.dir),
+        ...extra,
+      }),
+      timeout: 120_000,
+    });
+
+  it.each(BAD_MESSAGES)(
+    "refuses %s in the message (exit 11): nothing committed, nothing pushed",
+    (rule, parts) => {
+      const repo = makeRepo();
+      const bare = withOrigin(repo);
+      const env = denyList(repo, DENY_TERM);
+      const before = head(repo);
+      const pushed = originHead(bare);
+      repo.write("a.txt", "hello\n");
+      const r = commitPaths(repo, [parts.join("\n\n"), "a.txt"], env);
+      const out = `${r.stdout}${r.stderr}`;
+      expect(r.status, out).toBe(11);
+      expect(out).toContain(`[${rule}]`);
+      expect(out).not.toContain(TOKEN);
+      expect(out).not.toContain(MACHINE_EMAIL);
+      expect(head(repo)).toBe(before);
+      expect(originHead(bare)).toBe(pushed);
+    },
+  );
+
+  it("commits and pushes a clean message byte for byte", () => {
+    const repo = makeRepo();
+    const bare = withOrigin(repo);
+    const env = denyList(repo, DENY_TERM);
+    const msg =
+      "fix(tooling): scan messages (QA-2-026)\n\nPins x@1.2.3.\n\nReviewed-by: Probe <1234567+probe@users.noreply.github.com>";
+    repo.write("a.txt", "hello\n");
+    const r = commitPaths(repo, [msg, "a.txt"], env);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    const raw = spawnSync("git", ["--git-dir", bare, "cat-file", "commit", "build/probe"], {
+      encoding: "utf8",
+    }).stdout;
+    expect(raw.slice(raw.indexOf("\n\n") + 2)).toBe(`${msg}\n`);
   });
 });
