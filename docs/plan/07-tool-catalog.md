@@ -355,7 +355,7 @@ All `ff_prepare_*` return `{ prepared_id, kind, diff: { human: string, structure
 
 **G3 `ff_debug_echo`** — Phase 1a, week 1; **fixture mode only** (registered only when `FF_FIXTURE_DIR` is set; never in `tests/smoke/expected-tools.json`'s production lists) *(added round 1, OBJ-06)* — the structured-content spike.
 - Inputs: `{}`. Output: a fresh 12-char nonce **only** in `structuredContent` (the `text` block says "nonce omitted from text"); `outputSchema` present.
-- Purpose: Chad asks Claude Code and Claude Desktop to repeat the nonce; a client that can is forwarding `structuredContent` to the model. The answer per client goes to HANDOFF "Stack facts" (plan 10 A17); §5.1 is re-based on it and the C10 list tools regain `structuredContent` only where one copy is forwarded.
+- Purpose: Chad asks Claude Code and Claude Desktop to repeat the nonce; a client that can is forwarding `structuredContent` to the model. The answer per client goes to HANDOFF "Build facts" (plan 10 A17; `scripts/dev/a17-check.mjs` prints the Claude Code line, amended 2026-10-06); §5.1 is re-based on it and the C10 list tools regain `structuredContent` only where one copy is forwarded.
 - D/W/A/C: a throwaway tool · the cheapest experiment that settles research 06 U-2, which every §5.1 row silently assumed · guessing · nothing (it is deleted once A17 is recorded).
 - Sibling, same rules (fixture mode only): **`ff_debug_elicit`** — issues one form-mode elicitation (`decision: APPROVE|REJECT`) and returns what came back, so Claude Code's form-mode support (plan 02 §4.2, tagged [U]) is verified from the Inspector and from a Claude Code session without a write tool (plan 10 A19, round 1 OBJ-23 b).
 

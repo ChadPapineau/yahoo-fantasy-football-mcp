@@ -42,8 +42,12 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
   private temp home, config and cache), asks the model to repeat `ff_debug_echo`'s nonce, and
   decides from Claude Code's own transcript whether the tool result handed to the model holds
   `structuredContent`; it prints the line to record in `docs/HANDOFF.md` "Build facts". Zero
-  dependencies; distinct exit codes (3 = not logged in); the CLI's process group is stopped on
-  exit, Ctrl-C, SIGTERM and SIGHUP. Needs a build and `claude auth login`.
+  dependencies; distinct exit codes (3 = not logged in); the CLI's process group is stopped
+  (SIGTERM, then SIGKILL 3 s later) at the time limit, on Ctrl-C, SIGTERM or SIGHUP, and when the
+  CLI exits; `--save` is opened (0600) before the run; `--no-session-persistence` keeps the
+  session record out of `~/.claude/projects` (user-level Claude Code settings still apply). Run
+  it as `scripts/dev/with-node.sh node scripts/dev/a17-check.mjs`; needs a build and
+  `claude auth login`.
 - Project scaffold (Phase 0 remainder, `docs/plan/10-phasing-and-acceptance.md` §3.0):
   - `.npmrc` — `save-exact`, `ignore-scripts`, `engine-strict`, `audit`, no funding noise; landed
     alone before `package.json` so the docs workflow could be shown green with it present (Z3).
@@ -86,8 +90,9 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
   and committer is the GitHub no-reply address, the co-author trailers are gone, and the local
   working notes (`docs/scratch/`, `CLAUDE.md`) were removed from every commit: 312 commits became
   250. The commit ids cited in the docs and the gitleaks allow-list were remapped (`1446c7a`).
-  **Old commit ids no longer resolve**; a clone taken before 2026-10-06 must be re-cloned (or
-  reset to `origin/main`). Details: `docs/qa/2026-09-30-phase1a-qa-pentest.md` § Open items.
+  **Old commit ids no longer resolve in a clone of the rewritten history** (GitHub may still serve
+  pre-rewrite commits by URL until they are purged); a clone taken before 2026-10-06 must be
+  re-cloned (or reset to `origin/main`). Details: `docs/qa/2026-09-30-phase1a-qa-pentest.md` § Open items.
 - `main` is protected by a branch ruleset: no force-push, no deletion, linear history, no bypass
   actors (`docs/plan/04-repo-structure-and-ci.md` §5).
 - The contributor guide (`CONTRIBUTING.md`) holds every repository rule; personal tool settings
@@ -109,6 +114,26 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
   - stream-kdef gave `marginal_value` p10/p90 as the range of the gain over the current starter;
     it now gives `marginal_value.mean` and takes the range from the verdict's
     `rec.delta_vs_next` (QA-2-005).
+- **QA round 2, review of the round's own commits** (`docs/qa/2026-10-06-qa-round2.md`, QA-2-006 to
+  QA-2-024; each code fix has a regression test, mutation-checked):
+  - The onboard Skill and its guide said the server refuses "the synced folders in the home
+    folder" and that the save commands catch every synced folder; both refuse only the named
+    apps' folders (Nextcloud, Box Sync and the like are caught by neither), and the texts now say
+    so (QA-2-008). The tests behind QA-2-002, QA-2-003 and QA-2-005 now also catch a folder named
+    as not looked for, a surface named in a following sentence, and a sign error in
+    `rec.delta_vs_next` (QA-2-006, QA-2-007, QA-2-009).
+  - `scripts/dev/a17-check.mjs`: a completed run whose leftover child ignored SIGTERM was reported
+    as a timeout; an unwritable `--save` path lost the verdict after the full run, and an existing
+    file kept its mode; each run left a Claude Code session record behind; a result subtype error
+    after the tool call gave an empty note (QA-2-014 to QA-2-016, QA-2-018). Its tests now cover
+    SIGINT, SIGTERM and SIGHUP each, the SIGKILL step, and clean up after a failed run
+    (QA-2-012, QA-2-013). `b1dcd85` made SIGTERM and SIGHUP interrupt like Ctrl-C.
+  - Docs: plan 04 §5 said its whole "Now" column is applied, but Dependabot security updates and
+    vulnerability alerts are off (QA-2-019; an owner step in HANDOFF); plan 07 G3 and plan 01 §4.2
+    now say "Build facts" (QA-2-017); plan 09 §3.4 no longer promises a per-candidate range
+    (QA-2-011) and §4 says how `tool_contract` counts before the first release (QA-2-010); the
+    README's `ff_analyze_lineup` row lists `comparisons[]?` and the nullable `swaps[].out`
+    (QA-2-020); two code comments cited a pre-rewrite commit id (QA-2-021).
 - The pre-commit hook now refuses to add an iCloud/Finder conflict copy (`ci 2.yml`,
   `src/cli 2/x.ts`) — previously only `scripts/dev/commit-paths.sh` did; deleting one is never
   blocked.
