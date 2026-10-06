@@ -126,11 +126,10 @@ describe("the job table (plan 06 §1.2, plan 10 §3.1a)", () => {
     expect(cal).toHaveLength(6 + 16);
   });
 
-  it("daily 10:30 plus 16:30 Wed–Sat; stats 04:30 + game-day runs; prune Sun 03:00; backup Sun 03:10", () => {
-    expect(job("nflverse-daily").calendar).toEqual([
-      { Hour: 10, Minute: 30 },
-      ...[3, 4, 5, 6].map((d) => ({ Weekday: d, Hour: 16, Minute: 30 })),
-    ]);
+  it("daily every 6 h (QA-2-035); stats 04:30 + game-day runs; prune Sun 03:00; backup Sun 03:10", () => {
+    expect(job("nflverse-daily").calendar).toEqual(
+      [4, 10, 16, 22].map((h) => ({ Hour: h, Minute: 30 })),
+    );
     expect(job("nflverse-stats").calendar).toContainEqual({ Hour: 4, Minute: 30 });
     expect(job("nflverse-stats").calendar).toContainEqual({ Weekday: 0, Hour: 21, Minute: 0 });
     expect(job("store-prune").calendar).toEqual([{ Weekday: 0, Hour: 3, Minute: 0 }]);
@@ -181,10 +180,7 @@ describe("renderPlist", () => {
     expect(p.flags.StandardOutPath).toBe(
       "/Users/me/Library/Logs/fantasy-football-mcp/nflverse-daily.log",
     );
-    expect(p.calendar).toEqual([
-      { Hour: 10, Minute: 30 },
-      ...[3, 4, 5, 6].map((d) => ({ Weekday: d, Hour: 16, Minute: 30 })),
-    ]);
+    expect(p.calendar).toEqual([4, 10, 16, 22].map((h) => ({ Hour: h, Minute: 30 })));
   });
 
   it("escapes XML metacharacters in paths and env; refuses control characters and relative paths", () => {

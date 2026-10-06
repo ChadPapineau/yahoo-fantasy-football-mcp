@@ -124,8 +124,10 @@ const OFF_DAY_TTL = 6 * HOUR + 30 * MIN;
 
 /**
  * The table (plan 01 §5.2 "TTL (fresh)" and "Hard limit", §5.4 "beyond"). Release-based nflverse
- * classes are fresh while the last successful release check is ≤ 24 h old (the daily job cadence,
- * plan 06) — "fresh until the next release" cannot be observed between checks.
+ * classes are fresh while the last successful release check is within the TTL — "fresh until the
+ * next release" cannot be observed between checks — so each class's launchd job (src/cli/launchd.ts)
+ * checks at least once per TTL and one failed run never passes the hard limit (QA-1-036, QA-2-035;
+ * tests/cli/launchd-cadence.test.ts holds both).
  */
 export const FRESHNESS_TABLE: Readonly<Record<FreshnessClassId, FreshnessClass>> = Object.freeze({
   manual_league: row(
