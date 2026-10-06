@@ -99,25 +99,46 @@ export const saveBlocks = [
 ].map((m) => m[1] ?? "");
 
 /**
- * Runs the onboard guide's save commands in `sh` as a user would paste them, under `home` and the
- * given environment (PATH is /usr/bin:/bin). The "save the YAML … with any editor" comment line
- * stands for the user's editor: it is replaced by a copy of the fixture league to the very path the
- * `chmod 600` line names (so the test follows the guide's path, whatever it is), and `ff` is a stub
- * that logs its arguments.
+ * The shells a user may paste the save commands into, as installed here: `sh` (dash on Linux, bash
+ * in POSIX mode on macOS), and dash, bash and zsh themselves (macOS's default interactive shell).
+ */
+export const SHELLS: readonly string[] = [
+  "/bin/sh",
+  "/bin/dash",
+  "/bin/bash",
+  existsSync("/bin/zsh") ? "/bin/zsh" : "/usr/bin/zsh",
+].filter((s) => existsSync(s));
+
+/**
+ * Runs the onboard guide's save commands in a shell (`/bin/sh` unless `opts.using` names another)
+ * as a user would paste them, under `home` and the given environment (PATH is /usr/bin:/bin), from
+ * `opts.cwd` (default: the folder holding `home`, so a relative path never lands in the checkout).
+ * The "save the YAML … with any editor" comment line stands for the user's editor: it is replaced
+ * by a copy of the fixture league to the very path the `chmod 600` line names (so the test follows
+ * the guide's path, whatever it is) unless the commands left no folder to save in (a `STOP:` on
+ * FF_CONFIG_DIR), and `ff` is a stub that logs its arguments. zsh runs with `-f` (no startup files).
  */
 export function runSaveSteps(
   env: Record<string, string>,
   home: string,
+  opts: { using?: string; cwd?: string } = {},
 ): { status: number | null; stdout: string; stderr: string; ffLog: string } {
   const block = saveBlocks[0] ?? "";
   const target = /^chmod 600 (.+)$/m.exec(block)?.[1];
   if (target === undefined) throw new Error("the save commands have no `chmod 600 <file>` line");
   const script = block
     .split("\n")
-    .map((l) => (l.startsWith("# save the YAML") ? `cp "$FF_TEST_YAML" ${target}` : l))
+    .map((l) =>
+      l.startsWith("# save the YAML")
+        ? `[ ${target} = /league.yaml ] || cp "$FF_TEST_YAML" ${target}`
+        : l,
+    )
     .join("\n");
   const log = path.join(home, "..", "ff.log");
-  const r = spawnSync("/bin/sh", ["-c", `ff() { echo "ff $*" >> "$FF_TEST_LOG"; }\n${script}`], {
+  const shell = opts.using ?? "/bin/sh";
+  const flags = shell.endsWith("/zsh") ? ["-f", "-c"] : ["-c"];
+  const r = spawnSync(shell, [...flags, `ff() { echo "ff $*" >> "$FF_TEST_LOG"; }\n${script}`], {
+    cwd: opts.cwd ?? path.dirname(home),
     encoding: "utf8",
     env: {
       PATH: "/usr/bin:/bin",

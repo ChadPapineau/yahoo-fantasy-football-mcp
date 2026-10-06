@@ -12,13 +12,15 @@
 // passive "~/Dropbox is not checked by the server" too (reopened QA-2-007). QA-2-008: a generic
 // "synced folder" phrase is sampled with a sync app the guard does not know (~/Nextcloud), so "the
 // server refuses … the synced folders in the home folder" is an over-claim the test can see.
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { isInside, syncedFolders } from "../../src/config/paths.js";
 import { ConfigError, loadConfig } from "../../src/config/schema.js";
-import { ROOT, runSaveSteps } from "./helpers.js";
+import { ROOT, SHELLS, runSaveSteps } from "./helpers.js";
 import { sentences } from "./world.js";
 
 const FILES = ["skills/onboard/SKILL.md", "skills/onboard/references/onboard-league-yaml.md"];
@@ -385,5 +387,170 @@ describe("QA-1-044/QA-1-067: the guide's save commands catch what the server's g
   }
   it("a private folder outside any repository prints no STOP (control)", () => {
     expect(saveAt(".config/fantasy-football-mcp")).not.toMatch(/STOP/);
+  });
+});
+
+/** Runs `check(home)` for each fast-check run in a fresh temporary home under one base. */
+function inFreshHomes(): { home: () => string; cleanup: () => void } {
+  const base = realpathSync(mkdtempSync(path.join(tmpdir(), "ff-stop-")));
+  let n = 0;
+  return {
+    home: () => {
+      const h = path.join(base, `r${String((n += 1))}`, "home");
+      mkdirSync(h, { recursive: true, mode: 0o700 });
+      return h;
+    },
+    cleanup: () => {
+      rmSync(base, { recursive: true, force: true });
+    },
+  };
+}
+
+/** A folder name a user, a team or an organisation gives (spaces, '&', '.', ',', '-'). */
+const ORG_NAME = fc.stringMatching(/^[A-Za-z0-9][A-Za-z0-9 &.,'-]{0,14}[A-Za-z0-9]$/);
+/** Where a sync folder may sit, relative to the home folder: in it, under Library, on another volume. */
+const PLACEMENT = fc.constantFrom("", "Library/", "../volume/", "../volume/deep/x/");
+const SUBFOLDERS = fc.array(fc.constantFrom("ff", "a b", "x.y"), { minLength: 1, maxLength: 3 });
+
+describe("QA-2-008 (reopened): the save commands catch every folder of the sync apps the texts name", () => {
+  // The texts: "iCloud Drive, CloudStorage, Dropbox, Google Drive and OneDrive folders wherever
+  // they are and whatever their app names them (Dropbox (Personal), OneDrive - <organisation>)".
+  const APP_FOLDER = fc.oneof(
+    fc.mixedCase(fc.constant("Dropbox")),
+    ORG_NAME.map((o) => `Dropbox (${o})`),
+    fc.constant("Dropbox (Personal)"),
+    fc.mixedCase(fc.constant("Google Drive")),
+    fc.mixedCase(fc.constant("OneDrive")),
+    ORG_NAME.map((o) => `OneDrive - ${o}`),
+    fc.constant("OneDrive-Personal"),
+    ORG_NAME.map((o) => `CloudStorage/${o}`),
+    fc.mixedCase(fc.constant("Mobile Documents")).map((m) => `${m}/com~apple~CloudDocs`),
+  );
+  /** A name that holds an app's name but is no app's folder (it does not start a path segment). */
+  const LOOKALIKE = fc.constantFrom(
+    "MyDropbox",
+    "notes OneDrive",
+    "old-Google Drive",
+    "Documents2",
+  );
+
+  for (const shell of SHELLS) {
+    it(`${shell}: any app folder, at any place, under any name its app gives it, prints STOP`, () => {
+      const t = inFreshHomes();
+      try {
+        fc.assert(
+          fc.property(APP_FOLDER, PLACEMENT, SUBFOLDERS, (folder, place, sub) => {
+            const h = t.home();
+            const dir = path.join(h, place, folder, ...sub);
+            const out = runSaveSteps({ FF_CONFIG_DIR: dir }, h, { using: shell }).stdout;
+            expect(out, dir).toMatch(/^STOP: .*synced folder/m);
+          }),
+          {
+            numRuns: 30,
+            examples: [
+              ["Dropbox (Personal)", "", ["ff"]],
+              ["Dropbox (Example Org)", "", ["ff"]],
+              ["dropbox", "", ["ff"]],
+            ],
+          },
+        );
+      } finally {
+        t.cleanup();
+      }
+    }, 120_000);
+
+    it(`${shell}: a look-alike name prints no STOP (control)`, () => {
+      const t = inFreshHomes();
+      try {
+        fc.assert(
+          fc.property(LOOKALIKE, PLACEMENT, SUBFOLDERS, (folder, place, sub) => {
+            const h = t.home();
+            const out = runSaveSteps({ FF_CONFIG_DIR: path.join(h, place, folder, ...sub) }, h, {
+              using: shell,
+            }).stdout;
+            expect(out).not.toMatch(/STOP/);
+          }),
+          { numRuns: 10 },
+        );
+      } finally {
+        t.cleanup();
+      }
+    }, 120_000);
+  }
+});
+
+describe("QA-1-044/QA-1-067 (reopened): the save commands catch a dotfiles repository whose core.worktree holds the folder", () => {
+  const NAME = fc.stringMatching(/^[a-z][a-z0-9_-]{0,8}$/);
+  /** Where a dotfiles repository's git directory sits, relative to the home folder. */
+  const GIT_DIR = fc.oneof(
+    NAME.map((n) => `.${n}`), // the bare-repository recipe: ~/.cfg, ~/.dotfiles
+    NAME.map((n) => `${n}.git`),
+    fc.constant(".local/share/yadm/repo.git"), // yadm 3
+    fc.constant(".config/yadm/repo.git"), // yadm 2
+    NAME.map((n) => `.config/vcsh/repo.d/${n}.git`), // vcsh
+  );
+  const CONFIG_DIR = fc.constantFrom(".config/fantasy-football-mcp", "private/ff", ".ff/x y");
+  /** Where core.worktree points: the home folder, an ancestor of the config dir, it, elsewhere, unset. */
+  const RELATION = fc.constantFrom("home", "ancestor", "self", "elsewhere", "unset");
+
+  const git = (...args: string[]) => {
+    const r = spawnSync("git", args, { encoding: "utf8" });
+    expect(r.status, r.stderr).toBe(0);
+  };
+
+  for (const shell of SHELLS) {
+    it(`${shell}: STOP exactly when the repository's work tree holds the folder`, () => {
+      const t = inFreshHomes();
+      try {
+        fc.assert(
+          fc.property(
+            GIT_DIR,
+            CONFIG_DIR,
+            RELATION,
+            fc.boolean(),
+            (gitDir, configDir, relation, relative) => {
+              const h = t.home();
+              const g = path.join(h, gitDir);
+              const d = path.join(h, configDir);
+              git("init", "-q", "--bare", g);
+              const w =
+                relation === "home"
+                  ? h
+                  : relation === "ancestor"
+                    ? path.join(h, configDir.split("/")[0] ?? "")
+                    : relation === "self"
+                      ? d
+                      : relation === "elsewhere"
+                        ? path.join(h, "projects")
+                        : null;
+              if (w !== null) {
+                mkdirSync(w, { recursive: true, mode: 0o700 });
+                git("--git-dir", g, "config", "core.worktree", relative ? path.relative(g, w) : w);
+              }
+              const out = runSaveSteps({ FF_CONFIG_DIR: d }, h, { using: shell }).stdout;
+              const stop = /^STOP: .*work tree of the git repository/m;
+              if (relation === "elsewhere" || relation === "unset") expect(out).not.toMatch(stop);
+              else expect(out, `${gitDir} → ${relation}`).toMatch(stop);
+            },
+          ),
+          {
+            numRuns: 20,
+            // the reopened finding: git init --bare ~/.cfg; core.worktree = the home folder
+            examples: [[".cfg", ".config/fantasy-football-mcp", "home", false]],
+          },
+        );
+      } finally {
+        t.cleanup();
+      }
+    }, 120_000);
+  }
+
+  it("the texts say which dotfiles repositories nothing catches (no core.worktree)", () => {
+    for (const file of FILES) {
+      const said = sentences(readFileSync(path.join(ROOT, file), "utf8")).filter(
+        (s) => s.includes("--work-tree") && s.includes("core.worktree") && NEGATION.test(s),
+      );
+      expect(said.length, file).toBeGreaterThan(0);
+    }
   });
 });
