@@ -1273,6 +1273,9 @@ export const analyzeWaiversTool = defineTool({
               position: t.position === "K" ? ("K" as const) : ("DEF" as const),
               nfl_team: t.nfl_team,
               availability: "T" as const,
+              // only a locked STARTER freezes the position; a locked bench K/DEF is never the
+              // hold-vs-stream baseline (QA-2-033) — the engine needs each one's slot to tell
+              slot_class: t.entry?.slot_class ?? null,
             },
           ]
         : [],
