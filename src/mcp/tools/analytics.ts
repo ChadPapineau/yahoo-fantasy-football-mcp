@@ -980,6 +980,15 @@ export function isHeadToHead(scoringType: string): boolean {
   return scoringType.startsWith("head");
 }
 
+/**
+ * E3's NOT_FOUND hint when one of my starting seats is held by a player the NFL data does not match
+ * (QA-2-046): his points are unknown, so my total and P(win) are too — the seat is never scored 0.
+ * The same rule as the opponent's side (an empty seat refuses — QA-1-043) and as E2, which withholds
+ * P(win) for the same file (QA-2-039).
+ */
+export const MATCHUP_UNMATCHED_STARTER_HINT =
+  "A starter in your league.yaml matches no NFL player, so your total and win probability are unknown: fix that line's name, team or gsis_id (ff_get_status lists the unmatched players), or use ff_analyze_lineup for start/sit.";
+
 /** E3's NOT_FOUND hint when the week's `opponents:` entry names a team with no players (QA-1-069). */
 export const MATCHUP_OPPONENT_NO_PLAYERS_HINT =
   "This week's opponent in league.yaml has no players listed: add that team's players under other_teams, pass a week whose opponent has them, or use ff_analyze_lineup (objective mean) for start/sit.";
@@ -1025,6 +1034,10 @@ export const analyzeMatchupTool = defineTool({
       throw new FfError("NOT_FOUND", {
         hint: found.key === null ? MATCHUP_NO_OPPONENT_HINT : MATCHUP_OPPONENT_NO_PLAYERS_HINT,
       });
+    // a starting seat held by a player the data cannot match is not empty and not 0 points: my total
+    // is unknown, so no P(win) — refused, as an opponent's empty seat is (QA-2-046, QA-1-043)
+    if (mine.unscoredSeats.length > 0)
+      throw new FfError("NOT_FOUND", { hint: MATCHUP_UNMATCHED_STARTER_HINT });
     if (mine.out.lines_omitted) warnings.push(LINES_OMITTED_WARNING);
     const r = analyzeMatchupPre({
       slots,
