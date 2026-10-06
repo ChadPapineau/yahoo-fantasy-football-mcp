@@ -101,14 +101,18 @@ describe("ff status", () => {
     ).toBe("stale");
   });
 
-  it("a dataset file deleted behind the store's back reads as never loaded", async () => {
+  it("a dataset file deleted behind the store's back is UNREADABLE with its repair, as G1 reads it [QA-1-038]", async () => {
     const s = refreshed();
     rmSync(datasetFilePath(s.cacheDir, "nflverse:injuries"));
-    const { r } = await report(s);
+    const { r, text } = await report(s);
     expect(r.sources.find((x) => x.source === "nflverse:injuries")).toMatchObject({
-      state: "never_loaded",
+      state: "unreadable",
       file_present: false,
+      file_health: "missing",
     });
+    expect(text).toContain(
+      "nflverse:injuries: dataset file unreadable — run `ff refresh nflverse:injuries`",
+    );
   });
 
   it("a damaged current dataset file is UNREADABLE with its repair, never fresh [QA-1-038]", async () => {

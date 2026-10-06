@@ -49,8 +49,9 @@ export interface SourceStatus {
   readonly source: DatasetSourceId;
   readonly freshness_class: string;
   /**
-   * `never_loaded` when no successful refresh exists; `unreadable` when the current file is there
-   * but the server could not attach it (damaged, another layout or version — QA-1-038).
+   * `never_loaded` when no successful refresh exists; `unreadable` when a successful refresh recorded
+   * a current file the server cannot attach — missing, not a regular file, damaged, or another
+   * source's, version's or layout's — as G1 `ff_get_status` reads it (QA-1-038).
    */
   readonly state: FreshnessState | "never_loaded" | "unreadable";
   /** What the class does past its hard limit (`STALE_ONLY` error, or the driver is omitted). */
@@ -119,15 +120,14 @@ export function sourceStatus(
     },
     nowMs,
   );
-  // never "fresh" for a file the server cannot attach (QA-1-038): the same checks the refresh runs
-  const health =
-    fileBytes === null
-      ? null
-      : checkFile(source, datasetFilePath(cacheDir, source), current.file_version ?? "");
+  // never "fresh" for a file the server cannot attach (QA-1-038): the same checks the refresh runs.
+  // A refreshed source whose file is gone or not a regular file is unreadable too, never "never
+  // loaded" — G1 reads it so, and `ff refresh <source>` is the repair either way.
+  const health = checkFile(source, datasetFilePath(cacheDir, source), current.file_version ?? "");
   return {
     ...base,
     file_health: health,
-    state: fileBytes === null ? "never_loaded" : health !== "ok" ? "unreadable" : judged.state,
+    state: health !== "ok" ? "unreadable" : judged.state,
     age_s: judged.age_s,
     basis_at: judged.basis_at,
     file_version: current.file_version,
