@@ -16,6 +16,7 @@ import {
   isProvisionalWeek,
   resourceTtlMs,
   stampState,
+  ttlAt,
   worseFreshness,
   type FreshnessClassId,
   type FreshnessState,
@@ -329,6 +330,20 @@ describe("stampState — the class basis picks the instant (critics C-12, C-08b)
       stampState(cls, { as_of: iso(0), fetched_at: iso(0), checked_at: null }, NaN),
     ).toThrow(RangeError);
   });
+  // The oracle classifies with the TTL that applies at the basis instant: NOW is a Saturday, an off-day, so
+  // schedules and lines get their off-day TTL there (QA-1-036). Without it the property failed for any
+  // sampled basis age between 30 min and 6.5 h on those two classes (QA-2-025).
+  it("an off-day check of a game-day class is classified with its off-day TTL (QA-2-025 counterexample)", () => {
+    const cls = freshnessClass("nflverse_schedules");
+    const st = stampState(
+      cls,
+      { as_of: iso(1_801_000), fetched_at: iso(1_801_000), checked_at: iso(1_801_000) },
+      NOW,
+    );
+    expect(st.age_s).toBe(1801);
+    expect(st.state).toBe("fresh");
+  });
+
   it("property: for every class and basis instant, state equals classifyAge of the basis age", () => {
     fc.assert(
       fc.property(
@@ -344,7 +359,11 @@ describe("stampState — the class basis picks the instant (critics C-12, C-08b)
           const st = stampState(cls, t, NOW);
           const basisAgo = cls.basis === "release" ? Math.min(fetchedAgo, checkedAgo) : fetchedAgo;
           expect(st.age_s).toBe(basisAgo);
-          expect(st.state).toBe(cls.basis === "immutable" ? "fresh" : classifyAge(cls, basisAgo));
+          expect(st.state).toBe(
+            cls.basis === "immutable"
+              ? "fresh"
+              : classifyAge(cls, basisAgo, ttlAt(cls, NOW - basisAgo * 1000)),
+          );
         },
       ),
     );
