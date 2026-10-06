@@ -86,6 +86,19 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
 
 ### Changed
 
+- **QA round 2 behaviour changes** (`docs/qa/2026-10-06-qa-round2.md`):
+  - `ff_analyze_lineup`: `rec.action` can read "make N lineup changes and hold M coin flips"; a
+    `force_start` it cannot honour is `VALIDATION` with the reason `cannot_seat_together`, `on_ir` or
+    `locked`; a league whose `scoring_type` is not head-to-head gets `objective: "mean"`, mode
+    `neutral` and no P(win). `ff_analyze_matchup` answers `NOT_FOUND` for such a league.
+  - `ff_get_status`: `sources[].freshness` gains `unreadable`, and `datasets_loaded` fails for it.
+  - `ff_analyze_waivers`: betting lines omitted as stale (QA-1-004) now also stop a K/DEF stream over a
+    starter who plays.
+  - The `nflverse-daily` job runs every 6 h (04:30, 10:30, 16:30, 22:30); run `ff install-launchd`
+    again to pick up the new calendar.
+  - Commit guards: `.githooks/commit-msg` scans the commit message, and `scripts/dev/commit-paths.sh`
+    refuses a message that fails the scan with exit 11; the `scan-secrets: allow` marker no longer
+    hides a deny-listed name.
 - **Public history rewritten (2026-10-06, the owner's decision; QA-1-095).** Every commit's author
   and committer is the GitHub no-reply address, the co-author trailers are gone, and the local
   working notes (`docs/scratch/`, `CLAUDE.md`) were removed from every commit: 312 commits became
@@ -100,6 +113,51 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
 
 ### Fixed
 
+- **QA round 2, re-verification and second sweep** (`docs/qa/2026-10-06-qa-round2.md`: 105 fixes
+  re-checked, 22 reopened; 20 new findings, QA-2-026 to QA-2-045; each fix below has a regression
+  test, mutation-checked; two items are deferred and one closed, as the register records):
+  - `ff_analyze_lineup`: an `exclude`d starter now scores 0, as `status: O` does, so his replacement
+    is advised instead of "keep the current lineup" (QA-2-038). One coin-flip swap no longer holds
+    back a change that cannot lose points, such as filling an empty seat (QA-1-020, QA-1-040). A seat
+    held by a starter the crosswalk cannot match is kept, never "filled" (QA-2-039). An unseatable
+    `force_start` is refused instead of dropped (QA-1-010).
+  - `ff_analyze_matchup`'s no-opponent hint names what is missing (QA-1-069).
+  - Availability: a practice-only injury report no longer reads as "cleared to play", and look-ahead
+    weeks carry the newest designation for up to two weeks, then report availability as unknown
+    (QA-2-034, QA-1-021). Projections and the analytics tools use it; `ff_get_injuries` does not yet.
+  - `ff_analyze_waivers`: a decision week without betting lines is named, and a K/DEF without its line
+    is never streamed over a starter who plays (QA-2-044). The engine no longer freezes a position
+    for a locked bench K/DEF (QA-2-033); the tool does not pass the roster slot to it yet.
+  - Scoring: team-defence yards allowed added the opponent's sack yardage instead of subtracting it
+    (QA-2-032; republish existing files with `ff refresh nflverse:stats --force`); a threshold bonus
+    on an FG-distance or points-allowed bin was listed but never paid (QA-2-036); `league.yaml` can
+    state missed-FG bins and yards-allowed brackets, and an unknown override key now says what is
+    accepted (QA-2-045; a TE premium cannot be stated yet).
+  - Retrospective: a past week's `followed` no longer flips after a later league-file edit, so it
+    agrees with `ff_list_recommendations` (QA-2-040); regret compares like with like, and the Skills
+    log alternatives it can score (QA-2-041); per-player metrics count the opponent's stored
+    projections too (QA-2-042).
+  - Freshness: injuries read stale about 60 h a week under their own job, and one failed run caused
+    `STALE_ONLY` (QA-2-035); a `not_published` run did not end a failure streak (QA-1-037);
+    `ff_get_status` called an unreadable dataset `fresh` (QA-1-038).
+  - CLI and config: `ff uninstall --purge` deleted user directories under `<cache>/tmp`, and prune
+    could remove a person's folder inside its own `tmp/` (QA-2-029); doctor row 8 passed a read-only
+    `store.sqlite` and now names every read-only store path, which `--fix` repairs (QA-1-053); an
+    absolute `FF_CONFIG_DIR` that is a file or cannot be entered was reported as a `config.json`
+    error (QA-1-057, QA-1-096); a slot name in lower or mixed case got a non-actionable reason
+    (QA-1-047); a mistyped `gsis_id` that lands on a same-team backup was trusted (QA-1-042); the
+    log's pre-cut could pull most of a split secret into the kept text (QA-2-031).
+  - Secret defences: commit messages were never scanned (QA-2-026); a deny-listed name split by a line
+    wrap or written with unusual spacing passed (QA-2-027); the scanner skipped its own file
+    (QA-2-030); UTF-16 text scanned "clean" (QA-1-089).
+  - Skills: onboard's save commands now resolve `FF_CONFIG_DIR` as the server does, and catch every
+    name the sync apps give their folders and a dotfiles repository whose `core.worktree` holds the
+    folder (QA-1-072, QA-2-008, QA-1-044, QA-1-067); onboard no longer says the manual league cannot
+    give transactions (QA-1-062); the tests behind QA-2-005, QA-2-007 and QA-2-025 now catch the
+    variants that escaped them.
+  - Docs: the README's FAQ says a TE premium cannot be stated in `league.yaml` yet, and its job list,
+    plan 01 §5.2 and plan 06 §1.2 give the new `nflverse-daily` calendar; plan 07 E2, E3, E5, D2 and
+    E13 record the rules above (plan changelog, implementation amendments).
 - **QA round 2, deferred-items analysis** (`docs/qa/2026-10-06-qa-round2.md`; each fix has a
   regression test, mutation-checked):
   - A config, cache or league-file path in `~/Dropbox`, `~/Google Drive` or `~/OneDrive*` was
