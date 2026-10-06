@@ -2,7 +2,7 @@
 // _lib.mjs — shared helpers for the zero-dependency supply-chain checks in scripts/ci/
 // (docs/plan/04 §4.1 `supply-chain` job, R11; plan 02 S10). Node built-ins only.
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -86,17 +86,54 @@ export function runNpm(args, cwd) {
 }
 
 /**
- * @typedef {{ name: string, version: string, path?: string, resolved?: string }} TreeNode
+ * `path` is the path npm printed; `dir` is where the package was found on disk (set when
+ * flattenTree is given the project root). npm's text is not a path to trust: `npm ls --json`
+ * prints any UUID-like path segment as `***` (its secret redaction), so a checkout under such a
+ * directory gets printed paths that name no file.
+ * @typedef {{ name: string, version: string, path?: string, dir?: string, resolved?: string }} TreeNode
  * @typedef {{ nodes: Map<string, TreeNode>, problems: string[] }} RuntimeTree
  */
 
 /**
+ * The directory the dependency `name` of the package in `fromDir` is installed in, found the way
+ * Node resolves a bare specifier: `<d>/node_modules/<name>` for `fromDir` and each ancestor, up to
+ * and including `root` and never above it. null when none of them holds a package.json.
+ * @param {string} name
+ * @param {string} fromDir
+ * @param {string} root
+ * @returns {string | null}
+ */
+export function resolveInstalled(name, fromDir, root) {
+  const top = path.resolve(root);
+  const inside = (/** @type {string} */ p) => {
+    const rel = path.relative(top, p);
+    return (
+      rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
+    );
+  };
+  let d = path.resolve(fromDir);
+  while (inside(d)) {
+    if (path.basename(d) !== "node_modules") {
+      const candidate = path.join(d, "node_modules", name);
+      if (existsSync(path.join(candidate, "package.json"))) return candidate;
+    }
+    const up = path.dirname(d);
+    if (up === d) break;
+    d = up;
+  }
+  return null;
+}
+
+/**
  * Flatten `npm ls --omit=dev --all --json --long` output into unique name@version nodes.
- * Deduped references carry no `path`; another occurrence of the same name@version does.
+ * Deduped references carry no `path`; another occurrence of the same name@version does. With
+ * `root`, each node's `dir` is looked up on disk from its parent's directory (resolveInstalled),
+ * falling back to npm's printed path only when that path exists.
  * @param {unknown} ls
+ * @param {string} [root]
  * @returns {RuntimeTree}
  */
-export function flattenTree(ls) {
+export function flattenTree(ls, root) {
   if (!isRecord(ls)) throw new Error("npm ls output is not a JSON object");
   /** @type {Map<string, TreeNode>} */
   const nodes = new Map();
@@ -107,8 +144,9 @@ export function flattenTree(ls) {
   /**
    * @param {unknown} deps
    * @param {number} depth
+   * @param {string | undefined} fromDir the requiring package's directory (with `root` only)
    */
-  const walk = (deps, depth) => {
+  const walk = (deps, depth, fromDir) => {
     if (!isRecord(deps)) return;
     if (depth > 200) throw new Error("npm ls tree deeper than 200 levels — refusing");
     for (const [name, raw] of Object.entries(deps)) {
@@ -129,11 +167,21 @@ export function flattenTree(ls) {
       if (typeof raw.resolved === "string" && node.resolved === undefined) {
         node.resolved = raw.resolved;
       }
+      /** @type {string | undefined} */
+      let dir;
+      if (root !== undefined && fromDir !== undefined) {
+        const printed =
+          typeof raw.path === "string" && existsSync(path.join(raw.path, "package.json"))
+            ? raw.path
+            : undefined;
+        dir = resolveInstalled(name, fromDir, root) ?? printed;
+        if (dir !== undefined && node.dir === undefined) node.dir = dir;
+      }
       nodes.set(key, node);
-      walk(raw.dependencies, depth + 1);
+      walk(raw.dependencies, depth + 1, dir);
     }
   };
-  walk(ls.dependencies, 0);
+  walk(ls.dependencies, 0, root);
   return { nodes, problems };
 }
 
@@ -152,16 +200,17 @@ export function runtimeTree(root) {
       `npm ls did not print JSON (exit ${String(r.status)}): ${r.stderr.slice(0, 500)}`,
     );
   }
-  return flattenTree(parsed);
+  return flattenTree(parsed, root);
 }
 
 /**
- * Where a node's installed package.json lives.
+ * Where a node's installed package.json lives: the directory found on disk, else npm's printed
+ * path, else the top-level node_modules entry.
  * @param {TreeNode} node
  * @param {string} root
  */
 export function manifestDir(node, root) {
-  return node.path ?? path.join(root, "node_modules", node.name);
+  return node.dir ?? node.path ?? path.join(root, "node_modules", node.name);
 }
 
 /**
