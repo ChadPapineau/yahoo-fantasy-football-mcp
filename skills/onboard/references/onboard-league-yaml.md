@@ -94,16 +94,26 @@ Players are `{ name, team, position, slot }` with the nflverse team abbreviation
 
 ### Saving it
 
-The server reads `league.yaml` from its config directory: `$FF_CONFIG_DIR` when that is set, otherwise `$XDG_CONFIG_HOME/fantasy-football-mcp` when `XDG_CONFIG_HOME` is set to an absolute path, otherwise `~/.config/fantasy-football-mcp`. These commands (macOS or Linux) work that directory out the same way and print it; `umask 077` makes the new file private from the start:
+The server reads `league.yaml` from its config directory: `$FF_CONFIG_DIR` when that is set, otherwise `$XDG_CONFIG_HOME/fantasy-football-mcp` when `XDG_CONFIG_HOME` is set to an absolute path, otherwise `~/.config/fantasy-football-mcp`. These commands (macOS or Linux, in zsh, bash or sh) work that directory out the same way and print it: a leading `~/` in `FF_CONFIG_DIR` is your home folder and spaces around either value are ignored, as in the server, and an `FF_CONFIG_DIR` the server cannot use (a relative path, or `~name/`) prints a `STOP:` line instead. `umask 077` makes the new file private from the start:
 
 ```sh
 umask 077
-case "${XDG_CONFIG_HOME:-}" in /*) B="$XDG_CONFIG_HOME" ;; *) B="$HOME/.config" ;; esac
-D="${FF_CONFIG_DIR:-$B/fantasy-football-mcp}"
-mkdir -p "$D" && chmod 700 "$D" && echo "League file: $D/league.yaml"
-R=$(cd "$D" && pwd -P)
-P=$R; while [ "$P" != / ]; do [ -e "$P/.git" ] && echo "STOP: $D is inside a git repository - choose another folder" && break; P=$(dirname "$P"); done
-case "$R/" in */Dropbox/*|*/"Google Drive"/*|*/OneDrive*/*|*/CloudStorage/*|*/"Mobile Documents"/*|"$HOME"/Documents/*|"$HOME"/Desktop/*) echo "STOP: $D is in a synced folder - choose another folder" ;; esac
+X=${XDG_CONFIG_HOME:-}; while :; do case $X in [[:space:]]*) X=${X#?} ;; *[[:space:]]) X=${X%?} ;; *) break ;; esac; done
+V=${FF_CONFIG_DIR:-}; while :; do case $V in [[:space:]]*) V=${V#?} ;; *[[:space:]]) V=${V%?} ;; *) break ;; esac; done
+case "$X" in /*) C=$X ;; *) C=$HOME/.config ;; esac
+case "$V" in "") D=$C/fantasy-football-mcp ;; "~") D=$HOME ;; "~/"*) D=$HOME/${V#"~/"} ;; /*) D=$V ;; *) D=; echo "STOP: FF_CONFIG_DIR must be an absolute path or start with ~/ - correct it, then run these commands again" ;; esac
+if [ -n "$D" ] && mkdir -p "$D" && chmod 700 "$D"; then
+  echo "League file: $D/league.yaml"
+  R=$(cd "$D" >/dev/null 2>&1 && pwd -P); H=$(cd "$HOME" >/dev/null 2>&1 && pwd -P)
+  P=$R; while [ "$P" != / ]; do [ -e "$P/.git" ] && echo "STOP: $D is inside a git repository - choose another folder" && break; P=$(dirname "$P"); done
+  find "$HOME" "${XDG_DATA_HOME:-$HOME/.local/share}/yadm" "$C/yadm" "$C/vcsh/repo.d" -mindepth 1 -maxdepth 1 -type d \( -name '.*' -o -name '*.git' \) 2>/dev/null | while IFS= read -r G; do
+    [ -f "$G/HEAD" ] && [ -d "$G/objects" ] && W=$(git config --file "$G/config" --get core.worktree 2>/dev/null) || continue
+    case "$W" in /*) ;; *) W=$G/$W ;; esac
+    W=$(cd "$W" >/dev/null 2>&1 && pwd -P) && case "$R/" in "${W%/}"/*) echo "STOP: $D is in the work tree of the git repository $G - choose another folder" ;; esac
+  done
+  L=$(printf '%s/' "$R" | tr '[:upper:]' '[:lower:]'); HL=$(printf '%s' "$H" | tr '[:upper:]' '[:lower:]')
+  case "$L" in */dropbox*/*|*/"google drive"*/*|*/onedrive*/*|*/cloudstorage/*|*/"mobile documents"/*|"$HL"/documents/*|"$HL"/desktop/*) echo "STOP: $D is in a synced folder - choose another folder" ;; esac
+fi
 # save the YAML as "$D/league.yaml" with any editor, then:
 chmod 600 "$D/league.yaml"
 ff doctor
@@ -111,7 +121,7 @@ ff doctor
 
 Save the file at the path printed after `League file:`. If `ff doctor` then reports "no league file at" some other path, that is the path the server reads: move the file there. Never save it inside a code repository or a synced folder (any git working tree — a dotfiles repository that holds `~/.config` counts — iCloud Drive, Dropbox, Google Drive, OneDrive, or Desktop/Documents when they sync). The project repository is public, and a file in any repository is one `git add` away from being committed. If the commands print a line starting `STOP:`, do not save the file there: choose another folder, set `FF_CONFIG_DIR` to it, and run them again.
 
-The server's own location check is narrower than this rule, so do not rely on it: the server refuses only this project's checkout and these folders in your home folder: `~/Documents`, `~/Desktop`, iCloud Drive (`~/Library/Mobile Documents`), `~/Library/CloudStorage`, `~/Dropbox`, `~/Google Drive` and `~/OneDrive` (a business `~/OneDrive - <organisation>` too). It does not look for other git working trees, or for any other synced folder (another sync app's folder, or one outside the home folder). The commands above catch other git working trees, and iCloud Drive, CloudStorage, Dropbox, Google Drive and OneDrive folders wherever they are. Other sync apps' folders (Nextcloud, Box Sync, MEGA and the like) are caught by neither, so check that yourself.
+The server's own location check is narrower than this rule, so do not rely on it: the server refuses only this project's checkout and these folders in your home folder: `~/Documents`, `~/Desktop`, iCloud Drive (`~/Library/Mobile Documents`), `~/Library/CloudStorage`, `~/Dropbox`, `~/Google Drive` and `~/OneDrive` (a business `~/OneDrive - <organisation>` too). It does not look for other git working trees, or for any other synced folder (another sync app's folder, or one outside the home folder). The commands above catch a git working tree with a `.git` folder or file on the path; a dotfiles repository whose `core.worktree` setting holds the folder (a bare repository in a dot-folder of your home folder, such as `~/.cfg`, or yadm's or vcsh's in their default places); and iCloud Drive, CloudStorage, Dropbox, Google Drive and OneDrive folders wherever they are and whatever their app names them (`Dropbox (Personal)`, `OneDrive - <organisation>`). Neither catches a dotfiles repository used only through `--git-dir` and `--work-tree` (an alias, with no `core.worktree`): if you keep dotfiles that way, make sure that work tree does not hold the folder. Other sync apps' folders (Nextcloud, Box Sync, MEGA and the like) are caught by neither, so check that yourself.
 
 ### Keeping it current
 
