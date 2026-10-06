@@ -3,6 +3,9 @@
 // (score a week's logged calls; the metrics that reach n first — C12/OBJ-05), E14
 // ff_list_recommendations (a C10 list tool). Every read-back of model-authored text is bare and
 // path-listed with source `store.recommendation_log` (OBJ-15; RECLOG_TEXT_PATHS).
+// E13 (QA-2-040): a current-only roster (the manual league file) decides `followed` and the H2H
+// result only while unchanged since the week's last lock; earlier scorings' outcomes carry forward.
+// E13 (QA-2-042): per-player metrics score the stored pre-lock projections of every roster it reads.
 import { z } from "zod/v4";
 import type { NflTeam } from "../../config/schema.js";
 import type { InputFreshness, RecSubject } from "../../domain/analytics/types.js";
@@ -11,6 +14,8 @@ import { manualPlayerKeyFor, type Week } from "../../domain/league/types.js";
 import { validateRecordInput } from "../../domain/reclog/record.js";
 import {
   buildRetrospective,
+  rosterHoldsWeek,
+  weekLastLock,
   type PlayerForecast,
   type RosterPresence,
   type SubjectPoints,
@@ -20,6 +25,7 @@ import {
   RECLOG_TEXT_PATHS,
   RECLOG_UNTRUSTED_SOURCE,
   RECOMMENDATION_KINDS,
+  type RecommendationOutcome,
   type RecommendationRecord,
 } from "../../domain/reclog/types.js";
 import { score, scoringEngine } from "../../domain/scoring/engine.js";
@@ -116,7 +122,8 @@ export const recordRecommendation = defineTool({
   input: recordRecommendationInputSchema,
   opaqueInput: {
     rec: "data.rec of the analytics result being logged, unchanged (Rec: ff://docs/tool-outputs)",
-    alternatives: "[{action, subjects, point_estimate, distribution, decision_metric_value}]",
+    alternatives:
+      "[{action, subjects, point_estimate, distribution, decision_metric_value}]; a lineup alternative's subjects: start the entrant in its slot + sit the starter it replaces, or a whole lineup",
   },
   data: e12Data,
   budget: "list",
@@ -267,6 +274,28 @@ const e13Data = z.strictObject({
 /** How many simulation samples of a stored projection the retrospective scores (latency, A15). */
 export const RETRO_SAMPLE_CAP = 500;
 
+/**
+ * Platforms whose `getRoster(team, week)` returns the CURRENT roster for every week: the manual league
+ * file holds only today's lineup (ManualLeagueProvider.getRoster; plan 01 A-12). A platform that
+ * keeps each week's roster (Yahoo's `roster;week=N`) is not listed.
+ */
+export const CURRENT_ONLY_ROSTER_PLATFORMS: ReadonlySet<string> = new Set(["manual"]);
+
+/**
+ * Newest content instant among this call's reads of `source` (the league file's last edit); null
+ * when there is none or any of them is not a valid instant (then nothing is known about edits).
+ */
+function newestAsOf(inputs: readonly InputStamp[], source: string): string | null {
+  let best: { iso: string; ms: number } | null = null;
+  for (const i of inputs) {
+    if (i.source !== source) continue;
+    const ms = Date.parse(i.as_of);
+    if (!Number.isFinite(ms)) return null;
+    if (best === null || ms > best.ms) best = { iso: i.as_of, ms };
+  }
+  return best?.iso ?? null;
+}
+
 /** The default week of E13: the latest final week at or before the current week, else current − 1. */
 function defaultRetroWeek(ctx: ToolContext, lc: LeagueContext): Week {
   for (let w = Math.min(lc.league.current_week, 22); w >= 1; w--)
@@ -412,13 +441,36 @@ export const analyzeRetrospective = defineTool({
         points: pointsOf(r),
       })),
     ];
-    const myPts = startedTotal(roster, pointsOf);
-    const oppPts = oppRoster === null ? null : startedTotal(oppRoster, pointsOf);
-    // pre-lock stored projections of my started players (never a post-kickoff run)
     const games = weekGames(ctx, season, w).rows;
     const mode = lockModeOf(lc.league);
+    // QA-2-040: a current-only roster (league.yaml) is week w's only while unchanged since the
+    // week's last lock; otherwise it may already hold a later week's lineup, so neither `followed`
+    // nor the H2H result is read from it (earlier outcomes, then the logged hint, decide)
+    const weekRoster = rosterHoldsWeek(
+      CURRENT_ONLY_ROSTER_PLATFORMS.has(lc.ref.platform),
+      newestAsOf(inputs, lc.ref.platform),
+      weekLastLock(games, mode),
+    );
+    if (!weekRoster && records.length > 0)
+      warnings.push(
+        `the league file was edited after week ${String(w)} locked, so it may not hold week ${String(w)}'s rosters: followed comes from an earlier review or the logged hint (null: ask the user), and decisive is not computed`,
+      );
+    const myPts = weekRoster ? startedTotal(roster, pointsOf) : null;
+    const oppPts = oppRoster === null || !weekRoster ? null : startedTotal(oppRoster, pointsOf);
+    const priorOutcomes: RecommendationOutcome[] = [];
+    for (const r of records) {
+      const o = ctx.services.recommendationLog.outcome(r.log_id);
+      if (o !== null) priorOutcomes.push(o);
+    }
+    // QA-2-042: the pre-lock stored projections of every rostered player of the rosters read — mine
+    // and the opponent's (plan 10 §2.1 "all rostered players, all rosters"), each subject once;
+    // never a post-kickoff run
     const forecasts: PlayerForecast[] = [];
-    for (const t of mine) {
+    const scoredSubjects = new Set<string>();
+    for (const t of [...mine, ...(opp ?? [])]) {
+      const id = t.subject.kind === "player" ? `p:${t.subject.gsis_id}` : `d:${t.subject.nfl_team}`;
+      if (scoredSubjects.has(id)) continue;
+      scoredSubjects.add(id);
       const outcome = pointsOf(presenceOf(t));
       const lockAt = games.length === 0 ? null : lockAtFor(t.nfl_team, games, mode);
       if (outcome === null || lockAt === null) continue;
@@ -442,13 +494,14 @@ export const analyzeRetrospective = defineTool({
         records,
         kinds: args.kinds ?? null,
         realised,
-        roster,
+        roster: weekRoster ? roster : null,
         team_result:
           myPts === null || oppPts === null ? null : { my_points: myPts, opponent_points: oppPts },
         player_forecasts: forecasts,
         probabilities: { p_active: [], p_win: [], p_win_given_bid: [], p_role_holds: [] },
         min_n: args.min_n,
         inputs: dataInputs,
+        prior_outcomes: priorOutcomes,
       },
       ctx.services.clock,
     );

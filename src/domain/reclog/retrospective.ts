@@ -2,10 +2,14 @@
 // E13 + C12; research 05 §12.1–12.6; plan 10 §2.1 n-per-metric, A9; OBJ-05: no parameter proposals;
 // OBJ-15: `recommended`/`best_alternative` are the model's own text, path-listed by the tool).
 // Pure: the tool gathers the week's records, realised points, roster and forecasts and passes them in.
+// `followed` of a past week never flips with a later roster (QA-2-040): a current-only roster is
+// evidence only while it is unchanged since the week locked, an earlier answer carries forward, and
+// a final outcome's answer is the one E14 lists. Regret compares like with like (QA-2-041).
 
 import type { NflTeam } from "../../config/schema.js";
-import type { InputFreshness, Rec, RecSubject, SubjectRole } from "../analytics/types.js";
+import type { InputFreshness, NflGame, Rec, RecSubject, SubjectRole } from "../analytics/types.js";
 import { parseIso, type Clock } from "../clock.js";
+import { firstKickoff, lastKickoff, type LockMode } from "../league/schedule.js";
 import { POSITION_RE, type IsoInstant, type Week } from "../league/types.js";
 import type { Dist } from "../scoring/types.js";
 import {
@@ -96,7 +100,11 @@ export interface RetrospectiveInput {
   /** Kinds to score; null = all. */
   readonly kinds: readonly RecommendationKind[] | null;
   readonly realised: readonly SubjectPoints[];
-  /** The user's roster for the week; null when unknown (then `followed_hint` decides). */
+  /**
+   * The user's roster FOR THE WEEK; null when unknown or not known to be that week's (a current-only
+   * roster edited since the week locked — rosterHoldsWeek). Null → an earlier scoring's `followed`,
+   * else `followed_hint`, decides.
+   */
   readonly roster: readonly RosterPresence[] | null;
   readonly team_result: TeamResult | null;
   readonly player_forecasts: readonly PlayerForecast[];
@@ -105,6 +113,11 @@ export interface RetrospectiveInput {
   readonly min_n: number;
   /** Every contributing input with its freshness (plan 07 §2). */
   readonly inputs: readonly InputFreshness[];
+  /**
+   * The persisted outcomes of the week's records from earlier scorings (RecommendationLogRepository
+   * .outcome), matched by `log_id`; absent/empty = none (QA-2-040: resolveFollowed).
+   */
+  readonly prior_outcomes?: readonly RecommendationOutcome[];
 }
 
 /** The assembled retrospective plus the outcome rows to persist and fixed-vocabulary warnings. */
@@ -125,6 +138,8 @@ const GAIN_ROLES: ReadonlySet<SubjectRole> = new Set<SubjectRole>([
   "stream",
   "trade_in",
 ]);
+/** Roles that take the subject out of the lineup or roster in the move. */
+const LEAVE_ROLES: ReadonlySet<SubjectRole> = new Set<SubjectRole>(["sit", "drop", "trade_out"]);
 /** Kinds whose realised points land in this week's matchup (so `decisive` is defined). */
 const DECISIVE_KINDS: ReadonlySet<RecommendationKind> = new Set<RecommendationKind>([
   "lineup",
@@ -227,6 +242,140 @@ export function followedOf(
   });
 }
 
+/**
+ * `followed` of a call, stable across scorings (QA-2-040). A final outcome is immutable and is what
+ * E14 lists, so its answer stands. Otherwise the week's roster decides (followedOf); without one, an
+ * earlier scoring's answer — made from that week's roster, or from the same hint — carries forward,
+ * and only then does `followed_hint` decide. A roster edited after the week can never flip it.
+ */
+export function resolveFollowed(
+  record: RecommendationRecord,
+  roster: SubjectIndex<boolean> | null,
+  prior: RecommendationOutcome | null,
+): boolean | null {
+  const mine = prior !== null && prior.log_id === record.log_id ? prior : null;
+  if (mine?.week_final === true) return mine.followed;
+  if (roster !== null && record.rec.subjects.length > 0) return followedOf(record, roster);
+  if (mine !== null && mine.followed !== null) return mine.followed;
+  return followedOf(record, null);
+}
+
+/**
+ * Whether a roster read is the scored week's roster (QA-2-040). A platform that keeps each week's
+ * roster always is (`currentOnly` false). A current-only roster — the manual league file, which holds
+ * only today's lineup (plan 01 A-12) — is the week's only while unchanged since the week's last lock
+ * (`rosterAsOf` = its last edit ≤ `weekLockAt`): it then reads exactly as it did when the last player
+ * locked. Edited later, it may already hold the next week's lineup. Unknown edit time or lock: no.
+ */
+export function rosterHoldsWeek(
+  currentOnly: boolean,
+  rosterAsOf: string | null,
+  weekLockAt: IsoInstant | null,
+): boolean {
+  if (!currentOnly) return true;
+  if (rosterAsOf === null || weekLockAt === null) return false;
+  const edited = Date.parse(rosterAsOf);
+  const lock = Date.parse(weekLockAt);
+  return Number.isFinite(edited) && Number.isFinite(lock) && edited <= lock;
+}
+
+/** The week's last lock: its last kickoff (`per_game`) or its first (`weekly`); null if unknown. */
+export function weekLastLock(weekGames: readonly NflGame[], mode: LockMode): IsoInstant | null {
+  return mode === "weekly" ? firstKickoff(weekGames) : lastKickoff(weekGames);
+}
+
+/** The same player or defence: the first id both carry decides (key, gsis id, a defence's team). */
+export function sameSubject(a: SubjectIdentity, b: SubjectIdentity): boolean {
+  if (a.player_key !== null && b.player_key !== null) return a.player_key === b.player_key;
+  if (a.gsis_id !== null && b.gsis_id !== null) return a.gsis_id === b.gsis_id;
+  if (a.gsis_id === null && b.gsis_id === null && a.nfl_team !== null && b.nfl_team !== null)
+    return a.nfl_team === b.nfl_team;
+  return false;
+}
+
+/**
+ * The move an alternative stands for, made comparable with the recommendation (QA-2-041: regret
+ * compares like with like). A lineup rec lists its whole starting lineup, while an alternative may be
+ * a whole lineup or just the change. The alternative is a whole counterpart when it brings in as many
+ * subjects (start/add/stream/trade_in) as the recommendation and takes out none of them. Otherwise it
+ * is a change to the recommended move: the recommended subjects it sits, drops or trades out leave,
+ * and its incoming subjects take their seats — or, when it names none leaving, each takes the seat of
+ * the one recommended starter in its own slot. Null when that is ambiguous (a slot held twice, no
+ * slot) or the result holds a different number of subjects: no like-for-like comparison exists.
+ */
+export function counterpartOf(
+  recSubjects: readonly RecSubject[],
+  altSubjects: readonly RecSubject[],
+): readonly RecSubject[] | null {
+  const seats = recSubjects.filter((s) => GAIN_ROLES.has(s.role));
+  const incoming = altSubjects.filter((s) => GAIN_ROLES.has(s.role));
+  const leaving = altSubjects.filter(
+    (s) => LEAVE_ROLES.has(s.role) && seats.some((r) => sameSubject(r, s)),
+  );
+  if (leaving.length === 0 && incoming.length === seats.length) return altSubjects;
+  let moved: readonly RecSubject[] = seats.filter((r) => !leaving.some((l) => sameSubject(r, l)));
+  const entrants = incoming.filter((s) => !moved.some((r) => sameSubject(r, s)));
+  if (leaving.length > 0) moved = [...moved, ...entrants];
+  else
+    for (const e of entrants) {
+      const seat = moved.filter(
+        (r) =>
+          e.slot !== null &&
+          r.slot === e.slot &&
+          seats.includes(r) &&
+          !incoming.some((s) => sameSubject(s, r)),
+      );
+      const [only] = seat;
+      if (only === undefined || seat.length > 1) return null;
+      moved = moved.map((r) => (r === only ? e : r));
+    }
+  if (moved.length !== seats.length) return null;
+  return [...moved, ...recSubjects.filter((s) => !GAIN_ROLES.has(s.role))];
+}
+
+/** One signed realised term of a move. */
+interface SignedTerm {
+  readonly s: RecSubject;
+  readonly sign: 1 | -1;
+}
+
+/** A move's signed realised terms: + each gain subject, − each trade_out (sit/drop count 0). */
+function signedTerms(subjects: readonly RecSubject[]): SignedTerm[] {
+  const out: SignedTerm[] = [];
+  for (const s of subjects) {
+    if (GAIN_ROLES.has(s.role)) out.push({ s, sign: 1 });
+    else if (s.role === "trade_out") out.push({ s, sign: -1 });
+  }
+  return out;
+}
+
+/**
+ * realised(counterpart) − realised(recommended), from the subjects the two moves do NOT share (a
+ * shared subject with the same sign realises the same points and cancels exactly). Null when a
+ * needed subject's points are unknown.
+ */
+export function regretAgainst(
+  recSubjects: readonly RecSubject[],
+  counterpart: readonly RecSubject[],
+  points: SubjectIndex<number | null>,
+): number | null {
+  const rest = signedTerms(recSubjects);
+  const terms: number[] = [];
+  const add = (s: RecSubject, sign: number): boolean => {
+    const p = points.get(s);
+    if (p === undefined || p === null) return false;
+    terms.push(sign * p);
+    return true;
+  };
+  for (const t of signedTerms(counterpart)) {
+    const i = rest.findIndex((r) => r.sign === t.sign && sameSubject(r.s, t.s));
+    if (i >= 0) rest.splice(i, 1);
+    else if (!add(t.s, t.sign)) return null;
+  }
+  for (const r of rest) if (!add(r.s, -r.sign)) return null;
+  return stableSum(terms);
+}
+
 function sign(x: number): number {
   return x > 0 ? 1 : x < 0 ? -1 : 0;
 }
@@ -235,30 +384,40 @@ function sign(x: number): number {
 export interface ScoredCall {
   readonly call: RetrospectiveCall;
   readonly swaps: readonly number[];
+  /** Alternatives with no like-for-like counterpart of the recommendation (counted in a warning). */
+  readonly incomparable: number;
 }
 
 /**
  * Scores one call: `realised` of the recommendation; `regret` = realised(best alternative in
- * hindsight) − realised(recommended), signed (negative = the call beat every alternative), null when
- * no alternative is scorable; `decisive` = following the best alternative instead would have changed
- * the H2H result (win/tie/loss) — defined only for followed lineup/stream calls with a known result.
- * Swap regrets (lineup calls): the k-th start subject paired with the k-th sit subject, each
- * max(0, points(sit) − points(start)).
+ * hindsight) − realised(recommended), like with like (counterpartOf, regretAgainst), signed (negative
+ * = the call beat every alternative), null when the recommendation or no alternative is scorable;
+ * `followed` from resolveFollowed (`prior` = the call's persisted outcome, if any); `decisive` =
+ * following the best alternative instead would have changed the H2H result (win/tie/loss) — defined
+ * only for followed lineup/stream calls with a known result. Swap regrets (lineup calls): the k-th
+ * start subject paired with the k-th sit subject, each max(0, points(sit) − points(start)).
  */
 export function scoreCall(
   record: RecommendationRecord,
   points: SubjectIndex<number | null>,
   roster: SubjectIndex<boolean> | null,
   team: TeamResult | null,
+  prior: RecommendationOutcome | null = null,
 ): ScoredCall {
   const realised = realisedOf(record.rec.subjects, points);
   let best: { action: string; value: number } | null = null;
+  let incomparable = 0;
   for (const alt of record.alternatives) {
-    const v = realisedOf(alt.subjects, points);
+    const counterpart = counterpartOf(record.rec.subjects, alt.subjects);
+    if (counterpart === null) {
+      incomparable += 1;
+      continue;
+    }
+    const v = realised === null ? null : regretAgainst(record.rec.subjects, counterpart, points);
     if (v !== null && (best === null || v > best.value)) best = { action: alt.action, value: v };
   }
-  const regret = realised !== null && best !== null ? best.value - realised : null;
-  const followed = followedOf(record, roster);
+  const regret = best === null ? null : best.value;
+  const followed = resolveFollowed(record, roster, prior);
   let decisive: boolean | null = null;
   if (
     regret !== null &&
@@ -293,6 +452,7 @@ export function scoreCall(
       realised,
     },
     swaps,
+    incomparable,
   };
 }
 
@@ -599,8 +759,16 @@ export function buildRetrospective(input: RetrospectiveInput, clock: Clock): Ret
     input.roster === null
       ? null
       : new SubjectIndex(input.roster.map((r) => ({ ...r, value: r.started })));
-  const scored = thisWeek.map((r) => scoreCall(r, points, roster, input.team_result));
+  const priors = new Map((input.prior_outcomes ?? []).map((o) => [o.log_id, o]));
+  const scored = thisWeek.map((r) =>
+    scoreCall(r, points, roster, input.team_result, priors.get(r.log_id) ?? null),
+  );
   const calls = scored.map((s) => s.call);
+  const incomparable = scored.reduce((n, s) => n + s.incomparable, 0);
+  if (incomparable > 0)
+    warnings.push(
+      `retrospective: ${String(incomparable)} alternatives not scored: not like-for-like with the recommended move`,
+    );
 
   const forecasts = input.player_forecasts.filter(validForecast);
   if (forecasts.length < input.player_forecasts.length)
