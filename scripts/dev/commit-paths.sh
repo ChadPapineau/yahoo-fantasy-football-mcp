@@ -11,8 +11,9 @@
 #   * a path is outside the repository
 #   * the change is empty, or touches a path not under the given paths
 #   * scripts/dev/scan-secrets.mjs finds a secret or a personal identifier in any blob being
-#     committed (exit 9), or the author/committer address is not a no-reply or reserved
-#     placeholder address (exit 10, QA-1-095)
+#     committed (exit 9) or in the commit message (exit 11, QA-2-026: the message is published
+#     too), or the author/committer address is not a no-reply or reserved placeholder address
+#     (exit 10, QA-1-095)
 #
 # How: a private index (GIT_INDEX_FILE) is built from HEAD, the paths are added to it,
 # `git commit-tree` + a compare-and-swap `update-ref` move the branch, and the shared
@@ -42,7 +43,8 @@ done
 print $$ > "$LOCK/pid"
 IDX=$(mktemp -u "${TMPDIR:-/tmp}/ff-idx.XXXXXX")
 ERR=$(mktemp "${TMPDIR:-/tmp}/ff-push.XXXXXX")
-trap 'rm -rf "$LOCK"; rm -f "$IDX" "$ERR"' EXIT INT TERM HUP
+MSG=$(mktemp "${TMPDIR:-/tmp}/ff-msg.XXXXXX")
+trap 'rm -rf "$LOCK"; rm -f "$IDX" "$ERR" "$MSG"' EXIT INT TERM HUP
 
 PARENT=$(git rev-parse HEAD)
 GIT_INDEX_FILE=$IDX git read-tree "$PARENT"
@@ -69,12 +71,17 @@ done
 # the commit identity first: a machine-derived address must never be published (QA-1-095)
 "$ROOT/scripts/dev/with-node.sh" node "$ROOT/scripts/dev/scan-secrets.mjs" --identity \
   || { print -u2 "commit-paths: commit identity refused — nothing committed"; exit 10; }
+# the message, scanned as the very bytes `git commit-tree` stores: it is published with the commit,
+# and pushed at once below (QA-2-026)
+print -r -- "$msg" > "$MSG"
+"$ROOT/scripts/dev/with-node.sh" node "$ROOT/scripts/dev/scan-secrets.mjs" --message "$MSG" \
+  || { print -u2 "commit-paths: commit message scan FAILED — nothing committed"; exit 11; }
 # then EXACTLY the blobs being committed: the private index against HEAD (= $PARENT), read by
 # object id, any status but a deletion (type changes included) — not the working-tree files
 GIT_INDEX_FILE=$IDX "$ROOT/scripts/dev/with-node.sh" node "$ROOT/scripts/dev/scan-secrets.mjs" --index \
   || { print -u2 "commit-paths: secret/identifier scan FAILED — nothing committed"; exit 9; }
 
-C=$(print -r -- "$msg" | git commit-tree "$T" -p "$PARENT")
+C=$(git commit-tree "$T" -p "$PARENT" < "$MSG")
 git update-ref "refs/heads/$branch" "$C" "$PARENT"
 git reset -q -- "${rel[@]}" 2>/dev/null || true
 print "commit-paths: committed ${C[1,10]} on $branch (${#changed} path(s))"

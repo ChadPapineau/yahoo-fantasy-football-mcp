@@ -1,0 +1,15 @@
+#!/bin/sh
+# commit-msg — block a secret, a personal address or a deny-listed name in the commit MESSAGE
+# (QA-2-026). The message is published with the commit, and once it is on main it cannot be
+# rewritten away; the pre-commit hook runs before the message exists, so it cannot see it.
+# Scans the message file git hands this hook (`scan-secrets.mjs --editmsg`): the subject, the body,
+# every trailer and the comment lines too (with `git commit -m` git keeps them). Only the diff that
+# `git commit -v` adds below the scissors line is left out, since git drops it from the message.
+# Enabled per clone by the same setting as pre-commit:  git config core.hooksPath .githooks
+# (scripts/dev/commit-paths.sh scans its message itself, with --message, since it commits via
+# plumbing that does not fire hooks.) Never bypass with --no-verify.
+root=$(git rev-parse --show-toplevel) || exit 1
+"$root/scripts/dev/with-node.sh" node "$root/scripts/dev/scan-secrets.mjs" --editmsg "$1" || {
+  echo "commit-msg: secret/identifier scan of the commit message failed — commit blocked (the message is kept in $1)" >&2
+  exit 1
+}
