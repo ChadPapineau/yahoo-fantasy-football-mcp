@@ -206,6 +206,20 @@ export const P_ACTIVE = Object.freeze({
   noDesignation: 1,
 });
 
+/**
+ * The official injury report's rhythm (QA-1-021, QA-2-034; research 04 §A #6: practice reports
+ * Wed–Fri, game status Fri/Sat — Wednesday for a Thursday game). A team's rows appear with the first
+ * practice report; designations only with the game-status report, which the NFL publishes more than
+ * a day before kickoff for every game day — so a release built `gameStatusLeadMs` or less before a
+ * team's kickoff carries that team's game-status report. A designation carries forward while its
+ * team's next game-status report is not out, for at most `carryWeeks` weeks past the report it came
+ * from; beyond that availability is unknown, never "cleared".
+ */
+export const INJURY_REPORT = Object.freeze({
+  gameStatusLeadMs: 24 * 60 * 60 * 1000,
+  carryWeeks: 2,
+});
+
 /** Platform status codes that mean "will not play" (plan 07 D2: `O`/`IR`/`NA`/`SUSP` → 0). */
 export const INACTIVE_STATUS_CODES: readonly string[] = Object.freeze([
   "O",
@@ -329,6 +343,8 @@ export const KDEF = Object.freeze({
   shortlistSims: 150,
   /** Candidates per position kept for pass 2 (≥ maxCandidatesPerPosition). */
   shortlistPerPosition: 12,
+  /** Teams named in the "no betting line" assumption before "and N more" (QA-2-044; 200-char cap). */
+  unpricedTeamsShown: 6,
 });
 
 /** Roof values under which weather is irrelevant. */

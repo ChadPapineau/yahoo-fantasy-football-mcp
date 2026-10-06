@@ -1,14 +1,20 @@
 // availability.ts — P(active) (research 05 §1 step 8, §3.5: Questionable 71 % base rate, the
 // practice trend refines it; plan 07 D2 / changelog OBJ-16: within 3 h of kickoff a provider-stamped
-// game-day status wins and `p_active_basis = "yahoo_gameday_status"`). Pure.
+// game-day status wins and `p_active_basis = "yahoo_gameday_status"`), and which team-weeks of the
+// official report are only a practice report and which carry the game-status designations
+// (QA-1-021, QA-2-034). Pure.
+import type { NflTeam } from "../../config/schema.js";
+import { easternDate, kickoffMs } from "../league/schedule.js";
+import type { Week } from "../league/types.js";
 import {
   GAME_DAY_WINDOW_MS,
   INACTIVE_STATUS_CODES,
+  INJURY_REPORT,
   P_ACTIVE,
   ROSTER_INACTIVE_THIS_WEEK,
   ROSTER_OUT_STATUSES,
 } from "./constants.js";
-import type { InjuryReport, PActiveBasis } from "./types.js";
+import type { InjuryReport, NflGame, PActiveBasis } from "./types.js";
 
 /** What P(active) is computed from. */
 export interface AvailabilityInput {
@@ -19,13 +25,32 @@ export interface AvailabilityInput {
   /**
    * Whether this week's report is out for the player's team (QA-1-021: reports are published team by
    * team, Wednesday–Friday; the Thursday teams first). Omitted → `injuriesLoaded` (the old contract).
-   * Only a published report makes "not listed" mean "cleared to play".
    */
   readonly reportPublished?: boolean;
-  /** Whether the previous week's report was published for the player's team. */
+  /**
+   * Whether his team's GAME-STATUS report for this week is out — the one that carries the
+   * designations (`reportStates` → `"final"`). Only it makes "no designation" mean "cleared to play":
+   * a practice report alone does not (QA-2-034). Omitted → the old contract (a listed row, or a
+   * published report, clears).
+   */
+  readonly reportFinal?: boolean;
+  /**
+   * Whether `priorReport` was looked up on an earlier game-status report of his team: the previous
+   * week's (the old contract) or, with `reportFinal`, the newest one before this week.
+   */
   readonly priorPublished?: boolean;
-  /** The player's row on the previous week's report, or null (not listed). */
+  /** The player's row on that earlier report, or null (not listed). */
   readonly priorReport?: InjuryReport | null;
+  /**
+   * The target week. With it, a designation older than INJURY_REPORT.carryWeeks is not carried:
+   * availability is unknown (QA-1-021 — a look-ahead or rest-of-season week).
+   */
+  readonly week?: Week;
+  /**
+   * His newest row on a practice report after `priorReport`'s week, up to the target week — the
+   * newest practice trend, which refines a carried Questionable. Omitted → `report`.
+   */
+  readonly practiceReport?: InjuryReport | null;
   /** The provider's roster status code (league.yaml `status`, Yahoo `status`), or null. */
   readonly platformStatus: string | null;
   /**
@@ -49,10 +74,20 @@ export interface Availability {
   readonly p: number | null;
   readonly basis: PActiveBasis;
   /**
-   * Set when this week's report is not out yet for the player's team and his designation was carried
-   * from that earlier week's report (QA-1-021) — the caller names it as an assumption.
+   * Set when this week's game-status report is not out yet for the player's team and his designation
+   * was carried from that earlier week's report (QA-1-021) — the caller names it as an assumption.
    */
   readonly carried_from?: number;
+  /**
+   * Set when he is on this week's practice report but his team's game-status report is not out: no
+   * designation yet, and his last game-status report did not designate him (QA-2-034) — named.
+   */
+  readonly designation_pending?: true;
+  /**
+   * Set when his newest designation (from that week) is more than INJURY_REPORT.carryWeeks old and
+   * nothing newer is out: `p` is null (unknown), never "cleared" (QA-1-021) — named.
+   */
+  readonly expired_from?: number;
 }
 
 /** P(active) from a report row's designation (Questionable refined by practice); null when none. */
@@ -109,11 +144,15 @@ export function isRosterOut(status: string | null): boolean {
  * P(active) for one player-week. Order: (1) a provider-stamped game-day status inside the game-day
  * window; (2) the official report's designation (Questionable refined by the last practice level —
  * `trend_model`); (2b) an NFL roster status that rules him out (reserve list, cut, retired,
- * suspended, unsigned, game-day inactive — QA-1-030); (3) the provider's roster status; (4) not listed on his team's published report →
- * active; (5) his team's report for this week not out yet → last week's designation carried
- * (`carried_from`), or active when he was not on it (QA-1-021); (6) the dataset loaded but neither
- * report out (a look-ahead week) → active; (7) nothing loaded → `p: null`, basis `none` (the
- * simulation then treats the player as active and the projection names that assumption).
+ * suspended, unsigned, game-day inactive — QA-1-030); (3) the provider's roster status; (4) no
+ * designation on his team's game-status report → active; (5) that report not out yet (a practice
+ * report at most — QA-2-034 — or none) → his designation on the newest earlier game-status report
+ * carried (`carried_from`; a carried Questionable refined by the newest practice level), unknown
+ * once it is more than INJURY_REPORT.carryWeeks old (`expired_from`, p null), or active when that
+ * report did not designate him (`designation_pending` when he is on this week's practice report)
+ * (QA-1-021); (6) the dataset loaded but no earlier report out → active; (7) nothing loaded →
+ * `p: null`, basis `none` (the simulation then treats the player as active and the projection names
+ * that assumption).
  */
 export function pActive(input: AvailabilityInput): Availability {
   const gd = input.gameDayStatus;
@@ -137,15 +176,88 @@ export function pActive(input: AvailabilityInput): Availability {
   const fromPlatform = fromStatusCode(input.platformStatus);
   if (fromPlatform !== null) return { p: fromPlatform, basis: "designation_base_rate" };
   const published = input.reportPublished ?? input.injuriesLoaded;
-  if (input.report !== null || published) {
-    return { p: P_ACTIVE.noDesignation, basis: "designation_base_rate" };
-  }
+  const final = input.reportFinal ?? (input.report !== null || published);
+  if (final) return { p: P_ACTIVE.noDesignation, basis: "designation_base_rate" };
+  const pending: Availability =
+    input.report === null
+      ? { p: P_ACTIVE.noDesignation, basis: "designation_base_rate" }
+      : { p: P_ACTIVE.noDesignation, basis: "designation_base_rate", designation_pending: true };
   if (input.priorPublished === true) {
     const prior = input.priorReport ?? null;
     const carried = prior === null ? null : fromReport(prior);
-    if (prior !== null && carried !== null) return { ...carried, carried_from: prior.week };
-    return { p: P_ACTIVE.noDesignation, basis: "designation_base_rate" };
+    if (prior === null || carried === null) return pending;
+    if (input.week !== undefined && input.week - prior.week > INJURY_REPORT.carryWeeks) {
+      return { p: null, basis: "none", expired_from: prior.week };
+    }
+    // a practice report since is newer evidence than the carried one's: it refines a Questionable
+    const newer = input.practiceReport === undefined ? input.report : input.practiceReport;
+    const lvl = newer === null ? null : practiceLevel(newer);
+    if (designation(prior.report_status) === "questionable" && lvl !== null) {
+      return {
+        p: P_ACTIVE.questionableByPractice[lvl],
+        basis: "trend_model",
+        carried_from: prior.week,
+      };
+    }
+    return { ...carried, carried_from: prior.week };
   }
-  if (input.injuriesLoaded) return { p: P_ACTIVE.noDesignation, basis: "designation_base_rate" };
+  if (input.injuriesLoaded) return pending;
   return { p: null, basis: "none" };
+}
+
+/** Where a team's injury report for one week stands (QA-1-021, QA-2-034). */
+export type ReportState = "none" | "practice" | "final";
+
+/**
+ * Each team's week-`week` report state from that week's rows (every team's) and games:
+ * `"final"` once its game-status report is out — any of its rows carries a designation; or a team
+ * whose game is on the same or a later Eastern date has one (a game day's game-status reports are
+ * released together, the earlier game days' before them); or the release was built at most
+ * INJURY_REPORT.gameStatusLeadMs before its kickoff (every game-status report is out by then, a
+ * team with nobody designated included). Otherwise `"practice"` when it has rows (a practice report
+ * only: no designations yet) and `"none"` when it has none (not published, or a bye). `asOfMs` is
+ * the release's own stamp (null → never final by time). Rows of other seasons or weeks are ignored.
+ */
+export function reportStates(
+  rows: readonly InjuryReport[],
+  games: readonly NflGame[],
+  season: number,
+  week: Week,
+  asOfMs: number | null,
+): Map<NflTeam, ReportState> {
+  const listed = new Set<NflTeam>();
+  const designated = new Set<NflTeam>();
+  for (const r of rows) {
+    if (r.season !== season || r.week !== week) continue;
+    listed.add(r.nfl_team);
+    if (designation(r.report_status) !== null) designated.add(r.nfl_team);
+  }
+  const kickoff = new Map<NflTeam, number>();
+  for (const g of games) {
+    if (g.season !== season || g.week !== week) continue;
+    const k = kickoffMs(g.kickoff);
+    if (k === null) continue;
+    for (const t of [g.home, g.away]) {
+      const was = kickoff.get(t);
+      if (was === undefined || k < was) kickoff.set(t, k);
+    }
+  }
+  // the latest Eastern game date whose game-status reports are out (a designation is seen there)
+  let lastOut: string | null = null;
+  for (const t of designated) {
+    const k = kickoff.get(t);
+    if (k === undefined) continue;
+    const d = easternDate(k);
+    if (lastOut === null || d > lastOut) lastOut = d;
+  }
+  const out = new Map<NflTeam, ReportState>();
+  for (const t of new Set([...listed, ...kickoff.keys()])) {
+    const k = kickoff.get(t);
+    const final =
+      designated.has(t) ||
+      (k !== undefined && lastOut !== null && easternDate(k) <= lastOut) ||
+      (k !== undefined && asOfMs !== null && asOfMs >= k - INJURY_REPORT.gameStatusLeadMs);
+    out.set(t, final ? "final" : listed.has(t) ? "practice" : "none");
+  }
+  return out;
 }

@@ -22,7 +22,13 @@ import type {
   ScoringSettings,
   StatLine,
 } from "../scoring/types.js";
-import { isRosterOut, pActive, type Availability } from "./availability.js";
+import {
+  isRosterOut,
+  pActive,
+  type Availability,
+  type ReportState,
+  reportStates,
+} from "./availability.js";
 import type { NflRosterPlayer, RosterWeeklyReader } from "../crosswalk/types.js";
 import {
   DEF_SIM,
@@ -186,12 +192,12 @@ interface Loaded {
   readonly games: Map<string, NflGame[]>;
   readonly playerLines: Map<string, WindowGame[]>;
   readonly defenseLines: WindowGame[];
-  /** Report rows keyed `gsis:week` (the target weeks and each one's previous week). */
+  /** Report rows keyed `gsis:week` (every week up to the last target week). */
   readonly injuries: Map<string, InjuryReport>;
   /** Whether the injury dataset is loaded at all, per target week. */
   readonly injuriesLoaded: Map<Week, boolean>;
-  /** Teams whose report for the week is published (any row), per week (QA-1-021). */
-  readonly reportTeams: Map<Week, ReadonlySet<NflTeam>>;
+  /** Each team's report state per week: none, a practice report, or game status (QA-2-034). */
+  readonly reportStates: Map<Week, ReadonlyMap<NflTeam, ReportState>>;
   /** The target weeks' lines were dropped: the `lines` class is past its hard limit (QA-1-004). */
   readonly linesOmitted: boolean;
   /** Each target player's newest nflverse roster row this season (QA-1-030). */
@@ -274,9 +280,12 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
   const stamps: (DatasetStamp | null)[] = [];
   const games = new Map<string, NflGame[]>();
 
-  const before: Week[] = [];
-  for (let w = 1; w < first; w++) before.push(w);
-  const sched = req.readers.schedules.games(season, [...new Set([...before, ...req.weeks])]);
+  // every week up to the last target: the trailing window's and the injury report's (whose game
+  // days say when a team's game-status report is out — QA-2-034)
+  const last = Math.max(...req.weeks);
+  const upTo: Week[] = [];
+  for (let w = 1; w <= last; w++) upTo.push(w);
+  const sched = req.readers.schedules.games(season, [...new Set([...upTo, ...req.weeks])]);
   if (sched.stamp === null) {
     throw new AnalyticsError("dataset_never_loaded", "schedules never loaded", [
       "nflverse:schedules",
@@ -389,33 +398,36 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
     }
   }
 
-  // the whole week's report (every team), so "not listed" can be told from "not published yet":
-  // a team's report exists once it has any row for the week (QA-1-021)
+  // the whole week's report (every team), so "not listed" can be told from "not published yet"
+  // (QA-1-021) and a practice report from the game-status report (QA-2-034) — every week up to the
+  // last target, so a look-ahead week finds the newest game-status report before it
   const injuries = new Map<string, InjuryReport>();
   const injuriesLoaded = new Map<Week, boolean>();
-  const reportTeams = new Map<Week, ReadonlySet<NflTeam>>();
+  const states = new Map<Week, ReadonlyMap<NflTeam, ReportState>>();
   const wanted = new Set(gsisIds);
-  const reportWeeks = [...new Set(req.weeks.flatMap((w) => (w > 1 ? [w - 1, w] : [w])))].sort(
-    (a, b) => a - b,
-  );
-  for (const w of reportWeeks) {
+  for (const w of gsisIds.length === 0 ? [] : upTo) {
     const target = req.weeks.includes(w);
-    if (gsisIds.length === 0) {
-      if (target) injuriesLoaded.set(w, false);
-      continue;
-    }
     const r = req.readers.injuries.reports(season, w, null);
     if (target) injuriesLoaded.set(w, r.stamp !== null);
     if (r.stamp === null) continue;
     if (target) stamps.push(r.stamp);
-    const teams = new Set<NflTeam>();
     for (const rep of r.rows) {
       if (rep.season !== season || rep.week !== w) continue;
-      teams.add(rep.nfl_team);
       if (wanted.has(rep.gsis_id)) injuries.set(`${rep.gsis_id}:${String(w)}`, rep);
     }
-    reportTeams.set(w, teams);
+    const asOf = Date.parse(r.stamp.as_of);
+    states.set(
+      w,
+      reportStates(
+        r.rows,
+        gamesAt(games, season, w),
+        season,
+        w,
+        Number.isFinite(asOf) ? asOf : null,
+      ),
+    );
   }
+  for (const w of req.weeks) if (!injuriesLoaded.has(w)) injuriesLoaded.set(w, false);
 
   const rosterRows = new Map<string, NflRosterPlayer>();
   if (req.readers.rosters !== undefined && gsisIds.length > 0) {
@@ -444,7 +456,7 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
     defenseLines,
     injuries,
     injuriesLoaded,
-    reportTeams,
+    reportStates: states,
     rosterRows,
     linesOmitted,
     weather,
@@ -896,7 +908,16 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
         t.subject.kind === "player"
           ? (loaded.injuries.get(`${t.subject.gsis_id}:${String(w)}`) ?? null)
           : null;
-      const prior = week - 1;
+      const stateOf = (w: Week, tm: NflTeam): ReportState =>
+        loaded.reportStates.get(w)?.get(tm) ?? "none";
+      // the newest earlier game-status report of his team (his team that week, when he is on it):
+      // last week's, or an older one across a bye or a look-ahead week (QA-1-021)
+      let prior = week - 1;
+      while (prior >= 1 && stateOf(prior, rowOf(prior)?.nfl_team ?? team) !== "final") prior -= 1;
+      // his newest practice-report row since then (this week's, or the current week's for a
+      // look-ahead week): the newest practice trend
+      let practiceReport: InjuryReport | null = null;
+      for (let w = week; w > prior && practiceReport === null; w--) practiceReport = rowOf(w);
       const rosterRow =
         t.subject.kind === "player" ? loaded.rosterRows.get(t.subject.gsis_id) : undefined;
       // the newest roster status at or before this week (never a later week's); INA only that week
@@ -910,9 +931,12 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
         rosterStatus,
         report: rowOf(week),
         injuriesLoaded: loadedInj,
-        reportPublished: loadedInj && loaded.reportTeams.get(week)?.has(team) === true,
-        priorPublished: prior >= 1 && loaded.reportTeams.get(prior)?.has(team) === true,
+        reportPublished: loadedInj && stateOf(week, team) !== "none",
+        reportFinal: loadedInj && stateOf(week, team) === "final",
+        priorPublished: loadedInj && prior >= 1,
         priorReport: prior >= 1 ? rowOf(prior) : null,
+        practiceReport,
+        week,
         platformStatus: t.platform_status ?? null,
         gameDayStatus: t.game_day_status,
         kickoffMs: ko,
@@ -926,14 +950,34 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
         if (!assumptions.some((a) => a.text === why.text)) assumptions.push(why);
       }
       if (availability.carried_from !== undefined) {
+        // a practice report may be out already: only the game-status report replaces a designation
+        const what =
+          stateOf(week, team) === "practice"
+            ? "game-status report not out"
+            : "injury report not published";
         assumptions.push(
           A(
-            `week ${String(week)} injury report not published yet for ${team}: the week ${String(availability.carried_from)} designation is carried forward`,
+            `week ${String(week)} ${what} yet for ${team}: the week ${String(availability.carried_from)} designation is carried forward`,
             `${team}'s week ${String(week)} injury report is published (Wednesday–Friday)`,
           ),
         );
       }
-      if (availability.p === null) {
+      if (availability.designation_pending === true) {
+        assumptions.push(
+          A(
+            `week ${String(week)} game-status report not out yet for ${team}: on the practice report without a designation yet, treated as active`,
+            `${team}'s week ${String(week)} game-status report is published`,
+          ),
+        );
+      }
+      if (availability.expired_from !== undefined) {
+        assumptions.push(
+          A(
+            `week ${String(week)} availability unknown: the newest designation (week ${String(availability.expired_from)}) is too old to carry forward, so treated as active`,
+            `${team}'s week ${String(week)} injury report is published`,
+          ),
+        );
+      } else if (availability.p === null) {
         assumptions.push(
           A(
             "availability unknown (injury report not loaded): treated as active",
