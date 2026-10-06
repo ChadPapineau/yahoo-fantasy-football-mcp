@@ -66,7 +66,8 @@ export type RefreshErrorCode =
 
 /**
  * Why a run did nothing, successfully. `not_published`: none of the run's seasons is published
- * upstream yet (a new season before its first data — plan 06 §2; QA-1-033).
+ * upstream yet (a new season before its first data — plan 06 §2; QA-1-033); it ends a failure
+ * streak but leaves the current file's checked_at alone (QA-1-037).
  */
 export type SkipReason = "off_season" | "schedules_never_loaded" | "locked" | "not_published";
 
@@ -393,6 +394,24 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
     const early = await unchanged(version);
     if (early !== null) return early;
 
+    /**
+     * A run that reached upstream and found nothing to publish (`not_published`) is a success, so it
+     * ends a failure streak like "published" and "unchanged" (plan 01 §5.7; QA-1-037) — without
+     * claiming the current file was checked: that file is another season's, so its checked_at, and
+     * the age and freshness every tool judges it by, stay as they were. The publisher's recovery is
+     * given the row's own checked_at: it re-records the current success row when failures follow
+     * it (one row per recovery) and is a no-op otherwise. Best-effort: the skip stands either way.
+     */
+    const endFailureStreak = async (): Promise<void> => {
+      const prev = previous();
+      if (prev === null) return;
+      try {
+        await deps.publisher.recordUnchanged(id, prev.file_version, prev.checked_at);
+      } catch {
+        deps.log?.warn("refresh.streak_not_ended", { source: id });
+      }
+    };
+
     let v = version;
     let files: readonly TempFile[] = [];
     // seasons the source reported as not published upstream yet (reset per fetch attempt)
@@ -436,6 +455,7 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
           deps.log?.warn("refresh.season_not_published", { source: id, season: s });
         }
         if (published.length === 0) {
+          await endFailureStreak();
           deps.log?.info("refresh.skipped", { source: id, reason: "not_published" });
           return { status: "skipped", source: id, reason: "not_published" };
         }
