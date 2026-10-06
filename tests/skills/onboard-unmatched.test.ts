@@ -3,6 +3,8 @@
 // that list must actually list the player, and the documented fix — find the player's NFL id,
 // add it as `gsis_id` — must be followable with the tools the text names and must settle the match.
 // A player entered with last season's NFL team (nflverse has him elsewhere) is the case.
+// QA-2-003: the same holds for the rule fields a league file leaves out ("unverified"): every
+// surface the text names for that list must list them (`ff doctor` was named and does not).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -29,11 +31,19 @@ const remedy = TEXTS.flatMap(({ file, text }) =>
     .map((s) => ({ file, s })),
 );
 
-/** The surfaces a Skill may name for the unmatched list. */
+/** Sentences that tell the reader where the unverified (left-out) rule fields are listed. */
+const unverified = TEXTS.flatMap(({ file, text }) =>
+  sentences(text)
+    .filter((s) => /unverified/i.test(s))
+    .map((s) => ({ file, s })),
+);
+
+/** The surfaces a Skill may name for the unmatched list or the unverified fields. */
 const SURFACES = {
   "ff status": /\bff status\b/,
   "ff doctor": /\bff doctor\b/,
   ff_get_status: /\bff_get_status\b/,
+  ff_get_league: /\bff_get_league\b/,
 } as const;
 type Surface = keyof typeof SURFACES;
 
@@ -58,6 +68,8 @@ async function show(surface: Surface): Promise<string> {
   switch (surface) {
     case "ff_get_status":
       return JSON.stringify(dataOf(await stale.call("ff_get_status")));
+    case "ff_get_league":
+      return JSON.stringify(dataOf(await stale.call("ff_get_league")));
     case "ff status":
       return JSON.stringify(collectStatus(makeIo(sb, { clock: w.clock }), w.config, w.logger));
     case "ff doctor":
@@ -126,4 +138,39 @@ describe("QA-1-048: the unmatched-player remedy in the onboard Skill can be foll
       await fixed.close();
     }
   }, 60_000);
+});
+
+describe("QA-2-003: every surface the onboard text names for the unverified rule fields lists them", () => {
+  /** The fixture league's left-out rule fields, as the league tool lists them. */
+  const leftOut = async (): Promise<string[]> => {
+    const rules = dataOf(await stale.call("ff_get_league")).rules as {
+      unverified_fields: string[];
+    };
+    return rules.unverified_fields;
+  };
+
+  it("the fixture league leaves rule fields out, and the league tool lists them (control)", async () => {
+    expect(await leftOut()).toContain("playoffs_reseeding");
+  });
+
+  it("the text names at least one place where the unverified fields are listed", () => {
+    const named = Object.entries(SURFACES).filter(([, re]) => unverified.some((r) => re.test(r.s)));
+    expect(named.length).toBeGreaterThan(0);
+  });
+
+  it("every place the text names for the unverified fields lists every one of them", async () => {
+    const fields = await leftOut();
+    const wrong: string[] = [];
+    for (const [surface, re] of Object.entries(SURFACES) as [Surface, RegExp][]) {
+      const where = unverified.filter((r) => re.test(r.s));
+      if (where.length === 0) continue;
+      const shown = await show(surface);
+      const absent = fields.filter((f) => !shown.includes(f));
+      if (absent.length > 0)
+        wrong.push(
+          `${surface} lacks ${absent.join(", ")} (named in ${where.map((r) => r.file).join(", ")})`,
+        );
+    }
+    expect(wrong).toEqual([]);
+  });
 });
