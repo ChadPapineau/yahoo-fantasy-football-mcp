@@ -25,6 +25,31 @@ import {
 const classes = FRESHNESS_CLASS_IDS.map((id) => FRESHNESS_TABLE[id]);
 const RANK: Record<FreshnessState, number> = { fresh: 0, stale: 1, expired: 2 };
 
+/** Zones from UTC−11 to UTC+14, half- and three-quarter-hour offsets included (QA-2-025). */
+const ZONES = [
+  "UTC",
+  "Pacific/Pago_Pago",
+  "America/Los_Angeles",
+  "America/New_York",
+  "Asia/Kolkata",
+  "Asia/Kathmandu",
+  "Pacific/Auckland",
+  "Pacific/Chatham",
+  "Pacific/Kiritimati",
+] as const;
+
+/** Runs `f` with the process time zone set to `zone` (Node re-reads TZ on assignment), then restores it. */
+function inZone<T>(zone: string, f: () => T): T {
+  const prev = process.env.TZ;
+  process.env.TZ = zone;
+  try {
+    return f();
+  } finally {
+    if (prev === undefined) delete process.env.TZ;
+    else process.env.TZ = prev;
+  }
+}
+
 describe("freshness table shape (plan 01 A-4..A-9: shape, not values)", () => {
   it("has exactly one row per class id, keyed by its own id", () => {
     expect(Object.keys(FRESHNESS_TABLE).sort()).toEqual([...FRESHNESS_CLASS_IDS].sort());
@@ -330,18 +355,36 @@ describe("stampState — the class basis picks the instant (critics C-12, C-08b)
       stampState(cls, { as_of: iso(0), fetched_at: iso(0), checked_at: null }, NaN),
     ).toThrow(RangeError);
   });
-  // The oracle classifies with the TTL that applies at the basis instant: NOW is a Saturday, an off-day, so
-  // schedules and lines get their off-day TTL there (QA-1-036). Without it the property failed for any
-  // sampled basis age between 30 min and 6.5 h on those two classes (QA-2-025).
-  it("an off-day check of a game-day class is classified with its off-day TTL (QA-2-025 counterexample)", () => {
+  // The oracle classifies with the TTL that applies at the basis instant: schedules and lines get their
+  // off-day TTL on an off day (QA-1-036). Without it the property failed for any sampled basis age
+  // between 30 min and 6.5 h on those two classes (QA-2-025). Game days are LOCAL days, so the pinned
+  // counterexample is built from local wall-clock time and held in every zone, the ones east of
+  // UTC+12:30 included (a UTC-built "Saturday 11:30" is already Sunday in Pacific/Auckland).
+  it("an off-day check of a game-day class is classified with its off-day TTL, in every time zone (QA-2-025 counterexample)", () => {
     const cls = freshnessClass("nflverse_schedules");
-    const st = stampState(
-      cls,
-      { as_of: iso(1_801_000), fetched_at: iso(1_801_000), checked_at: iso(1_801_000) },
-      NOW,
-    );
-    expect(st.age_s).toBe(1801);
-    expect(st.state).toBe("fresh");
+    const judge = (basisMs: number, nowMs: number) => {
+      const at = new Date(basisMs).toISOString();
+      return stampState(cls, { as_of: at, fetched_at: at, checked_at: at }, nowMs);
+    };
+    for (const zone of ZONES)
+      inZone(zone, () => {
+        // Saturday 2026-10-10 11:30 local: an off day; Sunday 2026-10-11 11:30 local: a game day
+        const sat = new Date(2026, 9, 10, 11, 30).getTime();
+        const sun = new Date(2026, 9, 11, 11, 30).getTime();
+        expect(new Date(sat).getDay(), zone).toBe(6);
+        const off = judge(sat, sat + 1_801_000);
+        expect(off.age_s, zone).toBe(1801);
+        expect(off.state, zone).toBe("fresh");
+        // the same age on a game day is past the 30-minute TTL
+        expect(judge(sun, sun + 1_801_000).state, zone).toBe("stale");
+      });
+  });
+
+  it("the zone switch the test above relies on is real (non-vacuity)", () => {
+    // 2026-10-10T11:30:00Z is Saturday in UTC and already Sunday in Pacific/Kiritimati (UTC+14)
+    const utcSat = Date.UTC(2026, 9, 10, 11, 30);
+    expect(inZone("UTC", () => new Date(utcSat).getDay())).toBe(6);
+    expect(inZone("Pacific/Kiritimati", () => new Date(utcSat).getDay())).toBe(0);
   });
 
   it("property: for every class and basis instant, state equals classifyAge of the basis age", () => {
