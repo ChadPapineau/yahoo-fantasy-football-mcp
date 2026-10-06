@@ -17,6 +17,7 @@ import {
   translatePlayerWeek,
   unmappedStatColumns,
 } from "../../../src/sources/nflverse/columns.js";
+import { yardsAllowed } from "../../../src/domain/scoring/nflverse.js";
 import { UNMAPPED_PLAYER_WEEK_COLUMNS } from "../../../src/sources/nflverse/index.js";
 import { PLAYER_WEEK_STAT_COLUMNS } from "../../../src/store/datasets/tables.js";
 import { fixtureRows } from "./helpers/rewrite.js";
@@ -269,6 +270,30 @@ describe("team defence (DT) lines", () => {
       dst_ya: 320,
     });
     expect(toDefenseStatLine(row, { includePatBlocks: true }).line.values.dst_blk).toBe(2);
+  });
+
+  it("QA-2-032: dst_ya is net yards whatever sign the sack yardage carries (nflverse stores it negative)", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 700 }),
+        fc.integer({ min: 0, max: 120 }),
+        fc.integer({ min: -30, max: 400 }),
+        fc.boolean(),
+        (pass, lost, rush, negative) => {
+          const signed = negative ? -lost : lost;
+          const t = toDefenseStatLine({
+            ...row,
+            opp_passing_yards: pass,
+            opp_sack_yards_lost: signed,
+            opp_rushing_yards: rush,
+          });
+          expect(t.issues).toEqual([]);
+          expect(t.line.values.dst_ya).toBe(pass - lost + rush);
+          expect(t.line.values.dst_ya).toBe(yardsAllowed(pass, signed, rush));
+          expect(t.line.values.dst_ya).toBeLessThanOrEqual(pass + rush);
+        },
+      ),
+    );
   });
 
   it("no points allowed / missing opponent yardage → those stats are absent", () => {

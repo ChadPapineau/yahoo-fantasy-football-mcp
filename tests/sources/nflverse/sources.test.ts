@@ -224,7 +224,15 @@ describe("nflverse:stats_player_week", () => {
     )[0];
     expect(det.opp_passing_yards).toBe(opp?.p);
     expect(det.opp_rushing_yards).toBe(opp?.r);
-    expect(det.opp_sack_yards_lost).toBe(opp?.s);
+    // upstream stores the loss negative; the dataset holds its magnitude (QA-2-032)
+    expect(Number(opp?.s)).toBeLessThan(0);
+    expect(det.opp_sack_yards_lost).toBe(Math.abs(Number(opp?.s)));
+    const signs = w.all(
+      "SELECT MIN(opp_sack_yards_lost) AS lo, COUNT(*) AS n FROM ds_team_defense_week WHERE opp_sack_yards_lost > 0",
+    )[0];
+    expect(Number(signs?.lo)).toBeGreaterThan(0);
+    expect(Number(signs?.n)).toBeGreaterThan(50);
+    expect(w.all("SELECT 1 FROM ds_team_defense_week WHERE opp_sack_yards_lost < 0")).toEqual([]);
     // sacks are REAL (half sacks) and equal the sum over the team's rows
     const sacks = w.all(
       "SELECT team, week, def_sacks FROM ds_team_defense_week ORDER BY season, week, team",

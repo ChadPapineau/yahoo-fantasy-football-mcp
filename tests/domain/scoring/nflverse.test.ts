@@ -1,5 +1,6 @@
 // nflverse.test.ts — src/domain/scoring/nflverse.ts: `toStatLine(nflverse)` (plan 08 §3.2, A-1 column
 // names asserted against the store's dataset contract), the DT line, kick lists → league bins (§4.1).
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { score } from "../../../src/domain/scoring/engine.js";
 import { ScoringError } from "../../../src/domain/scoring/errors.js";
@@ -16,6 +17,7 @@ import {
   statLineFromPlayerWeek,
   statLineFromTeamDefense,
   withPositionType,
+  yardsAllowed,
 } from "../../../src/domain/scoring/nflverse.js";
 import { normalizeSettings } from "../../../src/domain/scoring/settings.js";
 import {
@@ -275,6 +277,40 @@ describe("statLineFromTeamDefense", () => {
     ).toBe(235);
     // 2.5 + 4 + 0 + 6 + 6 + 2 + 2 + 4 (7-13) = 26.5
     expect(score(l, S).points).toBe(26.5);
+  });
+
+  it("QA-2-032: dst_ya is net yards whatever sign the sack yardage carries (nflverse stores it negative)", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 700 }),
+        fc.integer({ min: 0, max: 120 }),
+        fc.integer({ min: -30, max: 400 }),
+        fc.boolean(),
+        (pass, lost, rush, negative) => {
+          const signed = negative ? -lost : lost;
+          const ya = statLineFromTeamDefense(
+            {
+              ...row,
+              opp_passing_yards: pass,
+              opp_sack_yards_lost: signed,
+              opp_rushing_yards: rush,
+            },
+            { pointsAllowed: 13 },
+          ).values.dst_ya;
+          expect(ya).toBe(pass - lost + rush);
+          expect(ya).toBe(yardsAllowed(pass, signed, rush));
+          // a sack never adds yards: net ≤ gross
+          expect(ya).toBeLessThanOrEqual(pass + rush);
+        },
+      ),
+    );
+    // the upstream shape: PIT 2026 week 1 allowed ATL 143 gross passing, 4 sacks for −25, 120 rushing
+    expect(
+      statLineFromTeamDefense(
+        { ...row, opp_passing_yards: 143, opp_sack_yards_lost: -25, opp_rushing_yards: 120 },
+        { pointsAllowed: 13 },
+      ).values.dst_ya,
+    ).toBe(238);
   });
 
   it("QA-1-017: a fumble-return TD is a defensive TD (dst_td = def_tds + fumble-return TDs)", () => {

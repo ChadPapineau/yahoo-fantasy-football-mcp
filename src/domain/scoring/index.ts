@@ -66,6 +66,7 @@ export {
   statLineFromPlayerWeek,
   statLineFromTeamDefense,
   withPositionType,
+  yardsAllowed,
 } from "./nflverse.js";
 export {
   isLeagueWideMismatch,

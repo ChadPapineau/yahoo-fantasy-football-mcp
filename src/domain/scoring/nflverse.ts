@@ -227,12 +227,28 @@ export interface DefenseLineOptions extends LineOptions {
 }
 
 /**
+ * A defence's yards allowed (dst_ya, plan 08 §3.2 [U] the platform's definition): the opponent's
+ * NET yards = gross passing yards − the yards lost on sacks + rushing yards. The sack term is taken
+ * as a magnitude whatever its sign: nflverse stores `sack_yards_lost` NEGATIVE (two sacks = −15),
+ * `ds_team_defense_week.opp_sack_yards_lost` holds the non-negative magnitude, and a positive
+ * "yards lost" is the same loss — subtracting a raw negative added the sack yardage (QA-2-032).
+ * Every translator (store, sources, domain) computes dst_ya through this one function.
+ */
+export function yardsAllowed(
+  passingYards: number,
+  sackYardsLost: number,
+  rushingYards: number,
+): number {
+  return passingYards - Math.abs(sackYardsLost) + rushingYards;
+}
+
+/**
  * The DT line of a `ds_team_defense_week` row (READER_QUERIES mapping): dst_sack ← def_sacks,
  * dst_int ← def_interceptions, dst_fum_rec ← fumble_recovery_opp, dst_td ← def_tds +
  * fumble_recovery_tds_opp (interception- AND fumble-return TDs, {@link DST_TD_COLUMNS}), dst_ret_td ←
  * special_teams_tds, dst_safety ← def_safeties, dst_blk ← def_fg_blocks + def_punt_blocks
- * (+ def_pat_blocks), dst_pa ← pointsAllowed, dst_ya ← opp_passing_yards − opp_sack_yards_lost +
- * opp_rushing_yards (present only when both yardage columns are; [U] the platform's definition).
+ * (+ def_pat_blocks), dst_pa ← pointsAllowed, dst_ya ← {@link yardsAllowed}(opp_passing_yards,
+ * opp_sack_yards_lost, opp_rushing_yards) (present only when both yardage columns are).
  */
 export function statLineFromTeamDefense(row: NflverseRow, opts: DefenseLineOptions): StatLine {
   const blocks = ["def_fg_blocks", "def_punt_blocks"];
@@ -249,7 +265,7 @@ export function statLineFromTeamDefense(row: NflverseRow, opts: DefenseLineOptio
     dst_safety: columnValue(row, "def_safeties"),
     dst_blk: sumColumns(row, blocks),
     dst_pa: opts.pointsAllowed === null ? null : coerceScalar(opts.pointsAllowed),
-    dst_ya: pass === null || rush === null ? null : pass - sackYards + rush,
+    dst_ya: pass === null || rush === null ? null : yardsAllowed(pass, sackYards, rush),
   };
   return makeStatLine(values, "DT", opts);
 }
