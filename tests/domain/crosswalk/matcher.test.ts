@@ -3,6 +3,7 @@
 // persisted pair survives a team change), research 04 §D precedence and traps, plan 05 §2 row.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
+import { GSIS_ID_RE } from "../../../src/config/schema.js";
 import {
   MATCH_CONFIDENCE,
   MAX_REPORTED_CANDIDATES,
@@ -33,6 +34,7 @@ import {
   row,
   rosterRow,
   yahooPlayer,
+  type FixturePlayer,
 } from "./helpers.js";
 
 function run(
@@ -1295,5 +1297,74 @@ describe("a gsis hint that contradicts the entry (QA-1-042)", () => {
       ]),
     );
     expect(gsisOf(res)).not.toBe(henry.gsis_id);
+  });
+});
+
+// --- QA-1-042 (round 2): a mistyped id landing on a same-team, same-position backup ------------------
+
+describe("a gsis hint naming a teammate at the same position (QA-1-042, round 2)", () => {
+  // every fixture skill player, each with a synthetic same-team, same-position backup whose id the
+  // entry's line carries by mistake (Josh Allen's line with Kyle Allen's id)
+  const starters = FIXTURE.players.filter((p) =>
+    ["QB", "RB", "WR", "TE", "K"].includes(p.position),
+  );
+  const backupOf = (p: FixturePlayer, i: number): NflRosterPlayer =>
+    row({
+      gsis_id: `00-099${String(1000 + i).slice(-4)}`,
+      full_name: `Backup ${p.name.split(" ").at(-1) ?? "Player"}`,
+      team: p.team,
+      position: p.position,
+    });
+
+  it("is never trusted when the entry's own name is another rostered player: every starter", () => {
+    expect(starters.length).toBeGreaterThan(10);
+    const rows = [...fixtureRosterRows(), ...starters.map(backupOf)];
+    starters.forEach((p, i) => {
+      const backup = backupOf(p, i);
+      expect(GSIS_ID_RE.test(backup.gsis_id)).toBe(true); // a valid id, or the hint is ignored
+      const entry = pp("manual", `manual.p.${backup.gsis_id}`, {
+        name: p.name,
+        team_abbr: p.team,
+        position: p.position,
+        eligible_positions: [p.position, "BN"],
+        gsis_hint: backup.gsis_id,
+      });
+      const r = run([entry], rows);
+      const res = only(r);
+      expect(gsisOf(res), p.name).not.toBe(backup.gsis_id);
+      expect(res.status, p.name).not.toBe("matched");
+      const ids = res.status === "ambiguous" ? res.candidates.map((c) => c.gsis_id) : [];
+      expect(ids, p.name).toContain(p.gsis_id);
+      expect(ids, p.name).toContain(backup.gsis_id);
+      expect(
+        r.report.unmatched_rostered.map((u) => u.player.ref.id),
+        p.name,
+      ).toEqual([entry.ref.id]);
+      expect(r.diagnostics, p.name).toContainEqual({
+        code: "hint_conflict",
+        platform_player_id: entry.ref.id,
+        gsis_ids: [backup.gsis_id],
+      });
+    });
+  });
+
+  it("a name nflverse does not know (a nickname) is still trusted on team + position, and reported", () => {
+    const rows = fixtureRosterRows();
+    for (const p of starters.slice(0, 12)) {
+      const entry = pp("manual", `manual.p.${p.gsis_id}`, {
+        name: `Zz Nickname ${p.name.split(" ").at(-1) ?? ""}`,
+        team_abbr: p.team,
+        position: p.position,
+        eligible_positions: [p.position],
+        gsis_hint: p.gsis_id,
+      });
+      const r = run([entry], rows);
+      expect(gsisOf(only(r)), p.name).toBe(p.gsis_id);
+      expect(r.diagnostics, p.name).toContainEqual({
+        code: "hint_name_mismatch",
+        platform_player_id: entry.ref.id,
+        gsis_ids: [p.gsis_id],
+      });
+    }
   });
 });

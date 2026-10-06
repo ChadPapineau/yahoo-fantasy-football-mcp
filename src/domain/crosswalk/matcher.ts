@@ -367,9 +367,11 @@ interface IdConflict {
 /**
  * Whether a gsis hint's roster row is the entry's player. The name agreeing is enough (a team or
  * position change is ordinary). A name that disagrees is accepted only when team AND position
- * family both agree — a nickname or a spelling nflverse does not share, which is exactly what a
- * hand-typed id is for — and is reported. Anything else (a mistyped id landing on another real
- * player: other name, other team or position) is a conflict: research 04 §D exact id "with checks",
+ * family both agree AND the entry's name is no other rostered player — a nickname or a spelling
+ * nflverse does not share, which is exactly what a hand-typed id is for — and is reported. Anything
+ * else is a conflict: a mistyped id landing on another real player (other name, other team or
+ * position), or on a same-team, same-position teammate while the entry's own name is a rostered
+ * player (Josh Allen's line with his backup's id; QA-1-042): research 04 §D exact id "with checks",
  * plan 10 A5a; guardrail "say what the data cannot see".
  */
 function hintAgrees(row: NflRosterPlayer, player: PlatformPlayer, ctx: Ctx): boolean {
@@ -377,8 +379,14 @@ function hintAgrees(row: NflRosterPlayer, player: PlatformPlayer, ctx: Ctx): boo
   if (key !== null && nameKey(row.full_name) === key) return true;
   const team = normalizeTeam(player.team_abbr);
   const fam = positionFamily(row.position);
+  const namesSomeoneElse =
+    key !== null && ctx.roster.byNameKey(key).some((r) => r.gsis_id !== row.gsis_id);
   const agrees =
-    team !== null && row.team === team && fam !== null && platformFamilies(player).has(fam);
+    !namesSomeoneElse &&
+    team !== null &&
+    row.team === team &&
+    fam !== null &&
+    platformFamilies(player).has(fam);
   if (agrees) {
     ctx.diag({
       code: "hint_name_mismatch",
