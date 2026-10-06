@@ -1,7 +1,8 @@
 // lineup-empty-seat.test.ts — QA-1-020 / QA-1-040 (reopened in round 2) through the tool: a starter
 // moved to IR leaves his seat empty, and the fixture lineup also carries a coin-flip W/R/T swap. The
 // no-move rule (QA-1-060) applies change by change, so the fill — which cannot lose points — is made
-// and only the coin flip is held: never "keep the current lineup" with an empty starting seat.
+// and only the coin flip is held: never "keep the current lineup" with an empty starting seat. The
+// other way round (the round-2 verification): a decisive change never carries a coin flip with it.
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -80,11 +81,59 @@ describe("a starter moved to IR next to a coin-flip swap (QA-1-020/040 reopened)
       expect(d.rec.lineup).toHaveLength(STARTING_SEATS);
       expect(d.rec.lineup.map((x) => x.player_key)).toContain(fill?.in);
       // every listed swap whose own interval lies above 0 is made; the rest are held, and counted
+      // (coin flips and changes that gain nothing apart)
       const made = /make (\d+) lineup change/.exec(d.rec.action);
       const held = /hold (\d+) coin flip/.exec(d.rec.action);
-      expect(Number(made?.[1] ?? 0) + Number(held?.[1] ?? 0)).toBe(d.swaps.length);
+      const skip = /skip (\d+) changes? that gains? nothing/.exec(d.rec.action);
+      expect(Number(made?.[1] ?? 0) + Number(held?.[1] ?? 0) + Number(skip?.[1] ?? 0)).toBe(
+        d.swaps.length,
+      );
       for (const s of d.swaps)
         if (s.interval[0] >= 0 && s.delta_e > 0)
           expect(d.rec.lineup.map((x) => x.player_key)).toContain(s.in);
     });
+});
+
+describe("a decisive change never carries a coin flip (the round-2 verification, fixture week 7)", () => {
+  const ALLEN = "manual.p.00-0034857"; // QB, BUF: bye in week 7
+  const LOVE = "manual.p.00-0036264";
+  const CHASE = "manual.p.00-0036900";
+  const WALKER = "manual.p.00-0038134";
+  let world: World;
+  beforeAll(async () => {
+    world = await makeWorld({ clock: "2026-10-06T08:00:00.000Z" });
+  }, 60_000);
+  afterAll(() => {
+    world.cleanup();
+  });
+
+  const call = async (week: number): Promise<E2["data"]> => {
+    const { client, close } = await connect(world);
+    const r = await client.callTool({ name: "ff_analyze_lineup", arguments: { week } });
+    await close();
+    expect(r.isError).not.toBe(true);
+    return (body(r) as unknown as E2).data;
+  };
+
+  it("week 7: Allen (bye) → Love is made, the Chase → Walker coin flip is held", async () => {
+    const d = await call(7);
+    const qb = d.swaps.find((s) => s.out === ALLEN);
+    const flip = d.swaps.find((s) => s.out === CHASE);
+    expect(qb, JSON.stringify(d.swaps)).toMatchObject({ in: LOVE, coin_flip: false });
+    expect(flip, JSON.stringify(d.swaps)).toMatchObject({ in: WALKER, coin_flip: true });
+    expect(d.rec.action).toBe("make 1 lineup change and hold 1 coin flip");
+    const kept = d.rec.lineup.map((x) => x.player_key);
+    expect(kept).toContain(LOVE);
+    expect(kept).not.toContain(ALLEN);
+    expect(kept).toContain(CHASE);
+    expect(kept).not.toContain(WALKER);
+    expect(d.rec.lineup).toHaveLength(STARTING_SEATS);
+  });
+
+  it("week 8: the same coin flip alone is held the same way", async () => {
+    const d = await call(8);
+    expect(d.swaps.find((s) => s.out === CHASE)).toMatchObject({ in: WALKER, coin_flip: true });
+    expect(d.rec.action).toBe("keep the current lineup");
+    expect(d.rec.lineup.map((x) => x.player_key)).toContain(CHASE);
+  });
 });
