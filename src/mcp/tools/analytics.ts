@@ -852,12 +852,17 @@ export const analyzeLineupTool = defineTool({
     );
     const mine = await lineupPlayers(ctx, lc, args.team_key, w, settings, rng, inputs, warnings);
     checkConstraints(args, mine.players, mine.rosterKeys, slots, ctx.nowMs);
-    const opp = (await opponentPlayers(ctx, lc, myKey, w, settings, rng, inputs, warnings)).side;
+    // a points-only league has no opponent to read (QA-2-043): the engine forces objective mean
+    const h2h = isHeadToHead(lc.league.scoring_type);
+    const opp = h2h
+      ? (await opponentPlayers(ctx, lc, myKey, w, settings, rng, inputs, warnings)).side
+      : null;
     if (mine.out.lines_omitted) warnings.push(LINES_OMITTED_WARNING);
     const rec = analyzeLineup({
       slots,
       players: mine.players,
       opponent: opp?.players ?? null,
+      head_to_head: h2h,
       objective: args.objective,
       ...(args.blend_weight === undefined ? {} : { blend_weight: args.blend_weight }),
       only_unlocked: args.only_unlocked,
@@ -949,6 +954,18 @@ const e3Data = z.strictObject({
 export const MATCHUP_NO_OPPONENT_HINT =
   "No opponent for this week in league.yaml: add - { week: <week>, team: <id> } under opponents (that team's players go under other_teams if they are not listed yet), pass a week that has one, or use ff_analyze_lineup (objective mean) for start/sit.";
 
+/** E3's NOT_FOUND hint in a league without head-to-head matchups (QA-2-043). */
+export const MATCHUP_NOT_HEAD_TO_HEAD_HINT =
+  "This league has no head-to-head matchups (its scoring_type is not head-to-head), so there is no win probability; use ff_analyze_lineup for start/sit.";
+
+/**
+ * Whether a league's `scoring_type` plays head-to-head matchups (`head`, `headpoint`, `headone`);
+ * points-only (`point`) and `roto` leagues have no opponent to beat (plan 07 E2; QA-2-043).
+ */
+export function isHeadToHead(scoringType: string): boolean {
+  return scoringType.startsWith("head");
+}
+
 /** E3's NOT_FOUND hint when the week's `opponents:` entry names a team with no players (QA-1-069). */
 export const MATCHUP_OPPONENT_NO_PLAYERS_HINT =
   "This week's opponent in league.yaml has no players listed: add that team's players under other_teams, pass a week whose opponent has them, or use ff_analyze_lineup (objective mean) for start/sit.";
@@ -973,6 +990,9 @@ export const analyzeMatchupTool = defineTool({
     if (args.mode !== "pre")
       throw new FfError("VALIDATION", { field: "mode", reason: "not_available" });
     const lc = await leagueContext(ctx, args);
+    // P(win) means nothing without head-to-head matchups, whatever opponent the file lists (QA-2-043)
+    if (!isHeadToHead(lc.league.scoring_type))
+      throw new FfError("NOT_FOUND", { hint: MATCHUP_NOT_HEAD_TO_HEAD_HINT });
     const warnings: string[] = [];
     const inputs: InputStamp[] = [lc.input];
     const w = weekOf(lc, args.week);
