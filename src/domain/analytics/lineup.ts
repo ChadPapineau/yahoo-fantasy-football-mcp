@@ -790,6 +790,14 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
     }
   }
 
+  // a forced start the solve could not seat (on IR, locked on the bench, more forced players than
+  // their seats) is refused, never dropped silently (QA-1-010 reopened; the tool names which first)
+  for (const k of force) {
+    if (!isStartClass(slotOf(slots, slotIn(chosen.a, k)))) {
+      throw new AnalyticsError("invalid_request", "force_start cannot be seated", ["force_start"]);
+    }
+  }
+
   // mode from the sign of μ_m − μ_o of the best-mean lineup (research 05 §3.2)
   const mm = meanEval.moments;
   const sdMode = diffSd(mm);
