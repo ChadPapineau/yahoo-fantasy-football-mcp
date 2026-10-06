@@ -20,7 +20,7 @@ weather; Yahoo is not connected (no API access). On 2026-10-06 the public histor
 (no-reply identity on every commit, no co-author trailers, no working notes; QA-1-095) and `main`
 gained branch ruleset `24558591` (no force-push, no deletion, linear history). The seven skipped
 round-1 hand-offs are decided: four closed, three deferred with a recorded design and a reopen
-trigger (§ Decisions made). **QA round 2 is complete; only the merge is left**
+trigger (§ Decisions made). **QA round 2 is complete and merged**
 ([`qa/2026-10-06-qa-round2.md`](qa/2026-10-06-qa-round2.md)). Its first half — the deferred-items
 analysis and a review of its own commits, QA-2-001 to QA-2-025 — is on `main` with the A17 script.
 Its second half is on `build/qa2-fixes` (from `main` at `f6ba81e`, which has not moved since, so the
@@ -39,13 +39,9 @@ QA-2-048 are deferred; and seven low findings were registered, QA-2-049 to QA-2-
 
 Owner's next steps, in order:
 
-1. **Merge `build/qa2-fixes`.** Recommended first, each a few lines with a test in one file:
-   QA-2-054 (`ff doctor` row 9 passes a source whose dataset file is deleted — introduced on this
-   branch; row 8 still fails it, so doctor still exits non-zero) and QA-2-053 (E1 names the new
-   `dnp_pending` state); QA-2-052 (the lineup seat assumption under `objective: pwin`) can follow the
-   merge. Then confirm CI on the head (`ci` covers lint, typecheck, test with the coverage gate,
-   process on ubuntu, smoke, pack and supply-chain; the macOS process job runs on dispatch) and
-   fast-forward `main`.
+1. **Merged** (2026-10-06): `build/qa2-fixes` is on `main` with CI green; QA-2-054 was fixed before the
+   merge (`89c2906`). Open low items for a later pass: QA-2-052, QA-2-053 and QA-2-056 to QA-2-061
+   (register § Open after round 2).
 2. **Set it up, or upgrade** — README § Getting started: build in
    `~/Developer/yahoo-fantasy-football-mcp`, `print-config` → add to Claude, copy the Skills,
    `ff refresh all`, then `/onboard` to write `~/.config/fantasy-football-mcp/league.yaml` (0600,
