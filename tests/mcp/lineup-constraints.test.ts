@@ -14,6 +14,8 @@ const K_ALLEN = "manual.p.00-0030279"; // WR, bench (Team A)
 const LOVE = "manual.p.00-0036264"; // QB, bench (Team A)
 const COLLINS = "manual.p.00-0036554"; // WR, IR (Team A)
 const LAMAR = "manual.p.00-0034796"; // QB, Team B
+const MCBRIDE = "manual.p.00-0037744"; // TE, starter (Team A)
+const H_HENRY = "manual.p.00-0033090"; // TE, bench (Team A)
 const UNKNOWN = "manual.p.00-9999999";
 
 interface Err {
@@ -28,7 +30,11 @@ interface Ok {
   data: {
     swaps: Swap[];
     comparisons?: Swap[];
-    rec: { action: string; drivers: { name: string }[] };
+    rec: {
+      action: string;
+      drivers: { name: string }[];
+      lineup: { slot: string; player_key: string }[] | null;
+    };
   };
 }
 
@@ -101,6 +107,26 @@ describe("refused visibly (QA-1-010)", () => {
       "exclude[0]",
       "not_on_target_roster",
     ],
+    // QA-1-010 reopened: a forced start the lineup cannot make is refused, never dropped silently
+    [
+      "force_start two QBs into the one QB seat",
+      { force_start: [ALLEN, LOVE] },
+      "force_start",
+      "cannot_seat_together",
+    ],
+    [
+      "force_start two QBs, the bench one first",
+      { force_start: [LOVE, ALLEN] },
+      "force_start",
+      "cannot_seat_together",
+    ],
+    ["force_start a player on IR", { force_start: [COLLINS] }, "force_start[0]", "on_ir"],
+    [
+      "force_start a player on IR next to a legal one",
+      { force_start: [LOVE, COLLINS] },
+      "force_start[1]",
+      "on_ir",
+    ],
   ];
   for (const [label, args, field, reason] of CASES)
     it(label, async () => {
@@ -133,6 +159,14 @@ describe("honoured (QA-1-010)", () => {
     const r = (await call({ force_start: [LOVE], exclude: [ALLEN] })).b as Ok;
     expect(r.data.swaps.some((s) => s.out === ALLEN && s.in === LOVE)).toBe(true);
   });
+  it("forced players who fit distinct seats together start together (TE + flex)", async () => {
+    for (const force of [[MCBRIDE, H_HENRY], [H_HENRY, MCBRIDE], [H_HENRY]]) {
+      const r = await call({ force_start: force });
+      expect(r.isError, JSON.stringify(r.b).slice(0, 300)).toBe(false);
+      const lineup = (r.b as Ok).data.rec.lineup ?? [];
+      for (const k of force) expect(lineup.map((x) => x.player_key)).toContain(k);
+    }
+  });
 });
 
 describe("splitComparisons never hides a recommended swap (QA-1-010)", () => {
@@ -153,5 +187,50 @@ describe("splitComparisons never hides a recommended swap (QA-1-010)", () => {
   });
   it("no compare argument: everything is a swap and no comparisons key", () => {
     expect(splitComparisons([sw("a", "b")], 0, undefined)).toEqual({ swaps: [sw("a", "b")] });
+  });
+});
+
+describe("force_start of a reserve whose game has started (QA-1-010 reopened)", () => {
+  let gameDay: World;
+  beforeAll(async () => {
+    // Sunday of week 5, 18:30Z: the 1 pm ET games have kicked off
+    gameDay = await makeWorld({ clock: "2026-10-11T18:30:00.000Z" });
+  }, 60_000);
+  afterAll(() => {
+    gameDay.cleanup();
+  });
+
+  it("every locked reserve is refused as locked; an unlocked one is started", async () => {
+    const { client, close } = await connect(gameDay);
+    const now = Date.parse("2026-10-11T18:30:00.000Z");
+    const base = await client.callTool({ name: "ff_analyze_lineup", arguments: {} });
+    const rows = (
+      JSON.parse((base.content as { text: string }[])[0]?.text ?? "{}") as {
+        data: {
+          current_lineup: { slot: string; player_key: string }[];
+          recommended_lineup: { slot: string; player_key: string; lock_at: string | null }[];
+        };
+      }
+    ).data;
+    const benchKeys = new Set(
+      rows.current_lineup.filter((r) => r.slot === "BN").map((r) => r.player_key),
+    );
+    const bench = rows.recommended_lineup.filter((r) => benchKeys.has(r.player_key));
+    const locked = bench.filter((r) => r.lock_at !== null && Date.parse(r.lock_at) <= now);
+    expect(locked.length).toBeGreaterThan(0);
+    for (const r of locked) {
+      const res = await client.callTool({
+        name: "ff_analyze_lineup",
+        arguments: { force_start: [r.player_key] },
+      });
+      expect(res.isError, r.player_key).toBe(true);
+      const b = JSON.parse((res.content as { text: string }[])[0]?.text ?? "{}") as Err;
+      expect(b.error).toMatchObject({
+        code: "VALIDATION",
+        field: "force_start[0]",
+        reason: "locked",
+      });
+    }
+    await close();
   });
 });

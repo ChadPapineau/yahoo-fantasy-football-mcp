@@ -18,7 +18,7 @@ import {
 } from "../../domain/analytics/index.js";
 import type { Projection, ProjectionRepository, Rec } from "../../domain/analytics/types.js";
 import { seedFrom, seededRng, type Rng } from "../../domain/clock.js";
-import { lockAtFor } from "../../domain/league/schedule.js";
+import { isLocked, lockAtFor } from "../../domain/league/schedule.js";
 import { MAX_ROSTER_SIZE, canOccupy, slotByName } from "../../domain/league/slots.js";
 import { manualPlayerKeyFor, type RosterSlots, type Week } from "../../domain/league/types.js";
 import type { ScoringSettings, StoredProjection } from "../../domain/scoring/types.js";
@@ -584,12 +584,14 @@ export function splitComparisons<S extends { readonly out: string | null; readon
 
 /** The hint every refused E2 constraint carries (QA-1-010). */
 export const LINEUP_CONSTRAINT_HINT =
-  "Use player keys from ff_get_roster for the team analysed; never force_start and exclude the same player; compare a current starter (out) with a player eligible for his slot (in).";
+  "Use player keys from ff_get_roster for the team analysed; never force_start and exclude the same player; force_start only players who can start together (not on IR, game not started); compare a current starter (out) with a player eligible for his slot (in).";
 
 /**
  * Refuses, visibly, any E2 constraint the engine could not honour (QA-1-010; plan 02 §5): a key not
- * on the target roster (or on it but not projectable), a player both forced and excluded, and a
- * `compare` whose `out` is not a current starter or whose `in` cannot play that slot.
+ * on the target roster (or on it but not projectable), a player both forced and excluded, a forced
+ * start the lineup cannot seat (on IR, a reserve whose game has started, or forced players and the
+ * locked starters too many for their seats — QA-1-010 reopened), and a `compare` whose `out` is not a
+ * current starter or whose `in` cannot play that slot.
  */
 function checkConstraints(
   args: {
@@ -600,6 +602,7 @@ function checkConstraints(
   pool: readonly LineupPlayer[],
   rosterKeys: ReadonlySet<string>,
   slots: RosterSlots,
+  nowMs: number,
 ): void {
   const byKey = new Map(pool.map((p) => [p.player_key, p]));
   const refuse = (field: string, reason: string): never => {
@@ -616,6 +619,21 @@ function checkConstraints(
   (args.force_start ?? []).forEach((k, i) => {
     if (excluded.has(k)) refuse(`force_start[${String(i)}]`, "also_excluded");
   });
+  // a forced start must be one the lineup can make: the engine keeps IR and never moves a locked
+  // player, and the forced players share the seats the locked starters leave (QA-1-010 reopened)
+  const lockedStarter = (p: LineupPlayer): boolean =>
+    isLocked(p.lock_at, nowMs) && isStartingSlot(slots, p.slot);
+  const forced = [...new Set(args.force_start ?? [])].map((k) => byKey.get(k));
+  (args.force_start ?? []).forEach((k, i) => {
+    const p = byKey.get(k);
+    if (p === undefined) return;
+    if (slotByName(slots, p.slot)?.class === "ir") refuse(`force_start[${String(i)}]`, "on_ir");
+    if (isLocked(p.lock_at, nowMs) && !lockedStarter(p))
+      refuse(`force_start[${String(i)}]`, "locked");
+  });
+  const toSeat = forced.filter((p): p is LineupPlayer => p !== undefined && !lockedStarter(p));
+  if (!seatsAll(slots, toSeat, pool.filter(lockedStarter)))
+    refuse("force_start", "cannot_seat_together");
   (args.compare ?? []).forEach((c, i) => {
     const at = `compare[${String(i)}]`;
     const o = known(`${at}.out`, c.out);
@@ -631,12 +649,21 @@ function checkConstraints(
 
 /**
  * Whether every player in `players` can hold a distinct starting seat of `slots` (bipartite
- * matching by augmenting paths — a roster is ≤ 60 players, a lineup ≤ 20 × 20 seats).
+ * matching by augmenting paths — a roster is ≤ 60 players, a lineup ≤ 20 × 20 seats), with the
+ * seats of `reserved` (locked starters, who keep theirs) taken first.
  */
-function seatsAll(slots: RosterSlots, players: readonly LineupPlayer[]): boolean {
+function seatsAll(
+  slots: RosterSlots,
+  players: readonly LineupPlayer[],
+  reserved: readonly LineupPlayer[] = [],
+): boolean {
   const seats = slots.slots
     .filter((x) => x.class === "starter" || x.class === "flex")
     .flatMap((x) => Array.from({ length: x.count }, () => x));
+  for (const r of reserved) {
+    const i = seats.findIndex((x) => x.name === r.slot);
+    if (i >= 0) seats.splice(i, 1);
+  }
   if (players.length > seats.length) return false;
   const holder = new Array<number>(seats.length).fill(-1);
   const fits = (pi: number, si: number): boolean => {
@@ -817,7 +844,7 @@ export const analyzeLineupTool = defineTool({
       callSeed("ff_analyze_lineup", { league: lc.ref.league_key, team: myKey, week: w }, inputs),
     );
     const mine = await lineupPlayers(ctx, lc, args.team_key, w, settings, rng, inputs, warnings);
-    checkConstraints(args, mine.players, mine.rosterKeys, slots);
+    checkConstraints(args, mine.players, mine.rosterKeys, slots, ctx.nowMs);
     const opp = await opponentPlayers(ctx, lc, myKey, w, settings, rng, inputs, warnings);
     if (mine.out.lines_omitted) warnings.push(LINES_OMITTED_WARNING);
     const rec = analyzeLineup({
