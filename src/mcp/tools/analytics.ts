@@ -365,7 +365,10 @@ export const projectPlayersTool = defineTool({
 
 // --- shared: a team's lineup players ----------------------------------------------------------------------
 
-/** A team's projected lineup players for a week (unmatched / non-projectable players omitted). */
+/**
+ * A team's projected lineup players for a week (unmatched / non-projectable players omitted), and
+ * the starting seats those omitted players hold (`unscoredSeats`, one slot name per seat — QA-2-039).
+ */
 async function lineupPlayers(
   ctx: ToolContext,
   lc: LeagueContext,
@@ -380,6 +383,7 @@ async function lineupPlayers(
   targets: Target[];
   out: ProjectionOutcome;
   rosterKeys: ReadonlySet<string>;
+  unscoredSeats: string[];
 }> {
   const rosterKeys = new Set<string>();
   const targets = (await rosterTargets(ctx, lc, teamKey, w, inputs, warnings, rosterKeys)).filter(
@@ -416,7 +420,16 @@ async function lineupPlayers(
       role_games: p.role_games,
     };
   });
-  return { players, targets, out, rosterKeys };
+  // a starter the projections omit still holds his seat: it is not empty (QA-2-039)
+  const projected = new Set(players.map((p) => p.player_key));
+  const roster = await ctx.services.platform.getRoster(teamOf(lc, teamKey), w);
+  const unscoredSeats = roster.value.entries
+    .filter(
+      (e) =>
+        (e.slot_class === "starter" || e.slot_class === "flex") && !projected.has(e.player.ref.id),
+    )
+    .map((e) => e.slot);
+  return { players, targets, out, rosterKeys, unscoredSeats };
 }
 
 /** The opponent's team key for `w`, or null when the platform lists no matchup for my team. */
@@ -863,6 +876,7 @@ export const analyzeLineupTool = defineTool({
       players: mine.players,
       opponent: opp?.players ?? null,
       head_to_head: h2h,
+      unscored_seats: mine.unscoredSeats,
       objective: args.objective,
       ...(args.blend_weight === undefined ? {} : { blend_weight: args.blend_weight }),
       only_unlocked: args.only_unlocked,
