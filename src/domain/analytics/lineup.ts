@@ -80,6 +80,11 @@ export interface LineupRequest {
   readonly players: readonly LineupPlayer[];
   /** The opponent's roster (their slots too), or null when unknown (manual league without one). */
   readonly opponent: readonly LineupPlayer[] | null;
+  /**
+   * False for a league with no head-to-head matchups (points-only, roto): no P(win), the objective
+   * is forced to mean (plan 07 E2; research 05 §3 format sensitivity — QA-2-043). Default true.
+   */
+  readonly head_to_head?: boolean;
   readonly objective?: Objective;
   readonly blend_weight?: number;
   readonly only_unlocked?: boolean;
@@ -653,8 +658,10 @@ interface Evaluated {
 
 /**
  * E2. An opponent whose listed players leave a skill seat empty gets no P(win) and the mean objective
- * (QA-1-043). Throws AnalyticsError `no_opponent` for `objective: pwin | blend` without an opponent roster
- * (NOT_FOUND + MANUAL_NO_OPPONENT_HINT), `invalid_request` for bounds / an empty roster.
+ * (QA-1-043), as does a league without head-to-head matchups (QA-2-043). Throws AnalyticsError
+ * `no_opponent` for `objective: pwin | blend` without an opponent roster in a head-to-head league
+ * (NOT_FOUND + MANUAL_NO_OPPONENT_HINT), `invalid_request` for bounds / an empty roster or a
+ * `force_start` the lineup cannot seat.
  */
 export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   const { slots, clock } = req;
@@ -668,8 +675,11 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   if (!(blendW >= 0 && blendW <= 1)) {
     throw new AnalyticsError("invalid_request", "blend_weight must be in 0..1", ["blend_weight"]);
   }
-  const listed = req.opponent !== null && req.opponent.length > 0 ? req.opponent : null;
-  if (req.objective !== undefined && req.objective !== "mean" && listed === null) {
+  // a points-only league has no opponent to beat: P(win) means nothing there, whatever opponent the
+  // file lists, and the objective is mean (plan 07 E2 "points leagues force objective mean")
+  const h2h = req.head_to_head !== false;
+  const listed = h2h && req.opponent !== null && req.opponent.length > 0 ? req.opponent : null;
+  if (h2h && req.objective !== undefined && req.objective !== "mean" && listed === null) {
     throw new AnalyticsError("no_opponent", "no opponent roster for this week");
   }
   const nowMs = clock.nowMs();
@@ -728,7 +738,14 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
     // no opponent: ΔP(win) is measured against an evenly matched opponent (the best mean lineup)
     return { mu_m: m.mu, v_m: m.v, mu_o: meanM.mu, v_o: meanM.v, cov: 0 };
   };
-  if (oppEmpty.length > 0) {
+  if (!h2h) {
+    assumptions.push(
+      A(
+        `a points-only league has no head-to-head opponent: P(win) is not reported and the objective is mean${req.objective !== undefined && req.objective !== "mean" ? ` (not ${req.objective})` : ""}`,
+        "the league's scoring_type is head-to-head",
+      ),
+    );
+  } else if (oppEmpty.length > 0) {
     assumptions.push(
       A(
         `the opponent's listed players leave starting slots empty (${oppEmpty.join(", ")}): P(win) withheld, the objective is mean${req.objective !== undefined && req.objective !== "mean" ? ` (not ${req.objective})` : ""}`,
