@@ -552,6 +552,92 @@ describe("readConfigFile / loadConfigFromProcess", () => {
     );
     expect(issues.map((i) => i.key).sort()).toEqual(["FF_CONFIG_DIR", "FF_TOOLSET"]);
   });
+  // An ABSOLUTE FF_CONFIG_DIR that resolves but cannot be used as a directory: the problem is
+  // FF_CONFIG_DIR's, never config.json's (QA-1-057 / QA-1-096 residual)
+  const asRoot = typeof process.getuid === "function" && process.getuid() === 0;
+  const UNUSABLE: readonly { name: string; make: () => string; perm?: true }[] = [
+    {
+      name: "a regular file",
+      make: () => {
+        const f = path.join(home, "ffcfg-file");
+        writeFileSync(f, "x");
+        return f;
+      },
+    },
+    {
+      name: "a path through a regular file",
+      make: () => {
+        const f = path.join(home, "plain");
+        writeFileSync(f, "x");
+        return path.join(f, "sub");
+      },
+    },
+    ...[0o000, 0o200, 0o600, 0o300].map((mode) => ({
+      name: `a ${mode.toString(8).padStart(3, "0")} directory`,
+      perm: true as const,
+      make: () => {
+        const d = path.join(home, `locked-${mode.toString(8)}`);
+        mkdirSync(d, { mode: 0o700 });
+        writeFileSync(path.join(d, "config.json"), "{}");
+        chmodSync(d, mode);
+        return d;
+      },
+    })),
+    {
+      name: "a directory under a 000 parent",
+      perm: true,
+      make: () => {
+        const parent = path.join(home, "locked-parent");
+        mkdirSync(path.join(parent, "cfg"), { recursive: true, mode: 0o700 });
+        chmodSync(parent, 0o000);
+        return path.join(parent, "cfg");
+      },
+    },
+  ];
+  afterEach(() => {
+    for (const n of ["locked-0", "locked-200", "locked-600", "locked-300", "locked-parent"]) {
+      try {
+        chmodSync(path.join(home, n), 0o700);
+      } catch {
+        // not created by this test
+      }
+    }
+  });
+  for (const u of UNUSABLE) {
+    it.skipIf(asRoot && u.perm === true)(
+      `names FF_CONFIG_DIR, never config.json, for an absolute FF_CONFIG_DIR that is ${u.name} [QA-1-057]`,
+      () => {
+        const dir = u.make();
+        const issues = issuesOf(() =>
+          loadConfigFromProcess({
+            env: { FF_CONFIG_DIR: dir, FF_TOOLSET: "bogus" },
+            home,
+            repoRoot: ROOT,
+          }),
+        );
+        expect(issues.map((i) => i.key).sort()).toEqual(["FF_CONFIG_DIR", "FF_TOOLSET"]);
+        const reason = issues.find((i) => i.key === "FF_CONFIG_DIR")?.reason ?? "";
+        expect(reason).toMatch(/not a directory|permissions/);
+        expect(reason).not.toContain(home);
+      },
+    );
+  }
+  it.skipIf(asRoot)(
+    "control: a usable directory whose config.json alone is unreadable still names config.json [QA-1-057]",
+    () => {
+      const d = confDir();
+      writeFileSync(path.join(d, "config.json"), "{}");
+      chmodSync(path.join(d, "config.json"), 0o000);
+      try {
+        const issues = issuesOf(() => loadConfigFromProcess({ env: {}, home, repoRoot: ROOT }));
+        expect(issues).toEqual([
+          { key: "config.json", reason: expect.stringMatching(/permissions/) as string },
+        ]);
+      } finally {
+        chmodSync(path.join(d, "config.json"), 0o600);
+      }
+    },
+  );
   it("surfaces an unexpected I/O failure as a value-free ConfigError", () => {
     const d = confDir();
     mkdirSync(path.join(d, "config.json", "nested"), { recursive: true });

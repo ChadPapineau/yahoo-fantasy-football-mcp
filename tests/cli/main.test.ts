@@ -1,5 +1,7 @@
 // main.test.ts — the `ff` dispatcher (plan 03 §1.1 step 1 parseArgs + exit 2 on usage/config;
 // §1.3 shared exit codes): every subcommand routes, strict flags, serve is handed stdio untouched.
+import { writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { EXIT } from "../../src/cli/exit.js";
 import {
@@ -75,6 +77,20 @@ describe("ff dispatcher", () => {
     const io = makeIo(sb, { env: { FF_CACHE_DIR: "relative/cache" } });
     expect(await main(["status"], io)).toBe(EXIT.USAGE);
     expect(io.err.text).toContain("FF_CACHE_DIR");
+  });
+
+  it("an absolute FF_CONFIG_DIR that is a file exits 2 naming FF_CONFIG_DIR, not config.json, in status and doctor [QA-1-096]", async () => {
+    sb = sandbox();
+    const file = path.join(sb.dir, "ffcfg-file");
+    writeFileSync(file, "x");
+    for (const cmd of [["status"], ["doctor", "--json"]]) {
+      const io = makeIo(sb, { env: { FF_CONFIG_DIR: file } });
+      const rc = await main(cmd, io);
+      expect(rc, cmd[0]).toBe(EXIT.USAGE);
+      const text = io.err.text + io.out.text;
+      expect(text, cmd[0]).toContain("FF_CONFIG_DIR: exists but is not a directory");
+      expect(text, cmd[0]).not.toContain("config.json:");
+    }
   });
 
   it("serve receives the remaining argv and the raw stdio, and its code is the exit code", async () => {
