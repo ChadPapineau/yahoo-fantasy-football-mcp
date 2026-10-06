@@ -60,7 +60,10 @@ describe("ff prune", () => {
     utimesSync(path.join(ds, young), recent, recent);
     const tmp = path.join(s.cacheDir, "tmp");
     mkdirSync(tmp, { mode: 0o700 }); // as the refresh runner creates it
-    mkdirSync(path.join(tmp, "nflverse_injuries-AbC123", "inner"), { recursive: true });
+    mkdirSync(path.join(tmp, "nflverse_injuries-AbC123", "inner"), {
+      recursive: true,
+      mode: 0o700,
+    }); // mkdtemp's mode
     writeFileSync(path.join(tmp, "nflverse_injuries-AbC123", "inner", "f"), "x");
     touchOld(path.join(tmp, "nflverse_injuries-AbC123"));
     mkdirSync(path.join(tmp, "keep-me"));
@@ -137,6 +140,32 @@ describe("ff prune", () => {
     chmodSync(tmp, 0o755);
     expect(() => pruneFiles(s.cacheDir, NOW)).toThrow(/permission bits/);
     expect(readdirSync(tmp)).toEqual(["nflverse_injuries-AbC123"]);
+  });
+
+  it("in our own 0700 tmp/, a person's folder or file with a run-temp name is never removed [QA-2-029]", () => {
+    const s = sandbox({ create: true });
+    sb = s;
+    const tmp = path.join(s.cacheDir, "tmp");
+    mkdirSync(tmp, { mode: 0o700 });
+    const theirs: string[] = [];
+    for (const [n, mode] of [
+      ["client-report", 0o755],
+      ["notes-backup", 0o750],
+      ["photos_2024-abcdef", 0o705],
+    ] as const) {
+      mkdirSync(path.join(tmp, n), { mode });
+      chmodSync(path.join(tmp, n), mode);
+      writeFileSync(path.join(tmp, n, "doc.txt"), "theirs");
+      touchOld(path.join(tmp, n));
+      theirs.push(n);
+    }
+    writeFileSync(path.join(tmp, "draft_v2-final"), "a plain file, never one of ours");
+    touchOld(path.join(tmp, "draft_v2-final"));
+    mkdirSync(path.join(tmp, "nflverse_injuries-AbC123"), { mode: 0o700 }); // ours
+    touchOld(path.join(tmp, "nflverse_injuries-AbC123"));
+    const r = pruneFiles(s.cacheDir, NOW);
+    expect(r.run_temp).toEqual(["nflverse_injuries-AbC123"]);
+    expect(readdirSync(tmp).sort()).toEqual([...theirs, "draft_v2-final"].sort());
   });
 
   it("never touches the recommendation log, league settings or write journal", async () => {
