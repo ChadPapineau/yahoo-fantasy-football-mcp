@@ -1,7 +1,7 @@
 # 01 — Repo security audit (prior-art vetting)
 
-**Author:** `repo-security-auditor` agent · **Date:** 2026-09-29 · **Status:** complete for the
-brief's list + 4 additions found by search. Companion doc: `02-prior-art-lessons.md`
+**Date:** 2026-09-29 · **Status:** complete for the
+initial candidate list + 4 additions found by search. Companion doc: `02-prior-art-lessons.md`
 (architecture lessons from the repos that pass).
 
 Every repo below was treated as **untrusted**. Nothing from any clone was installed or
@@ -15,11 +15,12 @@ the commit and file that contain them.
 1. Metadata via `gh api repos/<o>/<r>` (language, SPDX license, stars, archived, fork
    parent, `pushed_at`). Forks compared to their parent with the compare API
    (`ahead_by`/`behind_by`) — forks with no substantive changes were skipped by name.
-2. Clone into the session scratchpad, **outside the repo**
-   (`…/scratchpad/yff-research/vendor/<owner>__<name>`). Full history for the small
+2. Clone into a scratch directory, **outside the repo**
+   (`…/yff-research/vendor/<owner>__<name>`). Full history for the small
    MCP servers and wrappers (so `git log -p` history checks are real); `--depth 1` for
    the three large nflverse/ffverse repos (history **not** checked — stated per repo).
-3. One static inventory script per clone (`inv.sh`, my own, kept in the scratchpad):
+3. One static inventory script per clone (`inv.sh`, written for this audit, kept in the
+   scratch directory):
    tracked-file listing, suspicious filenames, `.gitignore`, lockfiles, manifests,
    secret-pattern greps (incl. Yahoo `dj0y…` consumer-key prefix and long hex/base64
    literals), every outbound host literal, obfuscation/exec markers (`eval`,
@@ -53,7 +54,7 @@ the commit and file that contain them.
 | 9 | spilchen/yahoo_fantasy_mcp | `133a45ab57738dad146dcb6b5557f70f8cf7d4e6` | Python | MIT | 2026-03-15 | 5 | Slow | **Safe to learn from** (caution: floating deps, no lockfile) |
 | 10 | jschne88/yahoo-fantasy-football-mcp (fork of jimbrig, +0) | — | — | none | 2025-08-20 | 0 | No | **Skipped** — identical fork; parent audited as #10b |
 | 10b | jimbrig/yahoo-fantasy-baseball-mcp | `6aabbe60d377c22144d691eec144efb54173711b` | TS/JS | **none** | 2025-05-14 | 5 | No | **Do not use** — no license; obsolete OAuth 1.0a; 1 CRITICAL/3 HIGH deps |
-| 11 | whatadewitt/yahoo-fantasy-sports-api (npm `yahoo-fantasy`; brief's `edwarddistel/…` does not exist) | `fc66175fdb02ecc0b2dac2f646eb90e3f586bed7` | JavaScript | MIT | 2026-09-24 | 228 | Yes | **Safe to learn from** |
+| 11 | whatadewitt/yahoo-fantasy-sports-api (npm `yahoo-fantasy`; the initially named `edwarddistel/…` does not exist) | `fc66175fdb02ecc0b2dac2f646eb90e3f586bed7` | JavaScript | MIT | 2026-09-24 | 228 | Yes | **Safe to learn from** |
 | 12 | uberfastman/yfpy | `5287b2d68d33d0f03f24eea70c179ae27aedc99c` | Python | **GPL-3.0** | 2025-09-14 (main) | 268 | Yes | **Learn from with caution** — GPL; token written to `.env` |
 | 13 | spilchen/yahoo_fantasy_api | `c9f4fef444a521022579ba38e4721f0a780f66c6` | Python | MIT | 2026-04-03 | 110 | Yes | **Safe to learn from** (caution: unmaintained deps, no lockfile) |
 | 14 | josuebrunel/yahoo-oauth | `f4a8583043119a21031c21644afb927051089377` | Python | MIT | 2024-12-17 | 65 | Idle 21 mo | **Learn from with caution** — plaintext `secrets.json` in cwd, default perms; `rauth` dep dead since 2017 |
@@ -67,9 +68,9 @@ the commit and file that contain them.
 | 21+ | kwonye/yahoo-fantasy-agent (npm `@kwonye/yahoo-fantasy-mcp`) | `0f8819d3301ff20aec4191d20c27150137a09e8f` | TypeScript | ISC | 2026-09-13 | 0 | New (6 commits) | **Safe to learn from** (caution: brand-new, single author) |
 
 Search coverage: `gh search repos "yahoo fantasy mcp"` (12 hits) and `"fantasy football mcp"`
-(19 hits) on 2026-09-29. Beyond the brief's list, the only non-fork hits with either
+(19 hits) on 2026-09-29. Beyond the initial candidate list, the only non-fork hits with either
 stars, TypeScript, or an npm release were #19–#21; the remaining ~15 are 0-star
-single-author Python repos of the same shape as #2/#9 and were not cloned (budget).
+single-author Python repos of the same shape as #2/#9 and were not cloned.
 `yahoo-fantasy-baseball-mcp` (jimbrig) was pulled in only because #10 is its identical
 fork. Sleeper clients: `dtsong/sleeper-api-wrapper` is the most-starred (101); npm
 `sleeper-mcp` and `@unclick/sleeper-mcp` exist but are 0-star and were not audited.
@@ -280,9 +281,9 @@ Otherwise as #7.
 
 ### 11. whatadewitt/yahoo-fantasy-sports-api (npm `yahoo-fantasy`) — Safe to learn from
 
-The brief named `edwarddistel/yahoo-fantasy-sports-api`; that repo and that npm name do
-not exist (GitHub 404, npm `{"error":"Not found"}`). The widely used Node wrapper is
-this one (228 stars, npm `yahoo-fantasy@5.4.1`, published 2026-09-24).
+The initial candidate list named `edwarddistel/yahoo-fantasy-sports-api`; that repo and
+that npm name do not exist (GitHub 404, npm `{"error":"Not found"}`). The widely used
+Node wrapper is this one (228 stars, npm `yahoo-fantasy@5.4.1`, published 2026-09-24).
 
 - **C:** clean; only RFC 5849 test vectors in `tests/oauth-vectors.js`.
 - **N:** `fantasysports.yahooapis.com`, `api.login.yahoo.com`; `s.yimg.com` only in
@@ -499,6 +500,7 @@ Typosquat check (all real, long-lived, expected maintainers): `pyaml` (Mike Kaza
 - **CRAN dependency vulnerabilities** for the two R packages — no OSV ecosystem.
 - **Whether the leaked Yahoo/Reddit credentials in #1 and #7 are still live** — not
   tested (that would be use of someone else's credentials). Treat them as burned; the
-  owners may not know. Reporting to the owners is a Chad decision, not an agent action.
-- **The ~15 zero-star search hits not cloned** — unaudited by choice (budget); none had
+  owners may not know. Reporting to the owners is a decision for the project owner, outside
+  this audit.
+- **The ~15 zero-star search hits not cloned** — unaudited by choice; none had
   stars, a release, or TypeScript.

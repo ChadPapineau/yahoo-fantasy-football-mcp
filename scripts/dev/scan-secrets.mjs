@@ -72,9 +72,9 @@ const RULES = [
   },
   { id: "yahoo-guid", re: /xoauth_yahoo_guid["']?\s*[:=]\s*["']?([A-Z0-9]{26})/g, group: 1 },
   {
-    // ANY mailbox (CLAUDE.md: never commit an email address); only no-reply and reserved
-    // placeholder addresses pass (isPlaceholderEmail). The lookbehind starts a match only at the
-    // beginning of a local-part run, which keeps the scan linear on long word-character lines.
+    // ANY mailbox (CONTRIBUTING.md Security: never commit an email address); only no-reply and
+    // reserved placeholder addresses pass (isPlaceholderEmail). The lookbehind starts a match only at
+    // the beginning of a local-part run, which keeps the scan linear on long word-character lines.
     id: "email-address",
     re: /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b/g,
     // not a mailbox: a no-reply/reserved address; the `git` SSH transport user (git@github.com:…);

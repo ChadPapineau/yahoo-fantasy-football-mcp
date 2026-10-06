@@ -1,7 +1,8 @@
 // scan-secrets.test.ts — scripts/dev/scan-secrets.mjs is the ONLY layer that runs before a value
 // reaches the public repo (gitleaks runs in CI, after the push), so it must flag at least what
-// gitleaks flags and fail closed on anything it cannot scan (CLAUDE.md Security; .gitleaks.toml;
-// QA-1-089). Every well-formed value below is assembled at run time so this file stays clean.
+// gitleaks flags and fail closed on anything it cannot scan (CONTRIBUTING.md Security;
+// .gitleaks.toml; QA-1-089). Every well-formed value below is assembled at run time so this file
+// stays clean.
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -130,7 +131,7 @@ describe("email addresses — any real mailbox, not a fixed list of free-mail do
   });
 
   it.each([
-    at("noreply", "anthropic.com"),
+    at("noreply", "mail.service.io"),
     at("123456+someone", "users.noreply.github.com"),
     at("no-reply", "service.io"),
     at("probe", "example.invalid"),

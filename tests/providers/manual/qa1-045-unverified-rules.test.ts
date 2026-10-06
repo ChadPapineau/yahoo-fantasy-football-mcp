@@ -1,4 +1,4 @@
-// qa1-045-unverified-rules.test.ts — Stage C QA round 1 regression: QA-1-045 an omitted rule/playoff field is named in rules.unverified_fields[] (skills/onboard §2
+// qa1-045-unverified-rules.test.ts — QA round 1 regression: QA-1-045 an omitted rule/playoff field is named in rules.unverified_fields[] (skills/onboard §2
 // "the field stays empty and is listed as unverified"; plan 07 A2 clean negatives).
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { edit, FIXTURE_TEXT, loadLeague, tempLeague, type TempLeague } from "./helpers.js";

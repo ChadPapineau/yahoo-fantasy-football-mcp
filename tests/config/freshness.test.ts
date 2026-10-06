@@ -256,7 +256,7 @@ describe("stampState — the class basis picks the instant (critics C-12, C-08b)
     expect(st.state).toBe("fresh");
     expect(st.basis_at).toBe(iso(H));
     expect(st.age_s).toBe(3600);
-    // the same stamp judged by fetched_at alone would be expired (the bug the critics measured)
+    // the same stamp judged by fetched_at alone would be expired (the bug the contract review measured)
     expect(classifyAge(cls, (10 * D) / 1000)).toBe("expired");
   });
   it("release basis: a missed daily check goes stale, then expired, by checked_at", () => {

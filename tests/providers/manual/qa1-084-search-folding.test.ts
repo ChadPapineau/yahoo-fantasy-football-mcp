@@ -1,4 +1,4 @@
-// qa1-084-search-folding.test.ts — Stage C QA round 1 regression: QA-1-084 player search folds apostrophes and punctuation (plan 07 C1; plan 05 §2 crosswalk
+// qa1-084-search-folding.test.ts — QA round 1 regression: QA-1-084 player search folds apostrophes and punctuation (plan 07 C1; plan 05 §2 crosswalk
 // name normalisation).
 import fc from "fast-check";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

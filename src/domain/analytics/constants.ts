@@ -194,7 +194,7 @@ export const DEF_SIM = Object.freeze({
 
 /**
  * P(active) (research 05 §3.5: Questionable on the final report played 71 % of the time, 2017–2023
- * [V Footballguys]; Doubtful 5.9 % per the brief; the practice trend refines Questionable — the
+ * [V Footballguys]; Doubtful 5.9 % in the same index; the practice trend refines Questionable — the
  * per-trend values are [U] starting points).
  */
 export const P_ACTIVE = Object.freeze({

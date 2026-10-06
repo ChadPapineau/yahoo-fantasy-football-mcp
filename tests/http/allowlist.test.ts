@@ -1,4 +1,4 @@
-// allowlist.test.ts — the Phase-1a host allow-list (plan 02 §7; brief: incl. api.open-meteo.com,
+// allowlist.test.ts — the Phase-1a host allow-list (plan 02 §7; incl. api.open-meteo.com,
 // api.weather.gov, github.com, objects/release-assets/raw.githubusercontent.com — NOT Yahoo, NOT
 // Sleeper yet) and query-free URL redaction for logs (plan 01 §7).
 import { describe, expect, it } from "vitest";

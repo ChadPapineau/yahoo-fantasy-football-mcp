@@ -1,6 +1,6 @@
 # 02 — Prior-art lessons (architecture only)
 
-**Author:** `repo-security-auditor` agent · **Date:** 2026-09-29 · Source of every claim:
+**Date:** 2026-09-29 · Source of every claim:
 `01-repo-security-audit.md` (file:line evidence lives there). Only repos with a
 **Safe** or **Caution** verdict contribute to the matrix. A short final section lists
 mistakes seen in *rejected* repos, for avoidance only. **No code was copied from any

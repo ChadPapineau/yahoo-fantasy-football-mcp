@@ -306,7 +306,7 @@ describe("refresh helpers", () => {
       expect(under, l).toHaveLength(Math.min(n, MAX_WARNING_LINES));
       for (const u of under) expect(u).toMatch(/^ {2}warning: \S/);
     }
-    // the fixture parquet carries upstream columns SOTARA does not read: named, and tolerated
+    // the fixture parquet carries upstream columns the server does not read: named, and tolerated
     expect(out).toMatch(/^ {2}warning: nflverse:injuries: \d+ extra column\(s\) tolerated: /m);
     expect(out).not.toMatch(/warning\(s\)/);
   });

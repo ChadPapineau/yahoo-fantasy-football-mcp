@@ -1,10 +1,10 @@
 # 05 — Testing strategy
 
-**Author:** `architecture-planner-core` · **Date:** 2026-09-29 · **Brief:** `docs/scratch/briefs/architecture-planner-core.md`
-**Inputs:** plans 01–04; `docs/research/03-yahoo-api.md` §A.2, §B.6, §D.1, §F; `05-strategy-and-analytics.md` §15 (engine verification); `04-data-sources.md` §B1, §H.8; the mcp-builder `evaluation.md` (read 2026-09-29); MCP Inspector README (`--cli`, `docs/cli-smoke-testing.md` "connect → list → call → assert … `--format json` + `jq`, the exit-code map" [V-inspector README, read 2026-09-29]); TypeScript SDK v2 `docs/testing.md` (`InMemoryTransport.createLinkedPair()` from `@modelcontextprotocol/client` — read 2026-09-30 by the advocate, log §1.0; the former [A-1] is resolved positive). Legend as in plan 01.
+**Part of:** the structural plan (01–06) · **Date:** 2026-09-29
+**Inputs:** plans 01–04; `docs/research/03-yahoo-api.md` §A.2, §B.6, §D.1, §F; `05-strategy-and-analytics.md` §15 (engine verification); `04-data-sources.md` §B1, §H.8; the mcp-builder `evaluation.md` (read 2026-09-29); MCP Inspector README (`--cli`, `docs/cli-smoke-testing.md` "connect → list → call → assert … `--format json` + `jq`, the exit-code map" [V-inspector README, read 2026-09-29]); TypeScript SDK v2 `docs/testing.md` (`InMemoryTransport.createLinkedPair()` from `@modelcontextprotocol/client` — read 2026-09-30 during the review, log §1.0; the former [A-1] is resolved positive). Legend as in plan 01.
 **Yahoo-dependency:** `read` — §3.1 fixture recording (the only credentialed step), the Yahoo rows of §4.1, `ff smoke`. **`none`** — unit/property/process tests, the nflverse and manual-league fixtures, the Inspector smoke in fixture mode, the gate tests (in-memory), the evals. *(tag added round 1, D.2 item 1: what survives a Yahoo denial is visible at a glance.)*
 
-Standard carried over from SOTARA (`docs/12-testing-standards.md` there): **everything ships with tests, adversarial by default, the coverage gate is never lowered to pass, and a regression test is only real once it has been shown red against the un-fixed code** (the `mutation-verify` discipline). Two SOTARA lessons shape this plan: *2,376 green tests shipped a broken run because the fake modelled the API we wished for* (fake the native seam with its failure modes), and *4 of 10 field findings were regressions from fixes that passed their own tests* (test the property, not the value).
+The standard: **everything ships with tests, adversarial by default, the coverage gate is never lowered to pass, and a regression test is only real once it has been shown red against the un-fixed code** (mutation verification). Two lessons from earlier field experience shape this plan: *2,376 green tests once shipped a broken run because the fake modelled the API we wished for* (fake the native seam with its failure modes), and *four of ten field findings were once regressions from fixes that passed their own tests* (test the property, not the value).
 
 ---
 
@@ -19,7 +19,7 @@ Standard carried over from SOTARA (`docs/12-testing-standards.md` there): **ever
 | T5 | **Inspector CLI smoke in fixture mode runs in CI** (no credentials, no tokens) | the Inspector is the reference client; `--cli` + `--format json` is made for CI [V-inspector] | a hand-written stdio client | Nothing |
 | T6 | **Model-driven evals: 10 read-only questions over the frozen fixture league**, run manually with the mcp-builder Python harness before a release | `evaluation.md`'s rules (read-only, independent, stable, single verifiable answer) are satisfiable only on frozen data | evals against the live league (answers change weekly) | Nothing |
 | T7 | **Coverage gate: 90 % lines / 85 % branches / 90 % functions globally; 100 % lines + branches for seven named modules** *(six → seven, T10 round 1: the retrospective's metric code)* | §7 | 80 % flat | Nothing downward; upward as the codebase settles |
-| T8 | **Every regression test is mutation-verified** before its finding is closed | SOTARA round-5 lesson | trust the green | Nothing |
+| T8 | **Every regression test is mutation-verified** before its finding is closed | the intro's second lesson | trust the green | Nothing |
 | T9 | **Safety defaults and contention are tested as properties, not assumed**: the XML entity flags carry a mutation check (§2 `xml`), the store carries a 3-s writer-lock contention test and a backup-restore test (§2 `store`), the envelope test walks every output for unlabelled third-party strings, and `defineTool()`'s toolset/schema rules are asserted (§2) *(added round 1: OBJ-10, 11, 14, 07)* | round 1 found a safety default stated backwards (A-9) and a backup that was a torn copy — both would have passed a test written to the wished-for API | trust the library default; trust `cp` | Nothing |
 | T10 | **Every latency or size bound in the plan names the fixture or dataset size it is measured on and the test that measures it** — a bound with no data size is a wish, not a bound *(added round 2, D.2 item 1)* | round 1's "< 50 ms swap" was asserted against no dataset and could not have passed on a real one (OBJ-27) | bounds as prose | Nothing |
 
@@ -195,12 +195,12 @@ Built exactly as `evaluation.md` prescribes, with the fixture league as the worl
 | `ff smoke`, `ff doctor --online` | none | yes | Yahoo |
 | Dataset refresh tests (real `timestamp.txt`) | none | none | GitHub releases (scheduled job only) |
 | Model-driven evals | **yes** | none (fixture mode) | Anthropic API |
-| Skill quality review (product planner's domain) | yes | none | — |
+| Skill quality review (the product plan's domain) | yes | none | — |
 
 ---
 
 ## 9. What this plan does not decide
-Analytics-model evaluation (backtests, Brier/CRPS — 05 §12; product planner); the Skills' behavioural tests (plans 09/10); the schedule of the credentialed manual jobs (plan 06).
+Analytics-model evaluation (backtests, Brier/CRPS — 05 §12; the product plan); the Skills' behavioural tests (plans 09/10); the schedule of the credentialed manual jobs (plan 06).
 
 ---
 

@@ -65,7 +65,7 @@ Totals, weeks 1–3: `mean` regret **114.5**, `pwin` regret **114.5**.
 - **(d) / (e) schema — met:** every `Dist` in every E1/E2 result carries `basis: "position_cv"`, and
   every `delta_pwin` is the `{ sign, band }` form (the type makes a two-decimal number impossible
   under `position_cv`; the backtest walks every result to check). The Skills' output template printing
-  `basis` is the Skills owner's Lane 1 test.
+  `basis` is checked by Skills Lane 1 (`scripts/skills/check-skills.mjs`, `npm run check:skills`).
 
 ## A8 — K/DEF streaming
 
@@ -84,7 +84,7 @@ kickers who recorded a 2026 line" up to mid-season signings. The committed `rost
 holds **every kicker's row** (40 kickers, 32 active), so fixture mode serves the full universe
 too. The served result carries an even, rank-interleaved share of plan 07 E5's "10 candidates
 compact": **5 K + 5 DEF** at `compact`, **3 + 3** at `detail: "full"`, both inside C8's 10,000
-characters without truncation (Stage B fixer round 3; before it the excerpt held only the fixture
+characters without truncation (modules gate, fix round 3; before it the excerpt held only the fixture
 league's 3 kickers, and on the real upstream file the ranking — 32 defences + 40 kickers, cut and
 practice-squad ones included, + my own K/DEF — exceeded E1's 64-target bound: every call was
 `VALIDATION`. The ranking pass now takes E5's own 96-candidate bound).
@@ -123,7 +123,7 @@ Measured by `tests/domain/analytics/perf.test.ts` on the fixture data (warm, thi
 
 | call | size | measured | budget |
 |---|---|---|---|
-| `projectPlayers` (E1) | 32 subjects (28 players + 4 DEF) × 1 week × `n_sims` 4000 = 128,000 scored lines | ≈ 0.5 s (≈ 1.1 s before the Stage B round 2 fix) | < 3 s (asserted) |
+| `projectPlayers` (E1) | 32 subjects (28 players + 4 DEF) × 1 week × `n_sims` 4000 = 128,000 scored lines | ≈ 0.5 s (≈ 1.1 s before the modules-gate fix round 2) | < 3 s (asserted) |
 | `projectPlayers` (E1), worst in-bounds call (QA-1-079) | 50 pool players × 6-week horizon × `n_sims` 20 000 — capped at `SIMS.maxTotalLines` = 512,000 simulated lines (≈ 1,700 per player-week, said in an assumption) | ≈ 2.0 s (≈ 25 s uncapped) | < 3 s (asserted) |
 | `analyzeKdef` (E5) | 64 subjects, look-ahead 2: pass 1 at 150 samples, pass 2 (12 per position + mine) at 400 + 2 × 150, plus the 128-node expectation per subject-week (QA-1-024) | ≈ 0.24 s (≈ 0.14 s before the expectation quadrature) | < 0.5 s (A15 P0) |
 

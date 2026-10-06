@@ -1,6 +1,6 @@
 # 03 — Yahoo Fantasy Sports API: capability reference
 
-**Author:** `yahoo-api-specialist` agent · **Researched:** 2026-09-29 · **Brief:** `docs/scratch/briefs/yahoo-api-specialist.md`
+**Researched:** 2026-09-29
 **Method:** official Yahoo docs first, then Yahoo help pages, then the source of three mature open-source wrappers read on GitHub (never cloned or run), plus two credential-free probes. No Yahoo app was created and no authenticated call was made. No real league, team or user identifiers appear in this document; keys shown are Yahoo's own documentation placeholders (`461` = the 2025 NFL game id in Yahoo's examples).
 
 ## How to read this document
@@ -10,7 +10,7 @@ Every claim carries a source tag and a verification mark:
 | Mark | Meaning |
 |---|---|
 | **[V-official]** | Stated in Yahoo's official documentation or portal (fetched 2026-09-29). |
-| **[V-probe]** | Observed directly this session by a credential-free request (OIDC discovery document, or an unauthenticated `GET` that returned only an error). |
+| **[V-probe]** | Observed directly during the research by a credential-free request (OIDC discovery document, or an unauthenticated `GET` that returned only an error). |
 | **[V-community]** | Not in official docs; consistent in at least one mature wrapper's source code or a dated GitHub issue. Reliable in practice, but Yahoo can change it silently. |
 | **[U]** | Unverified. Needs a live token to confirm. Collected in §F at the end. |
 
@@ -34,7 +34,7 @@ Every claim carries a source tag and a verification mark:
 | S-HELP-6451 | https://help.yahoo.com/kb/SLN6451.html | Football scoring-category abbreviations (no ids). |
 | S-YFPY | https://github.com/uberfastman/yfpy (`yfpy/query.py`, `models.py`, `utils.py`) | Python wrapper; most complete community model of the JSON responses. |
 | S-SPILCHEN | https://github.com/spilchen/yahoo_fantasy_api (`yhandler.py`, `team.py`, `league.py`) | Python wrapper; builds the write XML. |
-| S-WAD | https://github.com/whatadewitt/yahoo-fantasy-sports-api (npm `yahoo-fantasy`) | Node wrapper. (The brief named `edwarddistel/yahoo-fantasy-sports-api`; that repo does not exist — 404 — this is the Node wrapper.) |
+| S-WAD | https://github.com/whatadewitt/yahoo-fantasy-sports-api (npm `yahoo-fantasy`) | Node wrapper. (The research scope named `edwarddistel/yahoo-fantasy-sports-api`; that repo does not exist — 404 — this is the Node wrapper.) |
 | S-YOAUTH | https://github.com/josuebrunel/yahoo-oauth (`yahoo_oauth/oauth.py`, `utils.py`) | The OAuth helper the Python wrappers use. |
 | S-ISS-DRB18 | https://github.com/derekrbreese/fantasy-football-mcp-public/issues/18 | 2026-08-11: "Yahoo no longer self-serve provisions the Fantasy Sports API". |
 | S-ISS-YFPY84 | https://github.com/uberfastman/yfpy/issues/84 | 403 "This application is not authorized to perform this action" since 2026-07-22. |
@@ -230,13 +230,13 @@ Sub-resources chainable on the collection: `/stats;type=week;week=N`, `/stats;ty
 **Projections — the precise answer.**
 - What exists [V-official S-DOCS samples]: `team_projected_points {coverage_type, week, total}` on each team inside `league/.../scoreboard`, `team/.../matchups`, and `team/.../stats;type=week` [last: V-community S-YFPY]; and `win_probability` (0–1) on matchup teams. That is a **team-level weekly total**, computed by Yahoo from the projected points of the starters the team currently has slotted.
 - What does not exist: **no player-level projected points, no projected stat lines, no rest-of-season projections, no projection sub-resource.** Evidence: the Player resource's sub-resource list is exactly `metadata, stats, ownership, percent_owned, draft_analysis` [V-official S-DOCS]; the word "projected" occurs in the entire official reference only as `team_projected_points` (24 occurrences, all inside scoreboard/matchup samples) [V-official S-DOCS, grep]; yfpy's `Player` model — the most complete community model — has `player_points` but no projected field, while its `Team` model has `team_projected_points` [V-community S-YFPY `models.py`]; spilchen exposes no projection at all [V-community S-SPILCHEN]. Yahoo's own projections (consensus and "Fantasy Plus" tiers) exist only in the website/app UI [Yahoo help https://help.yahoo.com/kb/SLN37001.html].
-- Consequence: any per-player projection, start/sit ranking or waiver-target score must come from **another source** (fed to the other research agents, §E). `team_projected_points` can serve as a coarse cross-check of a lineup's expected total. Whether it is populated before the week's first game and how it evolves mid-week: [U].
+- Consequence: any per-player projection, start/sit ranking or waiver-target score must come from **another source** (fed to research 04 and 05, §E). `team_projected_points` can serve as a coarse cross-check of a lineup's expected total. Whether it is populated before the week's first game and how it evolves mid-week: [U].
 
 ### B.5 Stat ids and the scoring engine
 
 Stat categories are identified by integer `stat_id`. Two places carry them: the game-wide universe `game/nfl/stat_categories` ("Detailed description of all available stat categories for the game") and, per league, `league/{league_key}/settings` → `stat_categories.stats[]` (the categories this league tracks) and `stat_modifiers.stats[]` (the point value per unit) [V-official S-DOCS]. Per-stat fields: `stat_id, enabled, name, display_name, sort_order, position_type, stat_position_types[{position_type, is_only_display_stat}]`, and (yfpy) `abbr, group, is_excluded_from_display, bonuses[{target, points}]` [V-community S-YFPY `Stat`, `Bonus`].
 
-**NFL stat ids from Yahoo's official settings sample** [V-official S-DOCS, `league/{league_key}/settings` sample, a public league with default scoring]. The modifier column is that sample league's value (it happens to be half-PPR, 4-pt pass TD, −1 INT, −2 fumble lost — i.e. the same shape as the validation league described in the brief — but **the product must always read the league's own `stat_modifiers`**):
+**NFL stat ids from Yahoo's official settings sample** [V-official S-DOCS, `league/{league_key}/settings` sample, a public league with default scoring]. The modifier column is that sample league's value (it happens to be half-PPR, 4-pt pass TD, −1 INT, −2 fumble lost — i.e. the same shape as the validation league described in the research scope — but **the product must always read the league's own `stat_modifiers`**):
 
 | stat_id | name | display | pos | modifier |
 |---|---|---|---|---|
@@ -496,7 +496,7 @@ The official docs distinguish only "Read" from "Read/Write"; that every non-GET 
 
 ## E. Gaps — what the product wants that Yahoo does not provide
 
-Each item is a clean negative against the official resource list (`game, league, team, roster, player, transaction, user` and their sub-resources) [V-official S-DOCS] and the wrappers' models [V-community S-YFPY, S-SPILCHEN]. These feed the other research agents.
+Each item is a clean negative against the official resource list (`game, league, team, roster, player, transaction, user` and their sub-resources) [V-official S-DOCS] and the wrappers' models [V-community S-YFPY, S-SPILCHEN]. These feed research 04 and 05.
 
 | Gap | What Yahoo has instead | Needed from elsewhere |
 |---|---|---|

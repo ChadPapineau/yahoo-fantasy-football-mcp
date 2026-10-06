@@ -2,8 +2,8 @@
 // per-source dataset files; plan 08 §3.2 stat columns; plan 10 §3.1a sources), grounded in the real
 // 2026 nflverse parquet files read on 2026-09-30 (research 04 §H.8 closed: parquet = CSV schema).
 //
-// One contract, two implementers: the SOURCES engineer fills these tables (through DatasetWriter)
-// and the STORE engineer implements the domain's dataset readers over them (READER_QUERIES below).
+// One contract, two sides: the sources layer fills these tables (through DatasetWriter) and the
+// store layer implements the domain's dataset readers over them (READER_QUERIES below).
 // Columns keep nflverse's own names wherever they are stored verbatim; every other column names the
 // source columns it is derived from and how (`derivation`). Conventions for every table:
 //   - TEXT values pass through `emptyToNull` (derive.ts): "" and whitespace-only → NULL;

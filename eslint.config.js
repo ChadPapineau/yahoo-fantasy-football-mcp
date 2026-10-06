@@ -256,14 +256,14 @@ function restrictions(extra) {
 
 /**
  * src/domain is deterministic: randomness comes from the seeded Rng and time from the Clock in
- * src/domain/clock.ts (Stage A critique B C-17), so simulations and tests are reproducible.
+ * src/domain/clock.ts (critique B, C-17), so simulations and tests are reproducible.
  */
 const CLOCK_BAN = [
   {
     object: "Math",
     property: "random",
     message:
-      "src/domain must use the seeded Rng from src/domain/clock.ts, not Math.random (B C-17).",
+      "src/domain must use the seeded Rng from src/domain/clock.ts, not Math.random (critique B, C-17).",
   },
   {
     object: "Date",

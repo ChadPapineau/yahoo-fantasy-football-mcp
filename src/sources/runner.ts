@@ -45,8 +45,8 @@ export const ALL_SEASON_WEEKS: readonly Week[] = Object.freeze(
 );
 /**
  * The error a DatasetPublisher returns when the source's job_lock is held by another live refresh
- * (plan 06 §2 "exits 0 if another instance is running"). Requested of the store owner; until then
- * any error starting with it is read as "locked".
+ * (plan 06 §2 "exits 0 if another instance is running"). The store's publisher
+ * (src/store/publisher.ts) returns it; any error starting with it is read as "locked".
  */
 export const JOB_LOCKED_ERROR = "job_locked";
 

@@ -1,6 +1,6 @@
 # 06 — Automation inventory (zero-token jobs)
 
-**Author:** `architecture-planner-core` · **Date:** 2026-09-29 · **Brief:** `docs/scratch/briefs/architecture-planner-core.md`
+**Part of:** the structural plan (01–06) · **Date:** 2026-09-29
 **Inputs:** plans 01 (refresh model D8, data classes §5.2, freshness §5.4), 02 (journal §4.5, supply chain §7), 03 (doctor §5, launchd, uninstall), 04 (CI jobs), 05 (fixtures, smoke, evals); `docs/research/04-data-sources.md` §E (freshness map) and §B (cadences); `03-yahoo-api.md` §D.2 (finalisation clock). Legend as in plan 01.
 **Yahoo-dependency:** `read` — §1.3 credentialed jobs (snapshots, transactions append, token check, pre-kickoff check, journal reconcile). **`none`** — §1.1 CI, §1.2 data refreshes, §2 launchd design, §4 build order steps 1–3. *(tag added round 1, D.2 item 1: what survives a Yahoo denial is visible at a glance.)*
 
@@ -44,7 +44,7 @@ Columns: **Trigger** (launchd calendar in local time, or Actions); **Inputs**; *
 | Weekly audit + outdated report + macOS smoke (`scheduled.yml`) | Monday 06:00 UTC + manual | lockfile, binary | job summary | red run | N | ✅ workflow (audit/outdated); 🔧 smoke |
 | Dependabot security updates | on advisory | lockfile | PR | open PR | N | ✅ **now** |
 | Release (`release.yml`) | tag `v*` | repo at tag, `CHANGELOG.md` | GitHub Release + tarball + sha256 | red run; missing changelog entry | N | 🔧 (workflow file ✅) |
-| Branch ruleset (no force-push, no deletion, linear history; **no required checks** — round 1 OBJ-13, plan 04 §5) | repo setting (Chad) | — | — | force-push / deletion rejected; a red check is caught by the `ci-vigilance` obligation, not by the ruleset | N | ✅ **now** (plan 04 §5) |
+| Branch ruleset (no force-push, no deletion, linear history; **no required checks** — round 1 OBJ-13, plan 04 §5) | repo setting (Chad) | — | — | force-push / deletion rejected; a red check is caught by the CI-vigilance obligation, not by the ruleset | N | ✅ **now** (plan 04 §5) |
 
 ### 1.2 Data refreshes (launchd, Chad's Mac, no Yahoo credentials)
 
@@ -64,7 +64,7 @@ All are `ff refresh <source>`; each: poll version → skip/download → assert s
 | `refresh weather` | hourly from Wed to kickoff, only for the coming week's outdoor games | Open-Meteo or NWS per `FF_WEATHER_SOURCE` | `ds_weather` | warn-only; the recommendation lists the driver as missing | N | 🔧 |
 | `refresh odds` (optional) | 3×/day if `ODDS_API_KEY` set (≈108 credits/month of 500 [V-04 §B6]) | The Odds API | `ds_odds` | warn-only; credit counter in `ff status` | N | 🔧 |
 | `crosswalk rebuild` | after `nflverse:daily`, `sleeper:players`, `dynastyprocess` (chained by the job, not a separate plist) | `ds_roster_weekly`, `ds_sleeper_players`, DP, overrides file, persisted pairs | `crosswalk` **delta** rows in the store (a derived table under plan 01 §5.3's rules — round 2, OBJ-27); unmatched report | **notification when unmatched rostered/top-owned players > threshold** (04 §D "Alert when …"; threshold **[A-1: 5]**) | N (uses the last Yahoo player list already cached) | 🔧 |
-| `store prune` | weekly Sun 03:00 | `yahoo_cache` past hard limits, `ds/*.tmp` staging files left by an interrupted refresh, backups beyond two versions (`ds_news`'s 30-day retention is applied by the `news` refresh when it writes its file — a dataset file is never edited in place; round 2, OBJ-27). *No "superseded" dataset files exist to prune: `rename()` over the published path unlinks the old file, and an open handle keeps the old inode only until that server closes it (advocate's round-3 nit)* | freed space | warn-only | N | 🔧 |
+| `store prune` | weekly Sun 03:00 | `yahoo_cache` past hard limits, `ds/*.tmp` staging files left by an interrupted refresh, backups beyond two versions (`ds_news`'s 30-day retention is applied by the `news` refresh when it writes its file — a dataset file is never edited in place; round 2, OBJ-27). *No "superseded" dataset files exist to prune: `rename()` over the published path unlinks the old file, and an open handle keeps the old inode only until that server closes it (round-3 nit)* | freed space | warn-only | N | 🔧 |
 | `store backup` | weekly Sun 03:10 | `store.sqlite` (`VACUUM INTO`); `ds/` files are not backed up — rebuildable from the releases (round 2, OBJ-27) | `~/.cache/…/backups/store-<date>.sqlite` (keep 4) | notification on failure | N | 🔧 |
 
 ### 1.3 Yahoo-credentialed jobs (launchd, Chad's Mac; read-only; cached-class reads under the global limiter)
@@ -106,7 +106,7 @@ All are `ff refresh <source>`; each: poll version → skip/download → assert s
 
 | Channel | Red when | Who sees it |
 |---|---|---|
-| GitHub check | any `ci.yml`/`docs.yml`/`secrets` job fails | Chad, and every agent that pushed — the **`ci-vigilance` obligation** (plan 04 §5): verify the push's runs, fix or revert a red `main` before replying. In the docs phase this obligation *is* the protection, since no check is required by the ruleset (round 1, OBJ-13) |
+| GitHub check | any `ci.yml`/`docs.yml`/`secrets` job fails | Chad, or whoever pushed — the **CI-vigilance obligation** (plan 04 §5): verify the push's runs, fix or revert a red `main` before moving on. In the docs phase this obligation *is* the protection, since no check is required by the ruleset (round 1, OBJ-13) |
 | `refresh_log.ok = 0` | a launchd job failed after retries | `ff status`, `ff doctor` #9–#11 |
 | macOS notification | a job failed (rate-limited), a roster/FA diff, a pre-kickoff problem, a token/provisioning problem, an unmatched-crosswalk threshold | Chad, without opening anything |
 | `ff status` / `ff_get_status` | any source past its hard limit; pending journal rows; token expiry within 24 h; jobs not loaded | Chad, or the model when asked |

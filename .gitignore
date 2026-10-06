@@ -108,12 +108,11 @@ $RECYCLE.BIN/
 !.vscode/launch.json.example
 .idea/
 *.iml
+# per-machine tool settings (e.g. a local permissions file) never belong in the repo
+*.local.json
 *.swp
 *.swo
 *~
 .project
 .settings/
 .classpath
-
-# --- Claude Code local overrides -----------------------------------------
-.claude/settings.local.json

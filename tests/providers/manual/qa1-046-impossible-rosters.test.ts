@@ -1,4 +1,4 @@
-// qa1-046-impossible-rosters.test.ts — Stage C QA round 1 regression: QA-1-046 league.yaml rosters no platform could hold (an over-full starter/flex/IR slot, a
+// qa1-046-impossible-rosters.test.ts — QA round 1 regression: QA-1-046 league.yaml rosters no platform could hold (an over-full starter/flex/IR slot, a
 // position seated where it cannot play) and duplicates keyed off the player, not the spelling (name vs
 // gsis id, apostrophe variants) are file issues (plan 01 §8 X1; plan 02 §5).
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
