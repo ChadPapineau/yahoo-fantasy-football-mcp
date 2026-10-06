@@ -128,6 +128,20 @@ const b1Data = z.strictObject({
   latest_execution_time: iso.nullable(),
 });
 
+/** How many unmatched keys B1's warning names (as the other roster readers do, QA-1-042). */
+const UNMATCHED_KEYS_NAMED = 5;
+/** A player key safe to quote in a warning (server-made ids only). */
+const SAFE_KEY_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+/**
+ * B1's warning for rostered players the NFL data does not match (QA-2-039; round-1 Open items 4:
+ * every tool that reads a roster warns with the unmatched keys). They stay listed, gsis_id null.
+ */
+export function unmatchedRosterWarning(keys: readonly string[]): string {
+  const named = keys.filter((k) => SAFE_KEY_RE.test(k)).slice(0, UNMATCHED_KEYS_NAMED);
+  return `${String(keys.length)} rostered players are unmatched in the crosswalk: listed with gsis_id null, the NFL data (projections, injury reports, stats) leaves them out (ff_get_status lists them)${named.length > 0 ? `: ${named.join(", ")}` : ""}`;
+}
+
 export const getRoster = defineTool({
   name: "ff_get_roster",
   family: "platform",
@@ -209,6 +223,11 @@ export const getRoster = defineTool({
       }
       return row;
     });
+    const warnings: string[] = [];
+    const unmatched = roster.entries
+      .map((e) => e.player.ref.id)
+      .filter((key) => (byKey.get(key)?.subject ?? null) === null);
+    if (unmatched.length > 0) warnings.push(unmatchedRosterWarning(unmatched));
     const subjects = roster.entries.map((e) => ({
       player_key: e.player.ref.id,
       nfl_team: nflTeamOf(e.player),
@@ -242,6 +261,7 @@ export const getRoster = defineTool({
         latest_execution_time: latestExecutionTime(schedule, ctx.nowMs),
       },
       inputs,
+      warnings,
       bareFields: [bare("data.players[].name", src("player.name"))],
       provisional: weekProvisional(ctx, season, w),
       listKey: "players",
