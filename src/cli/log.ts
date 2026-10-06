@@ -6,6 +6,8 @@
 // every string is pre-cut to `maxString + longest registered secret + 4096` BEFORE the patterns run
 // (nothing past `maxString` survives truncation anyway), and the email pattern is length-bounded, so
 // a hostile 8 MB field cannot stall the stdio loop (critic C-11b: 60 000 chars took 4.1 s before).
+// Redaction can shrink the text before the cut, so only what a second, longer sample agrees on is
+// kept: a secret the cut splits never moves into the kept prefix (QA-2-031).
 import type { LogLevel } from "../config/schema.js";
 
 /** Level order, most severe first (plan 01 §7). */
@@ -128,7 +130,8 @@ export const REDACTION_PATTERNS: readonly PatternRule[] = Object.freeze([
   },
   {
     id: "json_secret",
-    re: /("(?:access_token|refresh_token|id_token|client_secret|password|passwd|api_key|apikey|token|secret|xoauth_yahoo_guid|guid|authorization)"\s*:\s*")[^"]*(")/gi,
+    // an unterminated value runs to the end: a value the pre-cut splits is still redacted
+    re: /("(?:access_token|refresh_token|id_token|client_secret|password|passwd|api_key|apikey|token|secret|xoauth_yahoo_guid|guid|authorization)"\s*:\s*")[^"]*("|$)/gi,
     replace: "$1[redacted]$2",
   },
   {
@@ -171,16 +174,23 @@ export function redactString(s: string, secrets: SecretRegistry): string {
 
 /**
  * Redacts then truncates to `max`, pre-cutting first so the work is linear in `max`, not in the
- * input: the kept prefix is at most `max` chars, and a secret or pattern ending inside it starts at
- * most `longest secret + PRECUT_SLACK` chars earlier than the cut — so no secret can survive in the
- * kept prefix. The reported dropped length is the ORIGINAL string's.
+ * input. A cut can split a secret, and the split remainder matches neither its registered value nor
+ * its pattern; redaction that shrinks the text before it (a dropped query string, a replaced value)
+ * would then pull that remainder into the first `max` chars (QA-2-031). So the input is redacted
+ * twice, cut at `keep` and at `keep + longest secret + PRECUT_SLACK`: the second sample holds whole
+ * every registered secret and every pattern match that the first cut splits, so the two agree only
+ * up to where such a secret starts, and only that common prefix is kept. A match longer than
+ * PRECUT_SLACK that both cuts split (a URL's user-info or a JWT longer than 4 KiB) is the one
+ * shape this cannot see. The reported dropped length is the ORIGINAL string's.
  */
 export function redactAndTruncate(s: string, secrets: SecretRegistry, max: number): string {
   const keep = max + secrets.longest + PRECUT_SLACK;
   if (s.length <= keep) return truncate(redactString(s, secrets), max);
   const red = redactString(s.slice(0, keep), secrets);
-  const cutAt = Math.min(red.length, max);
-  let cut = cutAt;
+  const wider = redactString(s.slice(0, keep + secrets.longest + PRECUT_SLACK), secrets);
+  const limit = Math.min(red.length, max);
+  let cut = 0;
+  while (cut < limit && red.charCodeAt(cut) === wider.charCodeAt(cut)) cut++;
   const code = red.charCodeAt(cut - 1);
   if (code >= 0xd800 && code <= 0xdbff) cut -= 1;
   return `${red.slice(0, cut)}…[truncated ${String(s.length - cut)} chars]`;

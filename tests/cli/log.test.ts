@@ -571,3 +571,101 @@ describe("linear-time redaction (critic C-11b: the email pattern was quadratic)"
     expect(lines[0]).toContain("[redacted:identifier]");
   });
 });
+
+describe("the pre-cut when redaction shrinks the text before the cut (QA-2-031)", () => {
+  // a 32-char registered value with no recognisable shape, and a token shape nothing registers
+  const SECRET = J("Sx7Qp2Lm9Vt4", "Rb8Nc3Kd6Wf1Yh5Zj0Ga");
+  const TOKEN = J("gh", "p_", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8");
+  const NOTE = /…\[truncated \d+ chars\]$/;
+
+  /** `secret` placed so that the pre-cut at `keep` falls `kept` chars into it, after a long query. */
+  const line = (secret: string, keep: number, kept: number): string => {
+    const head = "fetch failed for https://h.example/p?";
+    const tail = " key ";
+    return `${head}${"q".repeat(keep - kept - head.length - tail.length)}${tail}${secret} end`;
+  };
+
+  it("a registered secret cut by the pre-cut is not pulled into the kept prefix", () => {
+    const r = new SecretRegistry();
+    r.add("api_key", SECRET);
+    const keep = DEFAULT_MAX_STRING + r.longest + PRECUT_SLACK;
+    for (const kept of [1, 8, 16, 31]) {
+      const out = redactAndTruncate(line(SECRET, keep, kept), r, DEFAULT_MAX_STRING);
+      expect(out).not.toContain(SECRET.slice(0, Math.min(kept, 6)));
+      expect(out).toMatch(NOTE);
+    }
+  });
+
+  it("a token shape cut by the pre-cut, nothing registered, is not pulled into the kept prefix", () => {
+    const keep = DEFAULT_MAX_STRING + PRECUT_SLACK;
+    for (const kept of [4, 20, 39]) {
+      const out = redactAndTruncate(
+        line(TOKEN, keep, kept),
+        new SecretRegistry(),
+        DEFAULT_MAX_STRING,
+      );
+      expect(out).not.toContain(TOKEN.slice(0, kept));
+    }
+  });
+
+  it("through the logger, the line keeps no fragment of the registered secret", () => {
+    const { log, raw } = capture("info");
+    log.registerSecret("api_key", SECRET);
+    log.warn("http.error", {
+      detail: line(SECRET, DEFAULT_MAX_STRING + SECRET.length + PRECUT_SLACK, 31),
+    });
+    expect(raw[0]).not.toContain(SECRET.slice(0, 6));
+  });
+
+  it("a JSON secret value longer than the pre-cut slack is redacted, not cut and kept", () => {
+    const value = "v".repeat(PRECUT_SLACK * 3);
+    for (const k of ["password", "access_token", "client_secret"]) {
+      const out = redactAndTruncate(`{"${k}":"${value}"}`, new SecretRegistry(), 100);
+      expect(out).not.toContain("vvvvvv");
+    }
+  });
+
+  // what shrinks: a dropped query string, a replaced JSON / parameter / Authorization value
+  const SHRINKERS: Readonly<Record<string, (n: number) => string>> = {
+    url: (n) => `fetch failed for https://h.example/p?${"q".repeat(n)} `,
+    json: (n) => `{"password":"${"p".repeat(n)}"} `,
+    param: (n) => `token=${"t".repeat(n)} `,
+    auth: (n) => `Authorization: Bearer ${"b".repeat(n)} `,
+    none: () => "",
+  };
+  const SECRETS: Readonly<Record<string, { value: string; registered: boolean }>> = {
+    registered: { value: SECRET, registered: true },
+    spaced: { value: "Quokka Zebra Placeholder Name", registered: true },
+    token: { value: TOKEN, registered: false },
+  };
+
+  it("property: any shrink before the cut, any cut inside the secret — the kept text is a prefix of the full redaction", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...Object.keys(SHRINKERS)),
+        fc.integer({ min: 0, max: 9000 }),
+        fc.constantFrom(...Object.keys(SECRETS)),
+        fc.double({ min: 0, max: 1, noNaN: true }),
+        fc.integer({ min: 20, max: 700 }),
+        (shrinker, n, which, at, max) => {
+          const sec = SECRETS[which] as { value: string; registered: boolean };
+          const r = new SecretRegistry();
+          if (sec.registered) r.add("identifier", sec.value);
+          const keep = max + r.longest + PRECUT_SLACK;
+          const kept = 1 + Math.floor(at * (sec.value.length - 1));
+          const sep = " key ";
+          const room = keep - kept - sep.length;
+          const head = (SHRINKERS[shrinker] as (n: number) => string)(n).slice(0, room);
+          const s = `${head}${"w ".repeat(room)}`.slice(0, room) + sep + sec.value + " end";
+          expect(s.indexOf(sec.value)).toBe(keep - kept);
+          const out = redactAndTruncate(s, r, max);
+          const body = out.replace(NOTE, "");
+          expect(redactString(s, r).startsWith(body)).toBe(true);
+          for (let i = 0; i + 6 <= sec.value.length; i++)
+            expect(body).not.toContain(sec.value.slice(i, i + 6));
+        },
+      ),
+      { numRuns: 400 },
+    );
+  });
+});
