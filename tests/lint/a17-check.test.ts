@@ -8,7 +8,15 @@
 // sh script) that records what it was handed and replays a transcript.
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  globSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import fc from "fast-check";
@@ -837,6 +845,29 @@ describe("main() end to end with a stub claude (the real CLI is never run)", () 
     const pid = Number(readFileSync(path.join(h.rec, "child.pid"), "utf8").trim());
     const deadline = Date.now() + 5000;
     while (alive(pid) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    expect(alive(pid)).toBe(false);
+  });
+
+  it("interrupted (SIGHUP here; SIGINT and SIGTERM alike): exit 130, the group stopped, the temp dir removed", async () => {
+    const h = harness();
+    const before = process.listenerCount("SIGHUP");
+    const tmpCount = () =>
+      globSync("ff-a17-*", { cwd: tmpdir() }).filter((d) => !d.startsWith("ff-a17-test-")).length;
+    const dirsBefore = tmpCount();
+    const pidFile = path.join(h.rec, "child.pid");
+    const pending = h.go(["--timeout", "60"], { A17_STUB_MODE: "hang" });
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(pidFile) && Date.now() < deadline)
+      await new Promise((r) => setTimeout(r, 20));
+    expect(process.listenerCount("SIGHUP")).toBe(before + 1);
+    process.emit("SIGHUP"); // runs the listeners only; no real signal reaches the test worker
+    expect(await pending).toBe(EXIT.INTERRUPTED);
+    expect(h.err.join("")).toContain("interrupted");
+    expect(process.listenerCount("SIGHUP")).toBe(before);
+    expect(tmpCount()).toBe(dirsBefore);
+    const pid = Number(readFileSync(pidFile, "utf8").trim());
+    const gone = Date.now() + 5000;
+    while (alive(pid) && Date.now() < gone) await new Promise((r) => setTimeout(r, 50));
     expect(alive(pid)).toBe(false);
   });
 

@@ -37,7 +37,8 @@
 // 2 setup/usage (bad option, dist/cli.js missing, the claude CLI not found, unreadable --from file) ·
 // 3 Claude Code not logged in or its login expired (run `claude auth login`, then rerun) ·
 // 4 the MCP server failed to connect, or does not list ff_debug_echo · 5 the tool was never called,
-// or its call failed · 6 timeout · 7 malformed or inconclusive output · 130 interrupted (Ctrl-C).
+// or its call failed · 6 timeout · 7 malformed or inconclusive output · 130 interrupted (Ctrl-C,
+// SIGTERM or SIGHUP — the CLI's process group is stopped and the temp dir removed first).
 import { execFile, spawn } from "node:child_process";
 import {
   chmodSync,
@@ -580,11 +581,14 @@ export function parseVersion(text) {
 /** stdout kept from one run; a transcript of this check is a few kilobytes. */
 const MAX_STDOUT_BYTES = 32 * 1024 * 1024;
 const MAX_STDERR_CHARS = 64 * 1024;
+/** Signals that interrupt the check; each stops the CLI's group before the script ends. */
+const STOP_SIGNALS = /** @type {const} */ (["SIGINT", "SIGTERM", "SIGHUP"]);
 
 /**
- * Runs the CLI with stdin closed, in its own process group, under a hard timeout. At the limit (or
- * on Ctrl-C) the group gets SIGTERM — the server shuts down cleanly on it — and SIGKILL 3 s later;
- * when the CLI exits the group gets SIGTERM too, so nothing it started outlives the check.
+ * Runs the CLI with stdin closed, in its own process group, under a hard timeout. At the limit,
+ * or on SIGINT/SIGTERM/SIGHUP to this script, the group gets SIGTERM (the server shuts down
+ * cleanly on it) and SIGKILL 3 s later; when the CLI exits the group gets SIGTERM too, so nothing
+ * it started outlives the check.
  * @param {{ bin: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number }} o
  * @returns {Promise<RunResult>}
  */
@@ -621,7 +625,7 @@ export function runClaude(o) {
         killGroup("SIGKILL");
       }, 3000);
     };
-    const onSigint = () => {
+    const onSignal = () => {
       interrupted = true;
       stop();
     };
@@ -635,10 +639,10 @@ export function runClaude(o) {
       settled = true;
       clearTimeout(timer);
       clearTimeout(hardKill);
-      process.removeListener("SIGINT", onSigint);
+      for (const sig of STOP_SIGNALS) process.removeListener(sig, onSignal);
       resolve(r);
     };
-    process.on("SIGINT", onSigint);
+    for (const sig of STOP_SIGNALS) process.on(sig, onSignal);
     child.stdout.on("data", (/** @type {Buffer} */ b) => {
       if (outBytes >= MAX_STDOUT_BYTES) return;
       out.push(b);
