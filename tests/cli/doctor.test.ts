@@ -302,6 +302,234 @@ describe("rows 2, 3, 13 — client configs", () => {
   });
 });
 
+/** Writes a Claude Code user config (`~/.claude.json`) under the sandbox home. */
+function codeConfig(s: Sandbox, doc: unknown, mode = 0o600): string {
+  const file = path.join(s.home, ".claude.json");
+  writeFileSync(file, JSON.stringify(doc));
+  chmodSync(file, mode);
+  return file;
+}
+
+/** A folder a `claude mcp add --scope local` was run in (it need not exist for doctor). */
+const folder = (s: Sandbox, name: string): string => path.join(s.dir, "folders", name);
+
+describe("rows 2, 3, 13 — Claude Code user and local scope (QA-2-063)", () => {
+  /** A valid entry of ours: this Node, an existing dist/cli.js stand-in, `serve`. */
+  function ours(s: Sandbox, env: Record<string, string> = { FF_LOG_LEVEL: "info" }) {
+    const entry = path.join(s.dir, "dist-cli.js");
+    writeFileSync(entry, "");
+    return { type: "stdio", command: process.execPath, args: [entry, "serve"], env };
+  }
+
+  it("user scope only: found at the top level and reported as user scope", async () => {
+    const s = fresh();
+    const scan = scanClientConfig(
+      "code",
+      codeConfig(s, { mcpServers: { [SERVER_NAME]: ours(s) } }),
+    );
+    expect(scan.entries.map((e) => [e.scope, e.project])).toEqual([["user", null]]);
+    const r = await checkLaunchConfig(makeIo(s), [scan]);
+    expect(r.status).toBe("ok");
+    expect(r.message).toMatch(/^1 client entry/);
+    expect(r.details).toEqual([`code (user scope): entry "${SERVER_NAME}" ok`]);
+  });
+
+  it("local scope only (`claude mcp add --scope local`): found under projects[<folder>], with its scope and folder", async () => {
+    const s = fresh();
+    const dir = folder(s, "advisor");
+    const file = codeConfig(s, {
+      projects: {
+        [folder(s, "other")]: { allowedTools: [], mcpServers: {} },
+        [dir]: { allowedTools: [], mcpServers: { [SERVER_NAME]: ours(s) } },
+      },
+    });
+    const scan = scanClientConfig("code", file);
+    expect(scan.entries.map((e) => [e.scope, e.project])).toEqual([["local", dir]]);
+    const r = await checkLaunchConfig(makeIo(s), [scan]);
+    // before QA-2-063: warn "no client is configured to launch this server"
+    expect(r.status).toBe("ok");
+    expect(r.message).toMatch(/^1 client entry/);
+    expect(r.details).toEqual([`code (local scope, ${dir}): entry "${SERVER_NAME}" ok`]);
+    expect(checkClientSecrecy([scan])).toMatchObject({ status: "ok" });
+  });
+
+  it("local scope: a bad entry fails naming the scope and folder, and the fix says to re-run in that folder", async () => {
+    const s = fresh();
+    const dir = folder(s, "advisor");
+    const scan = scanClientConfig(
+      "code",
+      codeConfig(s, {
+        projects: { [dir]: { mcpServers: { [SERVER_NAME]: { command: "node", args: ["x"] } } } },
+      }),
+    );
+    const r = await checkLaunchConfig(makeIo(s), [scan]);
+    expect(r.status).toBe("fail");
+    expect(r.details.join("\n")).toContain(
+      `code (local scope, ${dir}): \`command\` is not an absolute path`,
+    );
+    expect(r.fix).toContain("--scope local");
+  });
+
+  it("row 3 reads a local-scope entry's env: a secret in a group-readable file fails, keys only", () => {
+    const s = fresh();
+    const dir = folder(s, "advisor");
+    const spec = { ...ours(s, { YAHOO_CLIENT_SECRET: "xxxx-local-xxxx", FF_LOG_LEVEL: "info" }) };
+    const doc = { projects: { [dir]: { mcpServers: { [SERVER_NAME]: spec } } } };
+    const readable = scanClientConfig("code", codeConfig(s, doc, 0o644));
+    const r = checkClientSecrecy([readable]);
+    expect(r.status).toBe("fail");
+    expect(r.details.join("\n")).toContain(
+      `code (local scope, ${dir}): secret-looking env key(s) YAHOO_CLIENT_SECRET`,
+    );
+    expect(JSON.stringify(r)).not.toContain("xxxx-local-xxxx");
+    expect(checkClientSecrecy([scanClientConfig("code", codeConfig(s, doc, 0o600))]).status).toBe(
+      "warn",
+    );
+  });
+
+  it("both scopes: every entry is found and reported with its own scope; a bad one fails the row", async () => {
+    const s = fresh();
+    const a = folder(s, "a");
+    const b = folder(s, "b");
+    const doc = {
+      mcpServers: { [SERVER_NAME]: ours(s), unrelated: { command: "x" } },
+      projects: {
+        [a]: { mcpServers: { [SERVER_NAME]: ours(s) } },
+        [b]: {
+          mcpServers: { ff: { command: process.execPath, args: ["/nope/dist/cli.js", "serve"] } },
+        },
+      },
+    };
+    const scan = scanClientConfig("code", codeConfig(s, doc));
+    expect(scan.entries.map((e) => [e.scope, e.project, e.name])).toEqual([
+      ["user", null, SERVER_NAME],
+      ["local", a, SERVER_NAME],
+      ["local", b, "ff"],
+    ]);
+    const r = await checkLaunchConfig(makeIo(s), [scan]);
+    expect(r.status).toBe("fail");
+    expect(r.details).toEqual([
+      `code (user scope): entry "${SERVER_NAME}" ok`,
+      `code (local scope, ${a}): entry "${SERVER_NAME}" ok`,
+      `code (local scope, ${b}): \`args[0]\` does not exist (run \`npm run build\`?)`,
+    ]);
+    // the bad one removed: both remaining entries pass
+    const good = { ...doc, projects: { [a]: doc.projects[a] } };
+    const ok = await checkLaunchConfig(makeIo(s), [scanClientConfig("code", codeConfig(s, good))]);
+    expect(ok.status).toBe("ok");
+    expect(ok.message).toMatch(/^2 client entries/);
+  });
+
+  it("neither scope: warn, and the detail says both scopes were searched", async () => {
+    const s = fresh();
+    const scan = scanClientConfig(
+      "code",
+      codeConfig(s, {
+        mcpServers: { other: { command: "x" } },
+        projects: { [folder(s, "a")]: { mcpServers: { another: { command: "y" } } } },
+      }),
+    );
+    expect(scan.entries).toEqual([]);
+    const r = await checkLaunchConfig(makeIo(s), [scan]);
+    expect(r.status).toBe("warn");
+    expect(r.message).toBe("no client is configured to launch this server");
+    expect(r.details.join("\n")).toMatch(
+      /no fantasy-football-mcp-server entry at user scope or in any folder's local scope/,
+    );
+    expect(checkClientSecrecy([scan]).status).toBe("skip");
+  });
+
+  it("a malformed file: odd `projects` shapes are skipped, never thrown on; a folder name is printed safely", async () => {
+    const s = fresh();
+    for (const projects of [null, "x", 7, [{ mcpServers: { [SERVER_NAME]: ours(s) } }]]) {
+      const scan = scanClientConfig("code", codeConfig(s, { projects }));
+      expect(scan, JSON.stringify(projects)).toMatchObject({ state: "ok", entries: [], others: 0 });
+    }
+    const weird = `/tmp/a\u001b[2J\u0007b\u202e${"c".repeat(400)}`;
+    const projects: Record<string, unknown> = {
+      [folder(s, "null")]: null,
+      [folder(s, "array")]: [1],
+      [folder(s, "str")]: "x",
+      [folder(s, "servers-array")]: { mcpServers: [ours(s)] },
+      [folder(s, "servers-str")]: { mcpServers: "x" },
+      [folder(s, "spec-not-object")]: { mcpServers: { [SERVER_NAME]: "x" } },
+      "relative/folder": { mcpServers: { [SERVER_NAME]: ours(s) } },
+      [weird]: { mcpServers: { [SERVER_NAME]: ours(s) } },
+    };
+    // an own "__proto__" key, as JSON.parse makes one
+    Object.defineProperty(projects, "__proto__", {
+      value: { mcpServers: { [SERVER_NAME]: ours(s) } },
+      enumerable: true,
+    });
+    const scan = scanClientConfig("code", codeConfig(s, { projects }));
+    expect(scan.state).toBe("ok");
+    expect(scan.entries.map((e) => e.project)).toEqual([weird]);
+    const r = await checkLaunchConfig(makeIo(s), [scan]);
+    expect(r.status).toBe("ok");
+    expect(r.details).toHaveLength(1);
+    const line = r.details[0] ?? "";
+    expect(line).not.toMatch(/[\p{Cc}\p{Cf}]/u);
+    expect(line).toContain("/tmp/a?[2J?b?ccc");
+    expect(line.length).toBeLessThan(320);
+    writeFileSync(path.join(s.home, ".claude.json"), "{not json");
+    expect(scanClientConfig("code", path.join(s.home, ".claude.json")).state).toBe("invalid");
+  });
+
+  it("Claude Desktop has no folder scope: a `projects` key in its config is not read", () => {
+    const s = fresh();
+    const file = desktopConfig(s, {});
+    writeFileSync(
+      file,
+      JSON.stringify({
+        projects: { [folder(s, "a")]: { mcpServers: { [SERVER_NAME]: ours(s) } } },
+      }),
+    );
+    expect(scanClientConfig("desktop", file).entries).toEqual([]);
+  });
+
+  it("row 13 counts the other servers that load beside ours: user scope, plus our folders' (or every folder's, when ours is at user scope)", () => {
+    const s = fresh();
+    const a = folder(s, "a");
+    const b = folder(s, "b");
+    const local = {
+      mcpServers: { "user-other": { command: "x" } },
+      projects: {
+        [a]: { mcpServers: { [SERVER_NAME]: ours(s), "a-other": { type: "http", url: "u" } } },
+        [b]: { mcpServers: { "b-one": { command: "y" }, "b-two": { command: "z" } } },
+      },
+    };
+    const scan = scanClientConfig("code", codeConfig(s, local));
+    expect(scan.others).toBe(2); // user-other + a-other; b's servers never share a session with ours
+    const r = checkWriteFlag(cfg(s), {}, [scan]);
+    expect(r.details.join()).toContain("code config lists 2 other MCP server(s)");
+    expect(JSON.stringify(r)).not.toMatch(/user-other|a-other|b-one/);
+    const user = { ...local, mcpServers: { ...local.mcpServers, [SERVER_NAME]: ours(s) } };
+    expect(scanClientConfig("code", codeConfig(s, user)).others).toBe(4);
+    const nowhere = { ...local, projects: { [b]: local.projects[b] } };
+    expect(scanClientConfig("code", codeConfig(s, nowhere))).toMatchObject({
+      entries: [],
+      others: 1,
+    });
+  });
+
+  it("runDoctor finds a local-scope registration in ~/.claude.json (the reproduction: it said no client was configured)", async () => {
+    const s = fresh();
+    const dir = folder(s, "advisor");
+    codeConfig(s, { projects: { [dir]: { mcpServers: { [SERVER_NAME]: ours(s) } } } });
+    const r = await runDoctor(makeIo(s), {
+      json: true,
+      online: false,
+      fix: false,
+      yes: false,
+      clientConfig: path.join(s.home, "no-desktop.json"),
+    });
+    const row2 = byId(r.rows, "launch_config");
+    expect(row2.status).toBe("ok");
+    expect(row2.details).toContain(`code (local scope, ${dir}): entry "${SERVER_NAME}" ok`);
+    expect(byId(r.rows, "client_secrecy").status).toBe("ok");
+  });
+});
+
 describe("row 4 — config dir and league file", () => {
   it("missing dir fails with the --fix hint; 0755 fails; 0700 passes", () => {
     const s = fresh();

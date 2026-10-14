@@ -141,6 +141,20 @@ describe("ff print-config --client code", () => {
     expect(io.out.text).not.toContain(SECRET);
   });
 
+  it("the note names the folder-scoped alternative: `--scope local`, run in a chosen folder (QA-2-063)", async () => {
+    sb = sandbox();
+    const io = makeIo(sb, { packageRoot: fakePackage(sb) });
+    expect(await main(["print-config", "--client", "code"], io)).toBe(EXIT.OK);
+    expect(io.err.text).toMatch(/`--scope user` loads the tools in every Claude Code session/);
+    expect(io.err.text).toMatch(
+      /keep them out of other projects' sessions, run it in a chosen folder with `--scope local`/,
+    );
+    expect(io.err.text).toContain("never in a repository");
+    // the printed command itself stays user scope (plan 03 §4.2)
+    expect(io.out.text).toContain("--scope user");
+    expect(io.out.text).not.toContain("--scope local");
+  });
+
   it("quotes paths with spaces, quotes and shell metacharacters", () => {
     const spec = {
       command: "/Users/a b/node's",

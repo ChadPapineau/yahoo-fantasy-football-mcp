@@ -125,7 +125,9 @@ export function shellQuote(word: string): string {
 
 /**
  * The `claude mcp add` command line (plan 03 §4.2): user scope, so no absolute user path lands in a
- * project's `.mcp.json`. Flag syntax is plan 03 A-6 (verify against the Claude Code docs).
+ * project's `.mcp.json`. Flag syntax is plan 03 A-6 (verify against the Claude Code docs). The note
+ * on stderr names `--scope local`, run in a chosen folder, as the way to keep the tools out of other
+ * projects' sessions; it too is stored in `~/.claude.json`, not in the folder (QA-2-063).
  */
 export function codeCommand(spec: LaunchSpec): string {
   const words = ["claude", "mcp", "add", "--transport", "stdio", "--scope", "user", SERVER_NAME];
@@ -165,7 +167,7 @@ export async function printConfig(
     io.stderr,
     client === "desktop"
       ? `ff print-config: merge the mcpServers entry into ${pasteTarget("desktop", io.home)}, then restart Claude Desktop.`
-      : "ff print-config: run the command above in a terminal (user scope, so nothing lands in a repository).",
+      : "ff print-config: run the command above in a terminal. `--scope user` loads the tools in every Claude Code session; to keep them out of other projects' sessions, run it in a chosen folder with `--scope local` in its place (sessions started in that folder only). Either way Claude Code keeps the entry in ~/.claude.json, never in a repository.",
   );
   return EXIT.OK;
 }

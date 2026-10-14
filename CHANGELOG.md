@@ -228,6 +228,14 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
   lineup (the solver's tie-break chose which entrant took which freed seat): the made changes are now
   chosen canonically (largest made gain, then the highest sum of made-change p10s, then a fixed
   key/seat order) and lineup totals are summed in `player_key` order.
+- **QA-2-063** — `ff doctor` row 2 looked for a Claude Code registration only at the top level of
+  `~/.claude.json` (user scope), so a server added with `claude mcp add --scope local` (stored under
+  `projects["<folder>"].mcpServers` in the same file) read "no client is configured" although it was
+  registered and connected. Rows 2 and 3 now read user scope and every folder's local scope and name
+  the scope and folder of each entry (`code (local scope, <folder>)`); row 13 counts the other
+  servers that load beside ours (user scope, plus the folders ours loads in). `ff print-config
+  --client code` says that `--scope local`, run in a chosen folder, keeps the tools out of other
+  projects' sessions, and `ff uninstall` prints the matching `claude mcp remove --scope local`.
 - **The season-fresh verification round (2026-10-14, SF-27 to SF-40 in the QA register; each fix
   has a regression test, mutation-checked):**
   - A run that found its season unpublished upstream (injuries from the May schedule release to the

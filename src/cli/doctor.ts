@@ -184,6 +184,23 @@ export function checkNode(nodeVersion: string): DoctorRow {
 
 // --- rows 2, 3, 13: client configs ------------------------------------------------------------------
 
+/**
+ * Where an entry is registered. `user`: a config's top-level `mcpServers` — Claude Desktop's only
+ * place, and Claude Code's user scope (every session). `local`: Claude Code's
+ * `projects["<abs folder>"].mcpServers` in the same `~/.claude.json`, written by
+ * `claude mcp add --scope local` run in that folder (sessions started there only; QA-2-063).
+ */
+export type ClientScope = "user" | "local";
+
+/** One of our entries in a client config. */
+export interface ClientConfigEntry {
+  readonly name: string;
+  readonly spec: Record<string, unknown>;
+  readonly scope: ClientScope;
+  /** The folder a `local` entry belongs to; null at user scope. */
+  readonly project: string | null;
+}
+
 /** A parsed client config and our entries in it. */
 export interface ClientConfigScan {
   readonly client: "desktop" | "code";
@@ -191,8 +208,12 @@ export interface ClientConfigScan {
   /** `missing` = no file; `invalid` = unreadable or not JSON. */
   readonly state: "ok" | "missing" | "invalid";
   readonly mode: number | null;
-  readonly entries: readonly { readonly name: string; readonly spec: Record<string, unknown> }[];
-  /** How many OTHER mcpServers entries it lists (names are never printed). */
+  readonly entries: readonly ClientConfigEntry[];
+  /**
+   * How many OTHER servers can load in a session beside ours (names are never printed): every
+   * user-scope one, plus the local ones of each folder where ours loads — the folders it is
+   * registered in, or every folder when it is registered at user scope.
+   */
   readonly others: number;
 }
 
@@ -206,7 +227,32 @@ function isOurs(name: string, spec: Record<string, unknown>): boolean {
   );
 }
 
-/** Reads a client config's `mcpServers` (Desktop: top level; Claude Code user config: top level [A-6]). */
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** Splits one `mcpServers` object into our entries and a count of the others. */
+function splitServers(
+  servers: unknown,
+  scope: ClientScope,
+  project: string | null,
+): { entries: ClientConfigEntry[]; others: number } {
+  const entries: ClientConfigEntry[] = [];
+  let others = 0;
+  if (!isRecord(servers)) return { entries, others };
+  for (const [name, spec] of Object.entries(servers)) {
+    if (isRecord(spec) && isOurs(name, spec)) entries.push({ name, spec, scope, project });
+    else others++;
+  }
+  return { entries, others };
+}
+
+/**
+ * Reads a client config's servers: Claude Desktop's top-level `mcpServers` (plan 03 A-5); Claude
+ * Code's `~/.claude.json` at user scope (top level) and local scope (`projects[<abs folder>]`)
+ * [A-6]. A malformed `projects` value, folder entry or `mcpServers` is skipped, never thrown on; a
+ * folder key that is not an absolute path is skipped (Claude Code keys folders by absolute path).
+ * Project scope (a folder's `.mcp.json`) is not read: doctor does not open files in other folders.
+ */
 export function scanClientConfig(client: "desktop" | "code", file: string): ClientConfigScan {
   const empty = { client, file, mode: null, entries: [], others: 0 } as const;
   let text: string | null;
@@ -228,25 +274,34 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
   } catch {
     return { ...empty, mode, state: "invalid" };
   }
-  const servers =
-    typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>).mcpServers
-      : undefined;
-  const entries: { name: string; spec: Record<string, unknown> }[] = [];
-  let others = 0;
-  if (typeof servers === "object" && servers !== null && !Array.isArray(servers)) {
-    for (const [name, spec] of Object.entries(servers as Record<string, unknown>)) {
-      if (
-        typeof spec === "object" &&
-        spec !== null &&
-        !Array.isArray(spec) &&
-        isOurs(name, spec as Record<string, unknown>)
-      )
-        entries.push({ name, spec: spec as Record<string, unknown> });
-      else others++;
+  const root = isRecord(parsed) ? parsed : {};
+  const user = splitServers(root.mcpServers, "user", null);
+  const entries = [...user.entries];
+  let others = user.others;
+  const projects = client === "code" ? root.projects : undefined;
+  if (isRecord(projects)) {
+    const local: { entries: ClientConfigEntry[]; others: number }[] = [];
+    for (const [folder, settings] of Object.entries(projects)) {
+      if (!path.isAbsolute(folder) || !isRecord(settings)) continue;
+      local.push(splitServers(settings.mcpServers, "local", folder));
+    }
+    const oursAtUser = user.entries.length > 0;
+    for (const p of local) {
+      entries.push(...p.entries);
+      if (oursAtUser || p.entries.length > 0) others += p.others;
     }
   }
   return { client, file, state: "ok", mode, entries, others };
+}
+
+/** Control and format characters (bidi overrides included) never reach the terminal. */
+const UNPRINTABLE_RE = /[\p{Cc}\p{Cf}]/gu;
+
+/** How rows name where an entry is registered: `desktop`, `code (user scope)`, `code (local scope, <folder>)`. */
+function entryWhere(s: ClientConfigScan, e: ClientConfigEntry): string {
+  if (s.client === "desktop") return s.client;
+  if (e.scope === "user" || e.project === null) return `${s.client} (user scope)`;
+  return `${s.client} (local scope, ${truncate(e.project.replace(UNPRINTABLE_RE, "?"), 200)})`;
 }
 
 /** Default client config locations (plan 03 A-5, A-6 — verified on the machine by this row). */
@@ -293,7 +348,7 @@ export async function entryProblems(io: CliIo, spec: Record<string, unknown>): P
   return problems;
 }
 
-/** Row 2: launch configuration paths in every client config found. */
+/** Row 2: launch configuration paths in every client config found, Claude Code at user and local scope. */
 export async function checkLaunchConfig(
   io: CliIo,
   scans: readonly ClientConfigScan[],
@@ -301,6 +356,7 @@ export async function checkLaunchConfig(
   const title = "Launch config paths";
   const details: string[] = [];
   let bad = false;
+  let badLocal = false;
   let found = 0;
   for (const s of scans) {
     if (s.state === "missing") {
@@ -312,17 +368,23 @@ export async function checkLaunchConfig(
       continue;
     }
     if (s.entries.length === 0) {
-      details.push(`${s.client}: ${s.file} has no ${SERVER_NAME} entry`);
+      details.push(
+        s.client === "code"
+          ? `${s.client}: ${s.file} has no ${SERVER_NAME} entry at user scope or in any folder's local scope`
+          : `${s.client}: ${s.file} has no ${SERVER_NAME} entry`,
+      );
       continue;
     }
     for (const e of s.entries) {
       found++;
+      const where = entryWhere(s, e);
       const p = await entryProblems(io, e.spec);
       if (p.length === 0)
-        details.push(`${s.client}: entry "${e.name === SERVER_NAME ? e.name : "(ours)"}" ok`);
+        details.push(`${where}: entry "${e.name === SERVER_NAME ? e.name : "(ours)"}" ok`);
       else {
         bad = true;
-        for (const x of p) details.push(`${s.client}: ${x}`);
+        if (e.scope === "local") badLocal = true;
+        for (const x of p) details.push(`${where}: ${x}`);
       }
     }
   }
@@ -333,7 +395,11 @@ export async function checkLaunchConfig(
       title,
       "fail",
       "a client launches the server with a bad path or Node",
-      `replace the entry with the output of \`ff print-config --client desktop\` (or --client code)`,
+      `replace the entry with the output of \`ff print-config --client desktop\` (or --client code)${
+        badLocal
+          ? "; for a local-scope entry run that command in its folder with `--scope local` in place of `--scope user`"
+          : ""
+      }`,
       details,
     );
   if (found === 0)
@@ -378,7 +444,7 @@ export function checkClientSecrecy(scans: readonly ClientConfigScan[]): DoctorRo
       if (keys.length === 0) continue;
       const readable = s.mode !== null && (s.mode & 0o044) !== 0;
       details.push(
-        `${s.client}: secret-looking env key(s) ${keys.join(", ")} with a value${readable ? " in a group/other-readable file" : ""}`,
+        `${entryWhere(s, e)}: secret-looking env key(s) ${keys.join(", ")} with a value${readable ? " in a group/other-readable file" : ""}`,
       );
       status = readable ? "fail" : status === "fail" ? "fail" : "warn";
     }

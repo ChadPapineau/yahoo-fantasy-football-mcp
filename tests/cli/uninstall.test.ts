@@ -54,6 +54,10 @@ describe("ff uninstall", () => {
     expect(existsSync(path.join(s.configDir, "league.yaml"))).toBe(true);
     expect(io.out.text).toContain("kept your data");
     expect(io.out.text).toContain("claude mcp remove --scope user fantasy-football-mcp-server");
+    // a folder-scoped registration is removed in its folder (QA-2-063)
+    expect(io.out.text).toMatch(
+      /run `claude mcp remove --scope local fantasy-football-mcp-server` in that folder/,
+    );
     expect(io.out.text).toContain("claude_desktop_config.json");
   });
 

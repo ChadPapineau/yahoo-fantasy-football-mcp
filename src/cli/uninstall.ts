@@ -147,7 +147,7 @@ export function executePurge(plan: readonly PurgeStep[]): { removed: string[]; k
 export function manualSteps(home: string): string[] {
   return [
     `Remove the "${SERVER_NAME}" entry from ${pasteTarget("desktop", home)} (Claude Desktop), then restart it.`,
-    `Claude Code: claude mcp remove --scope user ${SERVER_NAME}`,
+    `Claude Code: claude mcp remove --scope user ${SERVER_NAME} (registered for one folder: run \`claude mcp remove --scope local ${SERVER_NAME}\` in that folder)`,
     "If installed globally: npm uninstall -g fantasy-football-mcp",
     "Time Machine or other backups may still hold copies of league.yaml and the store.",
   ];
