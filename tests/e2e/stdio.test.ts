@@ -12,7 +12,7 @@ import { outputSchemaOf } from "../../src/mcp/define.js";
 import { envelopeSchema } from "../../src/mcp/envelope.js";
 import { ERROR_CODES } from "../../src/mcp/errors.js";
 import { REGISTRY, toolNames } from "../../src/mcp/registry.js";
-import { envelopeViolations } from "../mcp/helpers/walk.js";
+import { distBases, envelopeViolations } from "../mcp/helpers/walk.js";
 
 type Walkable = Parameters<typeof envelopeViolations>[0];
 import {
@@ -147,8 +147,8 @@ describe("every tool, valid arguments → a schema-valid envelope over stdio", (
         expect(envelopeViolations(body as unknown as Walkable)).toEqual([]);
         expect(r.structuredContent === undefined).toBe(C10.has(name));
         if (r.structuredContent !== undefined) expect(r.structuredContent).toEqual(body);
-        for (const m of JSON.stringify(body.data).matchAll(/"basis":"([a-z_]+)"/g))
-          expect(m[1]).toBe("position_cv");
+        // every Dist's basis (G1's season block has a `basis` of its own: schedule | bootstrap)
+        for (const b of distBases(body.data)) expect(b).toBe("position_cv");
       }, 30_000);
     }
   }

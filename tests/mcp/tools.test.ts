@@ -18,7 +18,7 @@ import { DATASET_NEVER_LOADED_HINT, ERROR_TABLE } from "../../src/mcp/errors.js"
 import { REGISTRY } from "../../src/mcp/registry.js";
 import { MATCHUP_NO_OPPONENT_HINT } from "../../src/mcp/tools/analytics.js";
 import { LEAGUE_KEY, TEAM_A, TEAM_B, body, connect, makeWorld, type World } from "./helpers/env.js";
-import { envelopeViolations } from "./helpers/walk.js";
+import { distBases, envelopeViolations } from "./helpers/walk.js";
 
 interface Env {
   data: Record<string, unknown>;
@@ -114,15 +114,6 @@ const schemaOf = (name: string): z.ZodType => {
   if (def === undefined) throw new Error(name);
   return outputSchemaOf(def) ?? envelopeSchema(z.record(z.string(), z.unknown()));
 };
-
-/** The `basis` of every Dist (an object with p10 and p90) anywhere under `v`. */
-function distBases(v: unknown): string[] {
-  if (Array.isArray(v)) return v.flatMap(distBases);
-  if (typeof v !== "object" || v === null) return [];
-  const o = v as Record<string, unknown>;
-  const own = "p10" in o && "p90" in o && typeof o.basis === "string" ? [o.basis] : [];
-  return [...own, ...Object.values(o).flatMap(distBases)];
-}
 
 describe("every tool: valid arguments → a schema-valid envelope that passes the A6 walk", () => {
   for (const [name, argsList] of Object.entries(VALID)) {

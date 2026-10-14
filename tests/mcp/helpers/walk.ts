@@ -69,3 +69,12 @@ export function envelopeViolations(env: {
   }
   return [...new Set([...bad, ...objectKeyViolations(env.data)])];
 }
+
+/** The `basis` of every Dist (an object with p10 and p90) anywhere under `v` — not G1's season basis. */
+export function distBases(v: unknown): string[] {
+  if (Array.isArray(v)) return v.flatMap(distBases);
+  if (typeof v !== "object" || v === null) return [];
+  const o = v as Record<string, unknown>;
+  const own = "p10" in o && "p90" in o && typeof o.basis === "string" ? [o.basis] : [];
+  return [...own, ...Object.values(o).flatMap(distBases)];
+}

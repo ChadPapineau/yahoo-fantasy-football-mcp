@@ -689,8 +689,15 @@ describe("the child process", () => {
     await vi.advanceTimersByTimeAsync(10);
     r.shutdown();
     expect(t.spawner.children[0]!.kills).toEqual(["SIGTERM"]);
+    // the store is closed after the server's shutdown: the child's late exit never reads it
+    t.log.current = () => {
+      throw new Error("database is not open");
+    };
     t.spawner.children[0]!.exit(null, "");
-    await call;
+    expect(row(await call, "nflverse:injuries")).toMatchObject({
+      outcome: "failed",
+      code: "aborted",
+    });
     expect(await r.ensureFresh(["nflverse:schedules"], { requestId: RID(2) })).toBeNull();
     expect(t.spawner.children).toHaveLength(1);
   });

@@ -465,6 +465,27 @@ export function createOnDemandRefresher(
     return out;
   };
 
+  /**
+   * `settle`, never throwing: a child that outlives the server's store (shutdown) or a store read
+   * that fails reads `failed:aborted` / `failed:internal` instead of an unhandled rejection.
+   */
+  const safeSettle = (
+    sources: ReadonlySet<DatasetSourceId>,
+    before: ReadonlyMap<DatasetSourceId, RefreshLogRow | null>,
+    startedAt: number,
+    result: { code: number | null; stdout: string } | "spawn",
+  ): Map<DatasetSourceId, SourceOutcome> => {
+    const fallback = (code: RefreshOutcomeCode): Map<DatasetSourceId, SourceOutcome> =>
+      new Map([...sources].map((id) => [id, { outcome: "failed", code, at: now(), until: null }]));
+    if (closed) return fallback("aborted");
+    try {
+      return settle(sources, before, startedAt, result);
+    } catch (e) {
+      o.logger.warn("refresh.settle_failed", { error: e instanceof Error ? e.name : "unknown" });
+      return fallback("internal");
+    }
+  };
+
   const start = (judged: readonly Judged[], nowMs: number): Flight | "spawn" | "throttled" => {
     while (spawnTimes.length > 0 && (spawnTimes[0] ?? 0) <= nowMs - HOUR_MS) spawnTimes.shift();
     if (live.size >= ON_DEMAND.maxChildren || spawnTimes.length >= ON_DEMAND.maxSpawnsPerHour)
@@ -499,12 +520,12 @@ export function createOnDemandRefresher(
       child,
       finished: false,
       settled: child.done.then(
-        (r) => settle(sources, before, nowMs, r),
+        (r) => safeSettle(sources, before, nowMs, r),
         (e: unknown) => {
           o.logger.warn("refresh.spawn_failed", {
             code: (e as { code?: unknown }).code ?? "unknown",
           });
-          return settle(sources, before, nowMs, "spawn");
+          return safeSettle(sources, before, nowMs, "spawn");
         },
       ),
     };
