@@ -816,6 +816,37 @@ describe("modes", () => {
     expect(row(await repair, "nflverse:roster_weekly")?.outcome).toBe("in_progress");
     expect(Date.now() - T0).toBe(15_000);
   });
+
+  it("an expired required file is a repair: stats (slow tier) and schedules (fast) wait the 15 s budget", async () => {
+    // a machine asleep for ten days: stats past their 3-day hard limit, schedules past 7 days. Without
+    // the orchestrator's expiry check the stats revalidation went to the background and schedules got
+    // the 6 s fast budget, and the analytics tools answered STALE_ONLY at once.
+    for (const [source, budget] of [
+      ["nflverse:stats_player_week", ON_DEMAND.waitRepairMs],
+      ["nflverse:schedules", ON_DEMAND.waitRepairMs],
+    ] as const) {
+      t = rig();
+      t.log.ok(source, `${source}-old`, Date.now() - 10 * 24 * H);
+      const r = t.make();
+      const start = Date.now();
+      const call = r.ensureFresh([source], { requestId: RID(1) });
+      let done = false;
+      void call.then(() => {
+        done = true;
+      });
+      await vi.advanceTimersByTimeAsync(budget - 1);
+      expect(done, `${source} answered before its repair budget`).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(row(await call, source)?.outcome).toBe("in_progress");
+      expect(Date.now() - start, source).toBe(budget);
+      expect(t.spawner.children).toHaveLength(1);
+    }
+    // not expired: stats stay in the background, schedules wait 6 s
+    t = rig();
+    t.log.ok("nflverse:stats_player_week", "s-v1", Date.now() - 7 * H);
+    const bg = await t.make().ensureFresh(["nflverse:stats_player_week"], { requestId: RID(2) });
+    expect(row(bg, "nflverse:stats_player_week")?.outcome).toBe("in_progress");
+  });
 });
 
 describe("the child process", () => {
