@@ -1,5 +1,5 @@
 // doctor.ts — `ff doctor [--json] [--online] [--fix --yes] [--client-config <p>] [--client-log <p>]`
-// (plan 03 L5, §5 the 22 rows; plan 05 §2 `cli/doctor`: every row has a passing and a failing case,
+// (plan 03 L5, §5 the 22 rows plus row 23 `season`; plan 05 §2 `cli/doctor`: every row has a passing and a failing case,
 // a stable `--json` shape, exit code = worst finding, offline mode makes zero network calls). The
 // offline rows for Phase 1a are implemented; the Yahoo rows (5, 6, 7, 14, 15, 16, 18) report "not
 // applicable (no Yahoo access)" — Phase 1b is deferred. Doctor never creates, migrates or writes the
@@ -16,6 +16,7 @@ import {
   mkdirSync,
   openSync,
   readdirSync,
+  readFileSync,
   readSync,
   statfsSync,
   statSync,
@@ -36,6 +37,9 @@ import {
 } from "../config/paths.js";
 import { ConfigError, loadConfigFromProcess, type Config } from "../config/schema.js";
 import type { DatasetSourceId } from "../config/freshness.js";
+import { TOOL_INPUT_WEEK_MAX } from "../config/weeks.js";
+import { scheduleView } from "../domain/league/calendar.js";
+import { seasonBlock } from "../domain/league/status-blocks.js";
 import { createHttpClient } from "../http/client.js";
 import { ManualLeagueProvider } from "../providers/manual/index.js";
 import { LeagueFileError, MANUAL_LEAGUE_MISSING_HINT } from "../providers/platform.js";
@@ -48,7 +52,17 @@ import { VERSION } from "../version.js";
 import { EXIT } from "./exit.js";
 import { fixtureFetch, NFLVERSE_RELEASE_BASE } from "./fixture-fetch.js";
 import { bootLevel, distEntry, makeLogger, writeLine, type CliIo } from "./io.js";
-import { installedPlists, JOBS, LAUNCHCTL, labelOf, launchctl } from "./launchd.js";
+import {
+  installedPlists,
+  jobEnv,
+  JOBS,
+  LAUNCHCTL,
+  labelOf,
+  launchctl,
+  REFRESH_DUE_JOB,
+  renderPlist,
+  type LaunchdJob,
+} from "./launchd.js";
 import { redactString, SecretRegistry, truncate, type Logger } from "./log.js";
 import { SERVER_NAME, pasteTarget } from "./print-config.js";
 import { sourceStatuses, configuredSources, sourceStatus } from "./status.js";
@@ -500,7 +514,7 @@ export function checkLeagueFile(
   io: CliIo,
   config: Config,
   log: Logger,
-): { row: DoctorRow; leagueKey: string | null } {
+): { row: DoctorRow; leagueKey: string | null; leagueSeason: number | null } {
   const title = "League file";
   const provider = new ManualLeagueProvider({
     file: config.leagueFile,
@@ -519,6 +533,7 @@ export function checkLeagueFile(
         `league.yaml is valid (season ${String(l.data.season)}, ${String(l.data.num_teams)} teams)`,
       ),
       leagueKey: l.data.ref.league_key,
+      leagueSeason: l.data.season,
     };
   } catch (e) {
     if (e instanceof LeagueFileError) {
@@ -533,6 +548,7 @@ export function checkLeagueFile(
             MANUAL_LEAGUE_MISSING_HINT,
           ),
           leagueKey: null,
+          leagueSeason: null,
         };
       return {
         row: row(
@@ -545,11 +561,13 @@ export function checkLeagueFile(
           e.issues.slice(0, 20).map((i) => `${i.path}: ${i.reason}`),
         ),
         leagueKey: null,
+        leagueSeason: null,
       };
     }
     return {
       row: row(4, "league_file", title, "fail", errorText(e), "re-run `ff doctor`"),
       leagueKey: null,
+      leagueSeason: null,
     };
   }
 }
@@ -843,19 +861,35 @@ export function checkDatasets(io: CliIo, config: Config, ex: ExistingStore): Doc
   let status: RowStatus = "ok";
   const details: string[] = [];
   const failing: DatasetSourceId[] = [];
+  const unpublished: DatasetSourceId[] = [];
   for (const s of list) {
     const omit = s.beyond_hard === "omit";
     let st: RowStatus = "ok";
     // a current file that cannot be read is as unusable as one never loaded (QA-2-054, as G1 reads it)
     if (s.state === "never_loaded" || s.state === "expired" || s.state === "unreadable")
       st = omit ? "warn" : "fail";
-    else if (s.state === "stale") st = "warn";
-    if (st !== "ok") failing.push(s.source);
+    else if (s.state === "stale" || s.state === "not_published") st = "warn";
+    if (s.state === "not_published") unpublished.push(s.source);
+    else if (st !== "ok") failing.push(s.source);
     if (st === "fail" || (st === "warn" && status === "ok")) status = st;
+    const np = s.not_published;
     details.push(
-      `${s.source}: ${s.state}${s.age_s === null ? "" : ` (${String(s.age_s)} s)`}${s.consecutive_failures > 0 ? `, ${String(s.consecutive_failures)} consecutive failure(s)` : ""}`,
+      s.state === "not_published" && np !== null
+        ? `${s.source}: season ${String(np.season)} not published upstream yet (checked ${ageText(now, np.checked_at)} ago)`
+        : `${s.source}: ${s.state}${s.age_s === null ? "" : ` (${String(s.age_s)} s)`}${s.consecutive_failures > 0 ? `, ${String(s.consecutive_failures)} consecutive failure(s)` : ""}`,
     );
   }
+  // only upstream's state: nothing to repair, never `ff refresh all`
+  if (status === "warn" && failing.length === 0)
+    return row(
+      9,
+      "datasets",
+      "Datasets",
+      "warn",
+      `${String(unpublished.length)} dataset(s) not published upstream yet for the season in progress`,
+      "nothing to repair: the refresh tick picks each one up once upstream publishes it",
+      details,
+    );
   if (status === "ok")
     return row(
       9,
@@ -871,7 +905,7 @@ export function checkDatasets(io: CliIo, config: Config, ex: ExistingStore): Doc
     "datasets",
     "Datasets",
     status,
-    `${String(failing.length)} dataset(s) stale, expired or never loaded`,
+    `${String(failing.length)} dataset(s) stale, expired or never loaded${unpublished.length > 0 ? ` (${String(unpublished.length)} more not published upstream yet)` : ""}`,
     `\`ff refresh all\` (or \`ff refresh <source>\`)`,
     details,
   );
@@ -901,8 +935,47 @@ export function checkJournal(io: CliIo, ex: ExistingStore): DoctorRow {
   );
 }
 
-/** Row 11: launchd jobs installed, loaded, and their last run from refresh_log. */
-export async function checkLaunchd(io: CliIo, store: Store | null): Promise<DoctorRow> {
+/** The refresh tick's heartbeat is overdue past this (four missed ticks). */
+export const HEARTBEAT_MAX_AGE_MS = 60 * 60_000;
+
+/** "45 s", "12 min", "5 h", "3 d" between an ISO instant and now. */
+function ageText(nowMs: number, iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "?";
+  const s = Math.max(0, Math.round((nowMs - t) / 1000));
+  if (s < 90) return `${String(s)} s`;
+  if (s < 90 * 60) return `${String(Math.round(s / 60))} min`;
+  if (s < 36 * 3600) return `${String(Math.round(s / 3600))} h`;
+  return `${String(Math.round(s / 86400))} d`;
+}
+
+/** Whether an installed plist is byte-for-byte what `ff install-launchd` would write now. */
+function plistCurrent(io: CliIo, config: Config, job: LaunchdJob, file: string): boolean {
+  try {
+    if (lstatSync(file).isSymbolicLink()) return false;
+    const want = renderPlist({
+      job,
+      node: io.execPath,
+      entry: distEntry(io.packageRoot),
+      env: jobEnv(config),
+      home: io.home,
+    });
+    return readFileSync(file, "utf8") === want;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Row 11: the launchd jobs — each current job installed, loaded and as `ff install-launchd` would
+ * write it for this configuration (an older plist, e.g. from before an upgrade, is out of date); no
+ * plist of a retired job left behind; and the refresh tick's heartbeat (job_run) within the hour.
+ */
+export async function checkLaunchd(
+  io: CliIo,
+  store: Store | null,
+  config: Config | null = null,
+): Promise<DoctorRow> {
   const title = "launchd jobs";
   if (io.platform !== "darwin")
     return row(
@@ -910,41 +983,127 @@ export async function checkLaunchd(io: CliIo, store: Store | null): Promise<Doct
       "launchd",
       title,
       "na",
-      "launchd is macOS-only; schedule `ff refresh` with your platform's scheduler",
+      "launchd is macOS-only; schedule `ff refresh due` every 15 min (and `ff prune`, `ff backup` weekly) with systemd or cron",
     );
   if (io.uid === null) return row(11, "launchd", title, "skip", "no user id");
-  const installed = installedPlists(io.home);
-  if (installed.length === 0)
+  const all = installedPlists(io.home);
+  const installed = all.filter((p) => !p.retired);
+  const legacy = all.filter((p) => p.retired);
+  if (all.length === 0)
     return row(11, "launchd", title, "warn", "no jobs installed", "`ff install-launchd`");
   const details: string[] = [];
-  let status: RowStatus = "ok";
-  for (const { job } of installed) {
+  const problems: string[] = [];
+  for (const { job, file } of installed) {
     const r = await io.exec(LAUNCHCTL, launchctl.print(io.uid, labelOf(job)));
     const loaded = r.code === 0;
-    if (!loaded) status = "warn";
+    if (!loaded) problems.push(`${job} not loaded`);
     const spec = JOBS.find((j) => j.name === job);
-    const runs = (spec?.sources ?? [])
-      .map((s) => (store === null ? null : store.repos.refreshLog.latest(s as DatasetSourceId)))
-      .filter((x) => x !== null)
-      .map((x) => `${x.source} ${x.ok ? "ok" : `failed (${x.error ?? "?"})`} at ${x.finished_at}`);
+    const current = spec === undefined || config === null || plistCurrent(io, config, spec, file);
+    if (!current) problems.push(`${job} plist out of date`);
     details.push(
-      `${job}: ${loaded ? "loaded" : "NOT loaded"}${runs.length > 0 ? `; last run ${runs.join("; ")}` : ""}`,
+      `${job}: ${loaded ? "loaded" : "NOT loaded"}${current ? "" : "; plist OUT OF DATE (differs from what ff install-launchd writes now)"}`,
+    );
+  }
+  for (const { job } of legacy) {
+    problems.push(`retired job ${job} installed`);
+    details.push(
+      `${job}: an earlier version's job (retired; refresh-due replaces it) — still installed`,
     );
   }
   const missing = JOBS.map((j) => j.name).filter((n) => !installed.some((i) => i.job === n));
   if (missing.length > 0) {
-    status = "warn";
+    problems.push(`not installed: ${missing.join(", ")}`);
     details.push(`not installed: ${missing.join(", ")}`);
   }
+  if (store !== null && installed.some((i) => i.job === REFRESH_DUE_JOB)) {
+    const tick = store.repos.jobRuns.list().find((j) => j.job === REFRESH_DUE_JOB);
+    const now = io.clock.nowMs();
+    if (tick === undefined) {
+      problems.push("no refresh tick recorded");
+      details.push(`${REFRESH_DUE_JOB}: no run recorded yet`);
+    } else {
+      const age = now - Date.parse(tick.last_run_at);
+      const overdue = !(age <= HEARTBEAT_MAX_AGE_MS);
+      if (overdue) problems.push("no heartbeat");
+      if (tick.exit !== 0) problems.push("last tick failed");
+      details.push(
+        `${REFRESH_DUE_JOB}: last tick ${ageText(now, tick.last_run_at)} ago (exit ${String(tick.exit)})${tick.summary === null ? "" : ` — ${tick.summary}`}${overdue ? " — NO HEARTBEAT for over an hour" : ""}`,
+      );
+    }
+  }
+  const ok = problems.length === 0;
   return row(
     11,
     "launchd",
     title,
-    status,
-    status === "ok"
-      ? `${String(installed.length)} job(s) installed and loaded`
-      : "some jobs are missing or not loaded",
-    status === "ok" ? null : "`ff install-launchd` (re-running is safe)",
+    ok ? "ok" : "warn",
+    ok
+      ? `${String(installed.length)} job(s) installed, current and loaded; the refresh tick is running`
+      : problems.slice(0, 4).join("; "),
+    ok
+      ? null
+      : "`ff install-launchd` (re-running is safe; it also retires an earlier version's jobs)",
+    details,
+  );
+}
+
+/**
+ * Row 23: the season — the league file is for the NFL season in progress (preseason, regular season
+ * or postseason, from the loaded schedule), no reference table is past its verified season, and no
+ * loaded season runs past the tool-input week bound. `na` without a league file.
+ */
+export function checkSeason(io: CliIo, ex: ExistingStore, leagueSeason: number | null): DoctorRow {
+  const title = "Season";
+  if (leagueSeason === null) return row(23, "season", title, "na", "no league file to compare");
+  if (ex.kind !== "open") return row(23, "season", title, "skip", "store not open");
+  const now = io.clock.nowMs();
+  const view = scheduleView(ex.store.datasets.schedules, now);
+  if (view.phase.basis !== "schedule")
+    return row(23, "season", title, "skip", "no NFL schedule loaded yet (row 9)");
+  const b = seasonBlock(view, leagueSeason, ex.store.repos.seasonChecks.all(), now);
+  const problems: string[] = [];
+  const details: string[] = [
+    `NFL season ${String(b.nfl_season)} ${b.phase}${b.week === null ? "" : ` week ${String(b.week)}`}; league file season ${String(leagueSeason)}`,
+  ];
+  let fix: string | null = null;
+  if (b.league_matches === false && b.phase !== "offseason") {
+    problems.push(
+      `league.yaml is for ${String(leagueSeason)}, the NFL season in progress is ${String(b.nfl_season)} (${b.phase})`,
+    );
+    fix =
+      "run the onboard Skill's new-season step (it keeps last season's file as league-<season>.yaml)";
+  }
+  for (const v of b.reference_past_vintage) {
+    problems.push(`reference table ${v.id} verified through ${String(v.verified_through_season)}`);
+    details.push(
+      `${v.id}: verified through season ${String(v.verified_through_season)} — it still works; re-check it against this season`,
+    );
+  }
+  if (b.week_bound_exceeded) {
+    problems.push(
+      `a loaded season runs past week ${String(TOOL_INPUT_WEEK_MAX)} (the tool-input bound)`,
+    );
+    details.push(
+      `a loaded season's last week exceeds ${String(TOOL_INPUT_WEEK_MAX)}: the tools cannot ask for its last weeks until the tool contract widens the bound`,
+    );
+  }
+  if (problems.length === 0)
+    return row(
+      23,
+      "season",
+      title,
+      "ok",
+      `league.yaml matches the NFL season in progress (${String(b.nfl_season)}, ${b.phase})`,
+      null,
+      details,
+    );
+  return row(
+    23,
+    "season",
+    title,
+    "warn",
+    problems.slice(0, 3).join("; "),
+    fix ?? "re-check the named reference table (see details)",
     details,
   );
 }
@@ -1383,12 +1542,14 @@ export async function runDoctor(io: CliIo, opts: DoctorOptions): Promise<DoctorR
 
   let ex: ExistingStore = { kind: "missing" };
   let leagueKey: string | null = null;
+  let leagueSeason: number | null = null;
   try {
     if (config !== null) {
       rows.push(checkConfigDir(config));
       const lf = checkLeagueFile(io, config, log);
       rows.push(lf.row);
       leagueKey = lf.leagueKey;
+      leagueSeason = lf.leagueSeason;
     } else {
       rows.push(row(4, "config_dir", "Config dir", "skip", "configuration invalid"));
       rows.push(row(4, "league_file", "League file", "skip", "configuration invalid"));
@@ -1408,7 +1569,7 @@ export async function runDoctor(io: CliIo, opts: DoctorOptions): Promise<DoctorR
     }
     const store = ex.kind === "open" ? ex.store : null;
     rows.push(checkJournal(io, ex));
-    rows.push(await checkLaunchd(io, store));
+    rows.push(await checkLaunchd(io, store, config));
     rows.push(checkNpmrc(io.packageRoot));
     rows.push(checkWriteFlag(config, io.env, scans));
     rows.push(row(14, "clock_skew", "Clock skew (online)", "na", NO_YAHOO));
@@ -1423,6 +1584,7 @@ export async function runDoctor(io: CliIo, opts: DoctorOptions): Promise<DoctorR
     rows.push(...checkSettingsFlags(store, leagueKey));
     rows.push(checkStaleBuild(io.packageRoot));
     rows.push(checkClientLog(io, opts.clientLog ?? defaultClientLog(io.home)));
+    rows.push(checkSeason(io, ex, leagueSeason));
   } finally {
     if (ex.kind === "open") ex.store.close();
   }

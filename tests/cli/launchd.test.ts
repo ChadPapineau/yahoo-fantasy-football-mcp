@@ -1,7 +1,8 @@
-// launchd.test.ts — plan 06 §2 launchd design: one plist per job, absolute ProgramArguments,
-// non-secret EnvironmentVariables, logs under ~/Library/Logs, Background/LowPriorityIO/RunAtLoad
-// false, StartCalendarInterval entries matching §1.2; launchctl only through the injected executor
-// and never on --dry-run (tests never run launchctl).
+// launchd.test.ts — plan 06 §2 launchd design as amended by the schedule-driven refresh: one plist
+// per job (the 15-minute `refresh-due` tick with RunAtLoad, weekly prune and backup), absolute
+// ProgramArguments, non-secret EnvironmentVariables, logs under ~/Library/Logs, Background/
+// LowPriorityIO; the earlier per-source jobs retired on install and removed on uninstall; launchctl
+// only through the injected executor and never on --dry-run (tests never run launchctl).
 import {
   lstatSync,
   mkdirSync,
@@ -23,6 +24,8 @@ import {
   plistPath,
   removeJobs,
   renderPlist,
+  RETIRED_JOB_NAMES,
+  retireJobs,
   selectJobs,
   writePlist,
   xmlEscape,
@@ -94,16 +97,9 @@ function parsePlist(xml: string): {
   return { label: flags.Label ?? "", args, env, calendar, flags };
 }
 
-describe("the job table (plan 06 §1.2, plan 10 §3.1a)", () => {
-  it("has the six 1a jobs with unique names and valid calendar fields", () => {
-    expect(JOBS.map((j) => j.name)).toEqual([
-      "nflverse-schedules",
-      "nflverse-daily",
-      "nflverse-stats",
-      "weather",
-      "store-prune",
-      "store-backup",
-    ]);
+describe("the job table: one refresh tick + weekly prune and backup", () => {
+  it("has refresh-due, store-prune and store-backup with unique names and valid calendar fields", () => {
+    expect(JOBS.map((j) => j.name)).toEqual(["refresh-due", "store-prune", "store-backup"]);
     for (const j of JOBS) {
       expect(j.calendar.length).toBeGreaterThan(0);
       for (const c of j.calendar) {
@@ -114,39 +110,46 @@ describe("the job table (plan 06 §1.2, plan 10 §3.1a)", () => {
     }
   });
 
-  it("schedules: every :00 and :30 on Thu/Sun/Mon, every 6 h on the other days", () => {
-    const cal = job("nflverse-schedules").calendar;
-    for (const d of [4, 0, 1]) {
-      expect(cal).toContainEqual({ Weekday: d, Minute: 0 });
-      expect(cal).toContainEqual({ Weekday: d, Minute: 30 });
-    }
-    for (const d of [2, 3, 5, 6])
-      for (const h of [0, 6, 12, 18])
-        expect(cal).toContainEqual({ Weekday: d, Hour: h, Minute: 0 });
-    expect(cal).toHaveLength(6 + 16);
+  it("refresh-due: minutes 0/15/30/45 of every hour, every day, RunAtLoad — no weekday or hour in any data refresh", () => {
+    const tick = job("refresh-due");
+    expect(tick.argv).toEqual(["refresh", "due", "--notify"]);
+    expect(tick.calendar).toEqual([{ Minute: 0 }, { Minute: 15 }, { Minute: 30 }, { Minute: 45 }]);
+    expect(tick.runAtLoad).toBe(true);
+    for (const j of JOBS.filter((x) => x.argv[0] === "refresh"))
+      for (const c of j.calendar) {
+        expect(c.Weekday, j.name).toBeUndefined();
+        expect(c.Hour, j.name).toBeUndefined();
+      }
   });
 
-  it("daily every 6 h (QA-2-035); stats 04:30 + game-day runs; prune Sun 03:00; backup Sun 03:10", () => {
-    expect(job("nflverse-daily").calendar).toEqual(
-      [4, 10, 16, 22].map((h) => ({ Hour: h, Minute: 30 })),
-    );
-    expect(job("nflverse-stats").calendar).toContainEqual({ Hour: 4, Minute: 30 });
-    expect(job("nflverse-stats").calendar).toContainEqual({ Weekday: 0, Hour: 21, Minute: 0 });
+  it("prune Sun 03:00 and backup Sun 03:10, neither at load", () => {
     expect(job("store-prune").calendar).toEqual([{ Weekday: 0, Hour: 3, Minute: 0 }]);
     expect(job("store-backup").calendar).toEqual([{ Weekday: 0, Hour: 3, Minute: 10 }]);
-    expect(job("weather").calendar).toHaveLength(6);
-    expect(job("weather").argv).toEqual(["refresh", "weather", "--notify"]);
+    expect(job("store-prune").runAtLoad).toBe(false);
+    expect(job("store-backup").runAtLoad).toBe(false);
   });
 
-  it("selectJobs: all by default, a subset by name, unknown names refused (bounded echo)", () => {
+  it("the retired names are never reused by a current job", () => {
+    expect(RETIRED_JOB_NAMES).toEqual([
+      "nflverse-schedules",
+      "nflverse-daily",
+      "nflverse-stats",
+      "weather",
+    ]);
+    for (const n of RETIRED_JOB_NAMES) expect(JOBS.map((j) => j.name)).not.toContain(n);
+  });
+
+  it("selectJobs: all by default, a subset by name; unknown names refused (bounded echo); a retired name names refresh-due", () => {
     expect(selectJobs(undefined)).toHaveLength(JOBS.length);
     expect(selectJobs("all")).toHaveLength(JOBS.length);
-    expect(selectJobs("weather, store-backup,weather").map((j) => j.name)).toEqual([
-      "weather",
+    expect(selectJobs("refresh-due, store-backup,refresh-due").map((j) => j.name)).toEqual([
+      "refresh-due",
       "store-backup",
     ]);
-    expect(() => selectJobs("weather,__proto__")).toThrow(/unknown job/);
+    expect(() => selectJobs("store-prune,__proto__")).toThrow(/unknown job/);
     expect(() => selectJobs("x".repeat(1000))).toThrow(/unknown job\(s\): x{40}$/);
+    for (const n of RETIRED_JOB_NAMES)
+      expect(() => selectJobs(n), n).toThrow(/retired.*refresh-due/);
   });
 });
 
@@ -160,46 +163,49 @@ describe("renderPlist", () => {
   it("absolute ProgramArguments, env, logs, flags and calendar", () => {
     const xml = renderPlist({
       ...base,
-      job: job("nflverse-daily"),
+      job: job("refresh-due"),
       env: { FF_CACHE_DIR: "/c", FF_CONFIG_DIR: "/k" },
     });
     expect(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist')).toBe(true);
     const p = parsePlist(xml);
-    expect(p.label).toBe(`${LABEL_PREFIX}.nflverse-daily`);
+    expect(p.label).toBe(`${LABEL_PREFIX}.refresh-due`);
     expect(p.args).toEqual([
       "/opt/node/bin/node",
       "/Users/me/pkg/dist/cli.js",
       "refresh",
-      "nflverse:daily",
+      "due",
       "--notify",
     ]);
     expect(p.env).toEqual({ FF_CACHE_DIR: "/c", FF_CONFIG_DIR: "/k" });
     expect(p.flags.ProcessType).toBe("Background");
     expect(p.flags.LowPriorityIO).toBe("true");
-    expect(p.flags.RunAtLoad).toBe("false");
+    expect(p.flags.RunAtLoad).toBe("true");
     expect(p.flags.StandardOutPath).toBe(
-      "/Users/me/Library/Logs/fantasy-football-mcp/nflverse-daily.log",
+      "/Users/me/Library/Logs/fantasy-football-mcp/refresh-due.log",
     );
-    expect(p.calendar).toEqual([4, 10, 16, 22].map((h) => ({ Hour: h, Minute: 30 })));
+    expect(p.calendar).toEqual([0, 15, 30, 45].map((m) => ({ Minute: m })));
+    const prune = parsePlist(renderPlist({ ...base, job: job("store-prune"), env: {} }));
+    expect(prune.flags.RunAtLoad).toBe("false");
+    expect(prune.calendar).toEqual([{ Weekday: 0, Hour: 3, Minute: 0 }]);
   });
 
   it("escapes XML metacharacters in paths and env; refuses control characters and relative paths", () => {
     const xml = renderPlist({
       ...base,
       node: "/a&b/<node>",
-      job: job("weather"),
+      job: job("store-backup"),
       env: { FF_CACHE_DIR: `/x"'y` },
     });
     expect(xml).toContain("<string>/a&amp;b/&lt;node&gt;</string>");
     expect(parsePlist(xml).env.FF_CACHE_DIR).toBe(`/x"'y`);
     expect(() =>
-      renderPlist({ ...base, job: job("weather"), env: { FF_CACHE_DIR: "/x\u0001" } }),
+      renderPlist({ ...base, job: job("store-backup"), env: { FF_CACHE_DIR: "/x\u0001" } }),
     ).toThrow(/control/);
-    expect(() => renderPlist({ ...base, node: "node", job: job("weather"), env: {} })).toThrow(
+    expect(() => renderPlist({ ...base, node: "node", job: job("store-backup"), env: {} })).toThrow(
       /absolute/,
     );
     expect(() =>
-      renderPlist({ ...base, entry: "dist/cli.js", job: job("weather"), env: {} }),
+      renderPlist({ ...base, entry: "dist/cli.js", job: job("store-backup"), env: {} }),
     ).toThrow(/absolute/);
     expect(() => xmlEscape("a\u007fb")).toThrow();
     expect(xmlEscape("tab\tand\nnewline")).toBe("tab\tand\nnewline");
@@ -221,7 +227,7 @@ describe("ff install-launchd", () => {
     expect(out).toContain(`<string>${process.execPath}</string>`);
     expect(out).toContain(`<string>${path.join(pkg, "dist", "cli.js")}</string>`);
     expect(out).toContain(
-      `# would run: ${LAUNCHCTL} bootstrap gui/501 ${plistPath(sb.home, "weather")}`,
+      `# would run: ${LAUNCHCTL} bootstrap gui/501 ${plistPath(sb.home, "refresh-due")}`,
     );
     expect(out).toContain(`<key>FF_CACHE_DIR</key>\n    <string>${sb.cacheDir}</string>`);
   });
@@ -240,14 +246,16 @@ describe("ff install-launchd", () => {
     expect(io.out.text).toContain("gui/501");
   });
 
-  it("drops the weather job when FF_WEATHER_SOURCE=off (unless asked for)", async () => {
+  it("FF_WEATHER_SOURCE=off changes no job (the tick skips weather); --jobs weather is a usage error naming refresh-due", async () => {
     sb = sandbox();
     const io = makeIo(sb, { packageRoot: fakePackage(sb), env: { FF_WEATHER_SOURCE: "off" } });
     expect(await main(["install-launchd", "--dry-run"], io)).toBe(EXIT.OK);
-    expect(io.out.text).not.toContain("ff.weather.plist");
-    const io2 = makeIo(sb, { packageRoot: fakePackage(sb), env: { FF_WEATHER_SOURCE: "off" } });
-    expect(await main(["install-launchd", "--dry-run", "--jobs", "weather"], io2)).toBe(EXIT.OK);
-    expect(io2.out.text).toContain("ff.weather.plist");
+    for (const j of JOBS) expect(io.out.text).toContain(`${labelOf(j)}.plist`);
+    for (const n of RETIRED_JOB_NAMES) {
+      const io2 = makeIo(sb, { packageRoot: fakePackage(sb) });
+      expect(await main(["install-launchd", "--jobs", n], io2), n).toBe(EXIT.USAGE);
+      expect(io2.err.text).toMatch(/retired.*refresh-due/);
+    }
   });
 
   it("installs: writes 0644 plists, boots out then bootstraps each, via the injected executor", async () => {
@@ -259,16 +267,16 @@ describe("ff install-launchd", () => {
       exec: fx.exec,
       uid: 777,
     });
-    expect(await main(["install-launchd", "--jobs", "weather,store-prune"], io)).toBe(EXIT.OK);
+    expect(await main(["install-launchd", "--jobs", "refresh-due,store-prune"], io)).toBe(EXIT.OK);
     const files = readdirSync(launchAgentsDir(sb.home)).sort();
-    expect(files).toEqual([`${labelOf("store-prune")}.plist`, `${labelOf("weather")}.plist`]);
-    expect(lstatSync(plistPath(sb.home, "weather")).mode & 0o777).toBe(0o644);
-    expect(parsePlist(readFileSync(plistPath(sb.home, "weather"), "utf8")).args[0]).toBe(
+    expect(files).toEqual([`${labelOf("refresh-due")}.plist`, `${labelOf("store-prune")}.plist`]);
+    expect(lstatSync(plistPath(sb.home, "refresh-due")).mode & 0o777).toBe(0o644);
+    expect(parsePlist(readFileSync(plistPath(sb.home, "refresh-due"), "utf8")).args[0]).toBe(
       process.execPath,
     );
     expect(fx.calls).toEqual([
-      { file: LAUNCHCTL, args: ["bootout", `gui/777/${labelOf("weather")}`] },
-      { file: LAUNCHCTL, args: ["bootstrap", "gui/777", plistPath(sb.home, "weather")] },
+      { file: LAUNCHCTL, args: ["bootout", `gui/777/${labelOf("refresh-due")}`] },
+      { file: LAUNCHCTL, args: ["bootstrap", "gui/777", plistPath(sb.home, "refresh-due")] },
       { file: LAUNCHCTL, args: ["bootout", `gui/777/${labelOf("store-prune")}`] },
       { file: LAUNCHCTL, args: ["bootstrap", "gui/777", plistPath(sb.home, "store-prune")] },
     ]);
@@ -278,7 +286,7 @@ describe("ff install-launchd", () => {
     // re-running replaces in place
     expect(
       await main(
-        ["install-launchd", "--jobs", "weather"],
+        ["install-launchd", "--jobs", "refresh-due"],
         makeIo(sb, { packageRoot: fakePackage(sb), platform: "darwin", exec: fx.exec }),
       ),
     ).toBe(EXIT.OK);
@@ -288,7 +296,7 @@ describe("ff install-launchd", () => {
     sb = sandbox();
     const fx = fakeExec((c) => ({ code: c.args[0] === "bootstrap" ? 5 : 3 }));
     const io = makeIo(sb, { packageRoot: fakePackage(sb), platform: "darwin", exec: fx.exec });
-    expect(await main(["install-launchd", "--jobs", "weather"], io)).toBe(EXIT.ERROR);
+    expect(await main(["install-launchd", "--jobs", "refresh-due"], io)).toBe(EXIT.ERROR);
     expect(io.out.text).toContain("launchctl exit 5");
   });
 
@@ -333,36 +341,41 @@ describe("ff install-launchd", () => {
     mkdirSync(agents, { recursive: true });
     const target = path.join(s.dir, "victim");
     writeFileSync(target, "keep");
-    symlinkSync(target, plistPath(s.home, "weather"));
+    symlinkSync(target, plistPath(s.home, "refresh-due"));
     expect(() => {
-      writePlist(plistPath(s.home, "weather"), "<x/>");
+      writePlist(plistPath(s.home, "refresh-due"), "<x/>");
     }).toThrow(/symlink/);
     expect(readFileSync(target, "utf8")).toBe("keep");
     const home2 = path.join(s.dir, "home2");
     mkdirSync(path.join(home2, "Library"), { recursive: true });
     symlinkSync(s.dir, launchAgentsDir(home2));
     expect(() => {
-      writePlist(plistPath(home2, "weather"), "<x/>");
+      writePlist(plistPath(home2, "refresh-due"), "<x/>");
     }).toThrow(/plain directory/);
   });
 });
 
 describe("removeJobs", () => {
-  it("boots out and removes only our known plists; --dry-run removes nothing", async () => {
+  it("boots out and removes only our known plists, current and retired; --dry-run removes nothing", async () => {
     sb = sandbox();
     const agents = launchAgentsDir(sb.home);
     mkdirSync(agents, { recursive: true });
+    writeFileSync(plistPath(sb.home, "refresh-due"), "x");
     writeFileSync(plistPath(sb.home, "weather"), "x");
     writeFileSync(path.join(agents, "com.other.agent.plist"), "x");
     writeFileSync(path.join(agents, `${LABEL_PREFIX}.unknown-job.plist`), "x");
-    expect(installedPlists(sb.home).map((p) => p.job)).toEqual(["weather"]);
+    expect(installedPlists(sb.home)).toEqual([
+      { job: "refresh-due", file: plistPath(sb.home, "refresh-due"), retired: false },
+      { job: "weather", file: plistPath(sb.home, "weather"), retired: true },
+    ]);
     const fx = fakeExec(() => ({ code: 113 }));
     const dry = await removeJobs({ home: sb.home, uid: 501, exec: fx.exec, dryRun: true });
-    expect(dry.map((s) => s.kind)).toEqual(["launchctl", "remove"]);
+    expect(dry.map((s) => s.kind)).toEqual(["launchctl", "remove", "launchctl", "remove"]);
     expect(fx.calls).toEqual([]);
-    expect(installedPlists(sb.home)).toHaveLength(1);
+    expect(installedPlists(sb.home)).toHaveLength(2);
     await removeJobs({ home: sb.home, uid: 501, exec: fx.exec, dryRun: false });
     expect(fx.calls).toEqual([
+      { file: LAUNCHCTL, args: ["bootout", `gui/501/${labelOf("refresh-due")}`] },
       { file: LAUNCHCTL, args: ["bootout", `gui/501/${labelOf("weather")}`] },
     ]);
     expect(readdirSync(agents).sort()).toEqual([
@@ -374,5 +387,88 @@ describe("removeJobs", () => {
   it("installedPlists is empty when LaunchAgents does not exist", () => {
     sb = sandbox();
     expect(installedPlists(sb.home)).toEqual([]);
+  });
+});
+
+describe("retiring the earlier version's jobs (an upgrade is one `ff install-launchd`)", () => {
+  const legacyHome = (): Sandbox => {
+    const s = sandbox();
+    mkdirSync(launchAgentsDir(s.home), { recursive: true });
+    for (const n of RETIRED_JOB_NAMES) writeFileSync(plistPath(s.home, n), "<legacy/>");
+    return s;
+  };
+
+  it("install boots out and removes every legacy plist once refresh-due is loaded", async () => {
+    sb = legacyHome();
+    // "not loaded" from bootout is ignored
+    const fx = fakeExec((c) => ({ code: c.args[0] === "bootout" ? 113 : 0 }));
+    const io = makeIo(sb, { packageRoot: fakePackage(sb), platform: "darwin", exec: fx.exec });
+    expect(await main(["install-launchd"], io)).toBe(EXIT.OK);
+    expect(installedPlists(sb.home).map((p) => p.job)).toEqual(JOBS.map((j) => j.name));
+    for (const n of RETIRED_JOB_NAMES) {
+      expect(io.out.text).toContain(`retired ${labelOf(n)}`);
+      expect(fx.calls).toContainEqual({
+        file: LAUNCHCTL,
+        args: ["bootout", `gui/501/${labelOf(n)}`],
+      });
+    }
+    // the legacy bootouts come after the new jobs are loaded
+    const firstRetire = fx.calls.findIndex((c) => c.args[1]?.endsWith(".nflverse-schedules"));
+    const lastBootstrap = fx.calls.map((c) => c.args[0]).lastIndexOf("bootstrap");
+    expect(firstRetire).toBeGreaterThan(lastBootstrap);
+  });
+
+  it("--dry-run lists what would be retired and changes nothing", async () => {
+    sb = legacyHome();
+    const fx = fakeExec();
+    const io = makeIo(sb, { packageRoot: fakePackage(sb), platform: "darwin", exec: fx.exec });
+    expect(await main(["install-launchd", "--dry-run"], io)).toBe(EXIT.OK);
+    for (const n of RETIRED_JOB_NAMES) expect(io.out.text).toContain(`would retire ${labelOf(n)}`);
+    expect(fx.calls).toEqual([]);
+    expect(installedPlists(sb.home).filter((p) => p.retired)).toHaveLength(
+      RETIRED_JOB_NAMES.length,
+    );
+  });
+
+  it("keeps the legacy jobs when the new ones did not all load, or when refresh-due is not installed", async () => {
+    sb = legacyHome();
+    const failing = fakeExec((c) => ({ code: c.args[0] === "bootstrap" ? 5 : 0 }));
+    const io = makeIo(sb, { packageRoot: fakePackage(sb), platform: "darwin", exec: failing.exec });
+    expect(await main(["install-launchd"], io)).toBe(EXIT.ERROR);
+    expect(io.out.text).toContain("kept the earlier version's jobs");
+    expect(installedPlists(sb.home).filter((p) => p.retired)).toHaveLength(
+      RETIRED_JOB_NAMES.length,
+    );
+    const ok = fakeExec();
+    const io2 = makeIo(sb, { packageRoot: fakePackage(sb), platform: "darwin", exec: ok.exec });
+    expect(await main(["install-launchd", "--jobs", "store-backup"], io2)).toBe(EXIT.OK);
+    expect(installedPlists(sb.home).filter((p) => p.retired)).toHaveLength(
+      RETIRED_JOB_NAMES.length,
+    );
+  });
+
+  it("a symlinked legacy plist is refused (left in place, target untouched) and the install exits 1", async () => {
+    const s = sandbox();
+    sb = s;
+    mkdirSync(launchAgentsDir(s.home), { recursive: true });
+    const target = path.join(s.dir, "dotfiles-weather.plist");
+    writeFileSync(target, "keep");
+    symlinkSync(target, plistPath(s.home, "weather"));
+    writeFileSync(plistPath(s.home, "nflverse-daily"), "<legacy/>");
+    const fx = fakeExec();
+    const dry = await retireJobs({ home: s.home, uid: 501, exec: fx.exec, dryRun: true });
+    expect(dry.map((x) => [x.detail, x.ok])).toEqual([
+      [labelOf("nflverse-daily"), true],
+      [labelOf("weather"), false],
+    ]);
+    const io = makeIo(s, { packageRoot: fakePackage(s), platform: "darwin", exec: fx.exec });
+    expect(await main(["install-launchd"], io)).toBe(EXIT.ERROR);
+    expect(io.out.text).toMatch(/FAIL retire .*weather: refusing to remove a symlink/);
+    expect(lstatSync(plistPath(s.home, "weather")).isSymbolicLink()).toBe(true);
+    expect(readFileSync(target, "utf8")).toBe("keep");
+    expect(installedPlists(s.home).map((p) => p.job)).toEqual([
+      ...JOBS.map((j) => j.name),
+      "weather",
+    ]);
   });
 });

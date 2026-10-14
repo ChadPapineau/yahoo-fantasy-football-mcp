@@ -114,9 +114,11 @@ describe("ff (process)", () => {
       rows: { id: string; n: number; status: string; message: string }[];
     };
     expect(j.exit_code).toBe(1);
+    // plan 03 §5's 22 rows plus row 23 (`season`; na without a league file)
     expect(new Set(j.rows.map((x) => x.n))).toEqual(
-      new Set([0, ...Array.from({ length: 22 }, (_, i) => i + 1)]),
+      new Set([0, ...Array.from({ length: 23 }, (_, i) => i + 1)]),
     );
+    expect(j.rows.find((x) => x.id === "season")?.status).toBe("na");
     for (const id of [
       "token_file",
       "client_secret",
@@ -203,24 +205,31 @@ describe("ff (process)", () => {
   it("install-launchd --dry-run: absolute paths and calendar entries on stdout; nothing installed", () => {
     const t = tempRoot();
     const r = ff(
-      ["install-launchd", "--dry-run", "--jobs", "nflverse-daily,store-backup"],
+      ["install-launchd", "--dry-run", "--jobs", "refresh-due,store-backup"],
       t.env,
       t.dir,
     );
     expect(r.code).toBe(0);
     expect(r.stdout).toContain(`<string>${process.execPath}</string>`);
     expect(r.stdout).toContain(`<string>${DIST}</string>`);
-    expect(r.stdout).toContain("<string>nflverse:daily</string>");
-    expect(r.stdout).toMatch(
-      /<key>Hour<\/key>\s*<integer>10<\/integer>\s*<key>Minute<\/key>\s*<integer>30<\/integer>/,
-    );
+    expect(r.stdout).toMatch(/<string>refresh<\/string>\s*<string>due<\/string>/);
+    // the tick: minutes 0/15/30/45 of every hour, no hour or weekday; run at load
+    for (const m of [0, 15, 30, 45])
+      expect(r.stdout).toMatch(
+        new RegExp(`<dict>\\s*<key>Minute</key>\\s*<integer>${String(m)}</integer>\\s*</dict>`),
+      );
+    expect(r.stdout).toMatch(/<key>RunAtLoad<\/key>\s*<true\/>/);
     expect(r.stdout).toMatch(
       /<key>Weekday<\/key>\s*<integer>0<\/integer>\s*<key>Hour<\/key>\s*<integer>3<\/integer>\s*<key>Minute<\/key>\s*<integer>10<\/integer>/,
     );
     expect(r.stdout).toContain(
-      path.join(t.home, "Library", "Logs", "fantasy-football-mcp", "nflverse-daily.log"),
+      path.join(t.home, "Library", "Logs", "fantasy-football-mcp", "refresh-due.log"),
     );
     expect(existsSync(path.join(t.home, "Library"))).toBe(false);
+    // a retired job name is a usage error naming its replacement
+    const old = ff(["install-launchd", "--dry-run", "--jobs", "nflverse-daily"], t.env, t.dir);
+    expect(old.code).toBe(2);
+    expect(old.stderr).toMatch(/retired.*refresh-due/);
   });
 
   it("uninstall --dry-run --purge: prints, deletes nothing", () => {

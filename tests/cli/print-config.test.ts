@@ -211,3 +211,28 @@ describe("launchEnv", () => {
     });
   });
 });
+
+describe("launchEnv: answer-time refresh", () => {
+  it("copies FF_ON_DEMAND_REFRESH when set in the env (each mode); never when only defaulted", () => {
+    sb = sandbox();
+    for (const mode of ["wait", "background", "off"]) {
+      const config = loadConfig({
+        env: { FF_ON_DEMAND_REFRESH: mode },
+        file: undefined,
+        home: sb.home,
+        repoRoot: ROOT,
+      });
+      expect(launchEnv(config).FF_ON_DEMAND_REFRESH, mode).toBe(mode);
+    }
+    const defaulted = loadConfig({ env: {}, file: undefined, home: sb.home, repoRoot: ROOT });
+    expect(launchEnv(defaulted)).not.toHaveProperty("FF_ON_DEMAND_REFRESH");
+    // set in config.json only: the server reads the file itself
+    const fromFile = loadConfig({
+      env: {},
+      file: { FF_ON_DEMAND_REFRESH: "background" },
+      home: sb.home,
+      repoRoot: ROOT,
+    });
+    expect(launchEnv(fromFile)).not.toHaveProperty("FF_ON_DEMAND_REFRESH");
+  });
+});

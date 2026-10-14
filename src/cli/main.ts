@@ -20,7 +20,7 @@ import {
   type CliIo,
 } from "./io.js";
 import { printConfig } from "./print-config.js";
-import { refresh } from "./refresh.js";
+import { refresh, REFRESH_TARGETS } from "./refresh.js";
 import { status } from "./status.js";
 import { uninstall } from "./uninstall.js";
 
@@ -46,14 +46,20 @@ export const USAGE = `usage: ff <command> [options]
   status [--json]               data freshness, store, jobs — the dashboard
   doctor [--json] [--online] [--fix --yes] [--client-config <path>] [--client-log <path>]
                                 diagnose the install; exit code = worst finding
-  refresh <target> [--seasons 2025,2026] [--force] [--notify] [--json]
+  refresh <target…> [--seasons 2025,2026] [--force] [--notify] [--json]
                                 targets: all | nflverse | nflverse:schedules | nflverse:daily |
                                 nflverse:stats | nflverse:injuries | nflverse:roster_weekly |
-                                nflverse:stats_player_week | weather
+                                nflverse:stats_player_week | weather (several run schedules first)
+  refresh due [--dry-run] [--json] [--notify]
+                                one tick: refresh only what the NFL schedule makes due now
+                                (what launchd runs every 15 min; --dry-run explains each decision)
+                                the server's answer-time child adds --on-demand --no-migrate
+                                --expect-version <v>
   print-config --client desktop|code
                                 the launch config with absolute paths (no secrets)
   install-launchd [--jobs a,b] [--dry-run]
-                                install the refresh/prune/backup LaunchAgents (macOS)
+                                install the refresh-due tick and the prune/backup LaunchAgents
+                                (macOS; retires an earlier version's per-source jobs)
   uninstall [--dry-run] [--purge [--purge-config] --yes]
                                 remove the LaunchAgents; data only with --purge --yes
   prune [--notify]              drop expired cache rows, temp debris, old pre-migration backups
@@ -63,7 +69,7 @@ export const USAGE = `usage: ff <command> [options]
 
 exit codes: 0 ok · 1 failure · 2 usage or configuration · 5 serve forced shutdown
 environment: FF_CONFIG_DIR, FF_CACHE_DIR, FF_LEAGUE_FILE, FF_LOG_LEVEL, FF_WEATHER_SOURCE,
-             FF_TOOLSET, FF_FIXTURE_DIR (see README)`;
+             FF_TOOLSET, FF_FIXTURE_DIR, FF_ON_DEMAND_REFRESH (see README)`;
 
 type Options = NonNullable<ParseArgsConfig["options"]>;
 
@@ -86,8 +92,13 @@ const SPECS: Readonly<Record<string, { options: Options; positionals: number }>>
       force: { type: "boolean" },
       notify: { type: "boolean" },
       json: { type: "boolean" },
+      "on-demand": { type: "boolean" },
+      "no-migrate": { type: "boolean" },
+      "expect-version": { type: "string" },
+      "dry-run": { type: "boolean" },
     },
-    positionals: 1,
+    // several targets (deduplicated, run in refresh order); `due` stands alone
+    positionals: REFRESH_TARGETS.length,
   },
   "print-config": { options: { client: { type: "string" } }, positionals: 0 },
   "install-launchd": {
@@ -243,11 +254,15 @@ export async function main(
           config,
           log,
           {
-            target: p.positionals[0],
+            targets: p.positionals,
             seasons: str(p, "seasons"),
             force: flag(p, "force"),
             notify: flag(p, "notify"),
             json: flag(p, "json"),
+            onDemand: flag(p, "on-demand"),
+            noMigrate: flag(p, "no-migrate"),
+            expectVersion: str(p, "expect-version") ?? null,
+            dryRun: flag(p, "dry-run"),
           },
           deps.signal ?? new AbortController().signal,
         );

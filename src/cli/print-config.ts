@@ -40,6 +40,8 @@ const COPIED_KEYS: readonly ConfigKey[] = [
   "FF_WEATHER_SOURCE",
   "FF_FIXTURE_DIR",
   "FF_LEAGUE_KEYS",
+  // answer-time refresh (wait | background | off): a GUI client would otherwise run the default
+  "FF_ON_DEMAND_REFRESH",
 ];
 
 function resolvedValue(config: Config, key: ConfigKey): string | null {
@@ -58,6 +60,8 @@ function resolvedValue(config: Config, key: ConfigKey): string | null {
       return config.fixtureDir;
     case "FF_LEAGUE_KEYS":
       return config.leagueKeys.length > 0 ? config.leagueKeys.join(",") : null;
+    case "FF_ON_DEMAND_REFRESH":
+      return config.onDemandRefresh;
     default:
       return null;
   }

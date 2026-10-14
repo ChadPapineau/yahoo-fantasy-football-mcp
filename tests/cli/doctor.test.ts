@@ -26,6 +26,7 @@ import {
   checkLeagueFile,
   checkNode,
   checkNpmrc,
+  checkSeason,
   checkSettingsFlags,
   checkStaleBuild,
   checkStore,
@@ -43,8 +44,15 @@ import {
   type DoctorRow,
 } from "../../src/cli/doctor.js";
 import { EXIT } from "../../src/cli/exit.js";
-import { makeLogger } from "../../src/cli/io.js";
-import { JOBS, LAUNCHCTL, launchAgentsDir, plistPath } from "../../src/cli/launchd.js";
+import { distEntry, makeLogger } from "../../src/cli/io.js";
+import {
+  jobEnv,
+  JOBS,
+  LAUNCHCTL,
+  launchAgentsDir,
+  plistPath,
+  renderPlist,
+} from "../../src/cli/launchd.js";
 import { main } from "../../src/cli/main.js";
 import { SERVER_NAME } from "../../src/cli/print-config.js";
 import { openExistingStore, openStore, storeOpenReason } from "../../src/cli/store-access.js";
@@ -52,6 +60,10 @@ import { datasetFilePath, storePath } from "../../src/config/paths.js";
 import { loadConfig, type Config } from "../../src/config/schema.js";
 import { fixedClock } from "../../src/domain/clock.js";
 import { DS_SCHEMA_VERSION } from "../../src/store/attach.js";
+import { DS_GAMES, DS_VENUES } from "../../src/store/datasets/tables.js";
+import { storeFactory } from "../../src/store/index.js";
+import type { NflGame } from "../../src/domain/analytics/types.js";
+import { syntheticSeason, syntheticSeasons } from "../helpers/season/synthetic.js";
 import { fixtureFetch } from "../../src/cli/fixture-fetch.js";
 import type { FetchLike } from "../../src/http/client.js";
 import {
@@ -777,39 +789,305 @@ describe("rows 8–10 — store, datasets, journal", () => {
 });
 
 describe("row 11 — launchd", () => {
-  it("n/a off macOS; skip without a uid; warn when none installed", async () => {
+  it("n/a off macOS (names `ff refresh due` every 15 min); skip without a uid; warn when none installed", async () => {
     const s = fresh();
-    expect((await checkLaunchd(makeIo(s, { platform: "linux" }), null)).status).toBe("na");
+    const na = await checkLaunchd(makeIo(s, { platform: "linux" }), null);
+    expect(na.status).toBe("na");
+    expect(na.message).toContain("`ff refresh due` every 15 min");
     expect((await checkLaunchd(makeIo(s, { platform: "darwin", uid: null }), null)).status).toBe(
       "skip",
     );
     expect((await checkLaunchd(makeIo(s, { platform: "darwin" }), null)).status).toBe("warn");
   });
 
-  it("all installed and loaded → ok with last runs; one not loaded → warn; launchctl print only", async () => {
-    const s = refreshed();
+  /** Installs every current job's plist exactly as `ff install-launchd` writes it. */
+  function installCurrent(s: Sandbox, c: Config): void {
     mkdirSync(launchAgentsDir(s.home), { recursive: true });
-    for (const j of JOBS) writeFileSync(plistPath(s.home, j), "x");
+    const io = makeIo(s);
+    for (const j of JOBS)
+      writeFileSync(
+        plistPath(s.home, j),
+        renderPlist({
+          job: j,
+          node: io.execPath,
+          entry: distEntry(io.packageRoot),
+          env: jobEnv(c),
+          home: s.home,
+        }),
+      );
+  }
+
+  async function withTick(
+    s: Sandbox,
+    lastRunAt: string | null,
+    exit = 0,
+  ): Promise<ReturnType<typeof openStore>> {
     const c = cfg(s);
     const store = openStore(c, fixedClock(REFRESHED_AT), log(s), { migrate: false });
+    if (lastRunAt !== null)
+      await store.repos.jobRuns.record({
+        job: "refresh-due",
+        last_run_at: lastRunAt,
+        exit,
+        summary: "due=0 published=0 unchanged=0 skipped=0 failed=0",
+      });
+    return store;
+  }
+
+  it("current, loaded, a tick within the hour → ok; launchctl print only", async () => {
+    const s = refreshed();
+    const c = cfg(s);
+    installCurrent(s, c);
+    const store = await withTick(s, "2026-09-30T17:45:00.000Z");
     try {
       const fx = fakeExec();
-      const r = await checkLaunchd(makeIo(s, { platform: "darwin", exec: fx.exec }), store);
-      expect(r.status).toBe("ok");
-      expect(fx.calls.every((x) => x.file === LAUNCHCTL && x.args[0] === "print")).toBe(true);
-      expect(r.details.join("\n")).toMatch(
-        /nflverse-daily: loaded; last run nflverse:injuries ok at/,
+      const r = await checkLaunchd(
+        makeIo(s, { platform: "darwin", exec: fx.exec, clock: fixedClock(REFRESHED_AT) }),
+        store,
+        c,
       );
-      const fx2 = fakeExec((x) => ({ code: x.args[1]?.endsWith(".weather") === true ? 113 : 0 }));
-      const r2 = await checkLaunchd(makeIo(s, { platform: "darwin", exec: fx2.exec }), store);
-      expect(r2.status).toBe("warn");
-      expect(r2.details.join("\n")).toContain("weather: NOT loaded");
-      rmSync(plistPath(s.home, "store-backup"));
-      const r3 = await checkLaunchd(makeIo(s, { platform: "darwin", exec: fx.exec }), null);
-      expect(r3.details.join("\n")).toContain("not installed: store-backup");
+      expect(r.status, r.details.join("\n")).toBe("ok");
+      expect(fx.calls.every((x) => x.file === LAUNCHCTL && x.args[0] === "print")).toBe(true);
+      expect(r.details.join("\n")).toMatch(/refresh-due: last tick 15 min ago \(exit 0\)/);
     } finally {
       store.close();
     }
+  });
+
+  it("one job not loaded, or one missing → warn with the fix", async () => {
+    const s = refreshed();
+    const c = cfg(s);
+    installCurrent(s, c);
+    const store = await withTick(s, "2026-09-30T17:45:00.000Z");
+    try {
+      const fx = fakeExec((x) => ({
+        code: x.args[1]?.endsWith(".store-prune") === true ? 113 : 0,
+      }));
+      const io = makeIo(s, { platform: "darwin", exec: fx.exec, clock: fixedClock(REFRESHED_AT) });
+      const r = await checkLaunchd(io, store, c);
+      expect(r.status).toBe("warn");
+      expect(r.details.join("\n")).toContain("store-prune: NOT loaded");
+      expect(r.fix).toContain("ff install-launchd");
+      rmSync(plistPath(s.home, "store-backup"));
+      const r2 = await checkLaunchd(
+        makeIo(s, { platform: "darwin", clock: fixedClock(REFRESHED_AT) }),
+        store,
+        c,
+      );
+      expect(r2.details.join("\n")).toContain("not installed: store-backup");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("a retired job's plist left by an earlier version → warn naming it", async () => {
+    const s = refreshed();
+    const c = cfg(s);
+    installCurrent(s, c);
+    for (const n of ["nflverse-daily", "weather"]) writeFileSync(plistPath(s.home, n), "x");
+    const store = await withTick(s, "2026-09-30T17:45:00.000Z");
+    try {
+      const r = await checkLaunchd(
+        makeIo(s, { platform: "darwin", clock: fixedClock(REFRESHED_AT) }),
+        store,
+        c,
+      );
+      expect(r.status).toBe("warn");
+      expect(r.message).toContain("retired job nflverse-daily installed");
+      expect(r.details.join("\n")).toContain("weather: an earlier version's job (retired");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("an out-of-date plist (another node, another cache dir, the old calendar) → warn", async () => {
+    const s = refreshed();
+    const c = cfg(s);
+    installCurrent(s, c);
+    const store = await withTick(s, "2026-09-30T17:45:00.000Z");
+    try {
+      const io = makeIo(s, { platform: "darwin", clock: fixedClock(REFRESHED_AT) });
+      const tick = JOBS.find((j) => j.name === "refresh-due");
+      if (tick === undefined) throw new Error("no tick job");
+      for (const stale of [
+        renderPlist({
+          job: tick,
+          node: "/old/node",
+          entry: distEntry(io.packageRoot),
+          env: jobEnv(c),
+          home: s.home,
+        }),
+        renderPlist({
+          job: tick,
+          node: io.execPath,
+          entry: distEntry(io.packageRoot),
+          env: { ...jobEnv(c), FF_CACHE_DIR: "/elsewhere" },
+          home: s.home,
+        }),
+        renderPlist({
+          job: { ...tick, runAtLoad: false },
+          node: io.execPath,
+          entry: distEntry(io.packageRoot),
+          env: jobEnv(c),
+          home: s.home,
+        }),
+      ]) {
+        writeFileSync(plistPath(s.home, "refresh-due"), stale);
+        const r = await checkLaunchd(io, store, c);
+        expect(r.status).toBe("warn");
+        expect(r.details.join("\n")).toContain("refresh-due: loaded; plist OUT OF DATE");
+      }
+    } finally {
+      store.close();
+    }
+  });
+
+  it("no heartbeat: no tick recorded, a tick over an hour old, or a failed last tick → warn", async () => {
+    for (const [last, exit, want] of [
+      [null, 0, "no refresh tick recorded"],
+      ["2026-09-30T16:59:00.000Z", 0, "no heartbeat"],
+      ["2026-09-30T17:59:00.000Z", 1, "last tick failed"],
+    ] as const) {
+      const s = refreshed();
+      const c = cfg(s);
+      installCurrent(s, c);
+      const store = await withTick(s, last, exit);
+      try {
+        const r = await checkLaunchd(
+          makeIo(s, { platform: "darwin", clock: fixedClock(REFRESHED_AT) }),
+          store,
+          c,
+        );
+        expect(r.status, want).toBe("warn");
+        expect(r.message, want).toContain(want);
+      } finally {
+        store.close();
+        s.cleanup();
+        sb = undefined;
+      }
+    }
+  });
+});
+
+describe("row 9 — a season upstream has not published yet", () => {
+  it("warns (never fails) with the check's age, and never sends the user to `ff refresh all`", () => {
+    const s = refreshed();
+    const db = new DatabaseSync(storePath(s.cacheDir));
+    db.prepare(
+      "UPDATE refresh_log SET seasons_json = '[2025]' WHERE source = 'nflverse:injuries'",
+    ).run();
+    db.prepare(
+      "INSERT OR REPLACE INTO season_check (source, season, checked_at, status) VALUES ('nflverse:injuries', 2026, '2026-09-30T15:00:00.000Z', 'not_published')",
+    ).run();
+    db.close();
+    const c = cfg(s, { FF_WEATHER_SOURCE: "off" });
+    const io = makeIo(s, { clock: fixedClock("2026-09-30T18:05:00.000Z") });
+    const ex = openExistingStore(c, io.clock, log(s));
+    try {
+      const r = checkDatasets(io, c, ex);
+      expect(r.status).toBe("warn");
+      expect(r.message).toContain("not published upstream yet");
+      expect(r.fix).not.toContain("ff refresh");
+      expect(r.details).toContain(
+        "nflverse:injuries: season 2026 not published upstream yet (checked 3 h ago)",
+      );
+    } finally {
+      if (ex.kind === "open") ex.store.close();
+    }
+  });
+});
+
+describe("row 23 — season", () => {
+  /** A store whose schedules file holds `games` (a synthetic schedule), published at `at`. */
+  async function scheduleStore(s: Sandbox, games: readonly NflGame[], at: string): Promise<void> {
+    mkdirSync(s.cacheDir, { recursive: true, mode: 0o700 });
+    const c = cfg(s);
+    const pub = storeFactory.openPublisher({
+      storePath: storePath(c.cacheDir),
+      datasetDir: path.join(c.cacheDir, "ds"),
+      clock: fixedClock(at),
+    });
+    try {
+      const out = await pub.publish("nflverse:schedules", `v-${at}`, at, (w) => {
+        w.createTable(DS_GAMES);
+        w.createTable(DS_VENUES);
+        const rows = games.map((g) => ({
+          ...Object.fromEntries(DS_GAMES.columns.map((col) => [col.name, null])),
+          game_id: g.game_id,
+          season: g.season,
+          game_type: g.game_type ?? "REG",
+          week: g.week,
+          gameday: g.gameday ?? "2026-01-01",
+          kickoff_utc: g.kickoff,
+          away_team: g.away,
+          home_team: g.home,
+          roof: g.roof,
+        }));
+        const n = w.insert("ds_games", rows);
+        return Promise.resolve({
+          rows: n,
+          tables: [{ name: "ds_games", rows: n }],
+          seasons: [...new Set(games.map((g) => g.season))].sort(),
+          columns_hash: "h",
+        });
+      });
+      if (!out.ok) throw new Error(out.error);
+    } finally {
+      pub.close();
+    }
+  }
+
+  const rowAt = (s: Sandbox, at: string, leagueSeason: number | null): DoctorRow => {
+    const c = cfg(s);
+    const io = makeIo(s, { clock: fixedClock(at) });
+    const ex = openExistingStore(c, io.clock, log(s));
+    try {
+      return checkSeason(io, ex, leagueSeason);
+    } finally {
+      if (ex.kind === "open") ex.store.close();
+    }
+  };
+
+  it("na without a league file; skip without a store or a loaded schedule", () => {
+    const s = fresh();
+    expect(rowAt(s, "2027-08-20T12:00:00.000Z", null).status).toBe("na");
+    expect(rowAt(s, "2027-08-20T12:00:00.000Z", 2027).status).toBe("skip");
+  });
+
+  for (const S of [2027, 2028, 2029, 2030]) {
+    it(`${String(S)}: a ${String(S - 1)} league file once ${String(S)}'s preseason starts → warn with the new-season step; ${String(S)} → ok`, async () => {
+      const s = fresh();
+      await scheduleStore(s, syntheticSeasons([S - 1, S]), `${String(S)}-05-15T00:00:00.000Z`);
+      const behind = rowAt(s, `${String(S)}-08-20T12:00:00.000Z`, S - 1);
+      expect(behind.status).toBe("warn");
+      expect(behind.message).toContain(`league.yaml is for ${String(S - 1)}`);
+      expect(behind.fix).toContain("new-season step");
+      // in May, once S's schedule is loaded, the phase is S's preseason: the rollover nag starts
+      const may = rowAt(s, `${String(S)}-05-20T12:00:00.000Z`, S - 1);
+      expect(may.message).toContain(`league.yaml is for ${String(S - 1)}`);
+      // the reference tables are verified through 2026: later seasons say so (still a warning)
+      const current = rowAt(s, `${String(S)}-10-01T12:00:00.000Z`, S);
+      expect(current.message).not.toContain("league.yaml is for");
+      expect(current.details.join("\n")).toMatch(/venues: verified through season \d{4}/);
+      s.cleanup();
+      // before S's schedule is released (offseason S−1) a league file for S−1 is expected
+      const early = fresh();
+      await scheduleStore(early, syntheticSeasons([S - 1]), `${String(S)}-03-01T00:00:00.000Z`);
+      const off = rowAt(early, `${String(S)}-04-15T12:00:00.000Z`, S - 1);
+      expect(off.message).not.toContain("league.yaml is for");
+    });
+  }
+
+  it("a 20-week regular season (last week past the tool-input bound) → warn", async () => {
+    const s = fresh();
+    await scheduleStore(
+      s,
+      syntheticSeason({ season: 2026, regWeeks: 20 }),
+      "2026-08-01T00:00:00.000Z",
+    );
+    const r = rowAt(s, "2026-10-01T12:00:00.000Z", 2026);
+    expect(r.status).toBe("warn");
+    expect(r.message).toContain("the tool-input bound");
   });
 });
 
@@ -982,6 +1260,7 @@ describe("runDoctor / ff doctor", () => {
       "settings_changed",
       "stale_build",
       "client_log",
+      "season",
     ]);
     for (const id of [
       "token_file",

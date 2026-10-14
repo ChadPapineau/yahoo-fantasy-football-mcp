@@ -1,14 +1,19 @@
 // install-launchd.ts — `ff install-launchd [--jobs a,b] [--dry-run]` (plan 06 J1, §2; plan 03 L4):
 // generates one LaunchAgent plist per job with absolute paths and installs it with `launchctl
-// bootstrap gui/<uid>` (after a `bootout`, so re-running replaces a loaded job). `--dry-run` prints
-// the plists and the launchctl commands and changes nothing — it works on any platform.
+// bootstrap gui/<uid>` (after a `bootout`, so re-running replaces a loaded job). Once the refresh
+// tick is loaded, the plists of the jobs it replaced (RETIRED_JOB_NAMES) are booted out and removed,
+// so an upgrade needs this one command. `--dry-run` prints the plists, the launchctl commands and
+// what would be retired, and changes nothing — it works on any platform.
 import type { Config } from "../config/schema.js";
 import { EXIT, UsageError } from "./exit.js";
 import { distEntry, write, writeLine, type CliIo } from "./io.js";
 import {
+  installedPlists,
   installJobs,
   jobEnv,
   JOBS,
+  REFRESH_DUE_JOB,
+  retireJobs,
   LAUNCHCTL,
   labelOf,
   launchctl,
@@ -19,19 +24,19 @@ import {
 } from "./launchd.js";
 import { existsSync } from "node:fs";
 
-/** The jobs to install: `--jobs`, else every job (weather dropped when FF_WEATHER_SOURCE=off). */
-export function jobsFor(spec: string | undefined, config: Config): LaunchdJob[] {
-  let jobs: LaunchdJob[];
+/**
+ * The jobs to install: `--jobs`, else every job. A retired job name (an earlier version's per-source
+ * job) is a usage error naming `refresh-due`, which replaced it. FF_WEATHER_SOURCE=off needs no job
+ * change: the tick skips weather itself.
+ */
+export function jobsFor(spec: string | undefined): LaunchdJob[] {
   try {
-    jobs = selectJobs(spec);
+    return selectJobs(spec);
   } catch (e) {
     throw new UsageError(
       `--jobs: ${(e as Error).message}; known: ${JOBS.map((j) => j.name).join(", ")}`,
     );
   }
-  if (spec === undefined && config.weatherSource === "off")
-    jobs = jobs.filter((j) => j.name !== "weather");
-  return jobs;
 }
 
 /** `ff install-launchd`. */
@@ -40,7 +45,9 @@ export async function installLaunchd(
   config: Config,
   opts: { readonly jobs: string | undefined; readonly dryRun: boolean },
 ): Promise<number> {
-  const jobs = jobsFor(opts.jobs, config);
+  const jobs = jobsFor(opts.jobs);
+  // the retired per-source jobs are replaced by the tick: retire them only when it is installed
+  const retiring = jobs.some((j) => j.name === REFRESH_DUE_JOB);
   const entry = distEntry(io.packageRoot);
   const env = jobEnv(config);
   if (opts.dryRun) {
@@ -64,6 +71,14 @@ export async function installLaunchd(
       );
       await writeLine(io.stdout, "");
     }
+    if (retiring)
+      for (const s of await retireJobs({ home: io.home, uid, exec: io.exec, dryRun: true }))
+        await writeLine(
+          io.stdout,
+          s.ok
+            ? `# would retire ${s.detail} (bootout, then remove its plist)`
+            : `# would refuse to retire ${s.detail}: its plist is a symlink`,
+        );
     await writeLine(
       io.stderr,
       `ff install-launchd: dry run — ${String(jobs.length)} job(s), nothing written`,
@@ -105,11 +120,28 @@ export async function installLaunchd(
       `${s.ok ? "ok  " : "FAIL"} ${s.kind} ${s.detail}${s.ok ? "" : ` (launchctl exit ${String(s.code ?? "killed")})`}`,
     );
   }
+  let refused = 0;
+  if (retiring && failed === 0) {
+    for (const s of await retireJobs({
+      home: io.home,
+      uid: io.uid,
+      exec: io.exec,
+      dryRun: false,
+    })) {
+      if (!s.ok) refused++;
+      await writeLine(io.stdout, s.ok ? `retired ${s.detail}` : `FAIL retire ${s.detail}`);
+    }
+  } else if (retiring && installedPlists(io.home).some((p) => p.retired)) {
+    await writeLine(
+      io.stdout,
+      "kept the earlier version's jobs: the new ones did not all load (re-run after fixing it)",
+    );
+  }
   await writeLine(
     io.stdout,
     failed === 0
       ? `installed ${String(jobs.length)} job(s); \`ff doctor\` verifies they are loaded`
       : `${String(failed)} job(s) failed to load`,
   );
-  return failed === 0 ? EXIT.OK : EXIT.ERROR;
+  return failed === 0 && refused === 0 ? EXIT.OK : EXIT.ERROR;
 }

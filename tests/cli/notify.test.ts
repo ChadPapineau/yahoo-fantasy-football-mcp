@@ -7,6 +7,8 @@ import {
   appleScriptString,
   createNotifier,
   failureText,
+  INFO_TEXT_MAX,
+  infoText,
   NOTIFY_RATE_LIMIT_MS,
   NOTIFY_STATE_FILE,
   OSASCRIPT,
@@ -129,5 +131,58 @@ describe("notification text", () => {
 
   it("escapes AppleScript string literals", () => {
     expect(appleScriptString('a"b\\c')).toBe('"a\\"b\\\\c"');
+  });
+});
+
+describe("notifyInfo (a schedule change)", () => {
+  it("is never rate-limited, passes one sanitised line as an AppleScript literal, no-op off macOS", async () => {
+    sb = sandbox({ create: true });
+    const fx = fakeExec();
+    const n = createNotifier({
+      platform: "darwin",
+      exec: fx.exec,
+      clock: fixedClock("2026-12-08T14:05:00Z"),
+      cacheDir: sb.cacheDir,
+    });
+    const text = "NFL schedule changed: CHI@BUF Sat 20:20 → Sun 13:00 ET (+2 more)";
+    for (let i = 0; i < 3; i++) expect(await n.notifyInfo("refresh-due", text)).toBe("shown");
+    expect(fx.calls).toHaveLength(3);
+    expect(fx.calls[0]).toEqual({
+      file: OSASCRIPT,
+      args: [
+        "-e",
+        `display notification ${appleScriptString(text)} with title "fantasy-football-mcp"`,
+      ],
+    });
+    const off = createNotifier({
+      platform: "linux",
+      exec: fx.exec,
+      clock: fixedClock(0),
+      cacheDir: sb.cacheDir,
+    });
+    expect(await off.notifyInfo("refresh-due", text)).toBe("unsupported");
+    expect(fx.calls).toHaveLength(3);
+  });
+
+  it("infoText drops control/format characters and caps the line", () => {
+    expect(infoText("a\u001b[31mb‮c\n d")).toBe("a [31mb c d");
+    expect(infoText("  \u0000 ")).toBeNull();
+    const long = infoText("x".repeat(500));
+    expect(long?.length).toBe(INFO_TEXT_MAX);
+    expect(long?.endsWith("…")).toBe(true);
+  });
+
+  it("a failing osascript or an empty text reports failed", async () => {
+    sb = sandbox({ create: true });
+    const fx = fakeExec(() => ({ code: 1 }));
+    const n = createNotifier({
+      platform: "darwin",
+      exec: fx.exec,
+      clock: fixedClock(0),
+      cacheDir: sb.cacheDir,
+    });
+    expect(await n.notifyInfo("refresh-due", "NFL schedule changed")).toBe("failed");
+    expect(await n.notifyInfo("refresh-due", "\u0007")).toBe("failed");
+    expect(fx.calls).toHaveLength(1);
   });
 });

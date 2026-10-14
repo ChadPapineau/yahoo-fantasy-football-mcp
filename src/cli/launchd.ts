@@ -1,5 +1,5 @@
-// launchd.ts — the Phase-1a launchd jobs and their plists (plan 06 J1, §1.2 data-refresh rows, §2
-// launchd design; plan 03 L4 absolute paths; plan 10 §3.1a "Jobs"). One LaunchAgent per job, generated
+// launchd.ts — the launchd jobs and their plists (plan 06 J1, §2 launchd design, amended by the
+// schedule-driven refresh: one 15-minute tick; plan 03 L4 absolute paths). One LaunchAgent per job, generated
 // here (the "templates in src/cli/launchd/" of plan 06 §2 are this module's data: the job table plus
 // one XML renderer, so every path is resolved, never hand-typed). ProgramArguments =
 // [process.execPath, <abs dist/cli.js>, <subcommand…>]; EnvironmentVariables = non-secret config
@@ -36,82 +36,56 @@ export interface LaunchdJob {
   readonly calendar: readonly CalendarEntry[];
   /** The dataset sources whose refresh_log rows report this job's last run (doctor #11). */
   readonly sources: readonly string[];
+  /** launchd `RunAtLoad`: run once when the job is loaded (login, install, wake from a reboot). */
+  readonly runAtLoad: boolean;
 }
 
-const THU = 4;
-const FRI = 5;
 const SUN = 0;
-const MON = 1;
-const TUE = 2;
-const WED = 3;
-const SAT = 6;
 
 const at = (Hour: number, Minute: number, Weekday?: number): CalendarEntry =>
   Weekday === undefined ? { Hour, Minute } : { Weekday, Hour, Minute };
 
+/** The minutes of every hour the refresh tick fires (UTC quarter-hours in every real time zone). */
+export const TICK_MINUTES: readonly number[] = Object.freeze([0, 15, 30, 45]);
+
+/** The job that keeps every dataset current (`ff refresh due`). */
+export const REFRESH_DUE_JOB = "refresh-due";
+
 /**
- * The 1a jobs (plan 10 §3.1a "Jobs"; times from plan 06 §1.2, local time — NFL kickoffs are Eastern,
- * so on a non-Eastern machine these read as approximations [plan 06 A-2]; every job is season-aware
- * and idempotent, so an extra run costs one 24-byte poll).
+ * The jobs (plan 06 J1 as amended by the schedule-driven refresh). Data refreshes run from ONE tick,
+ * `refresh-due`: every quarter-hour of every hour, plus once at load. Each tick decides from the
+ * loaded NFL schedule what is due (src/config/cadence.ts) and exits in well under a second, with no
+ * network, when nothing is — so no plist names a weekday or a game time, and a flexed, Saturday,
+ * Wednesday, holiday or international game is followed without a new plist. Every real UTC offset
+ * is a multiple of 15 minutes, so the local minutes 0/15/30/45 are UTC quarter-hours everywhere;
+ * launchd's StartCalendarInterval coalesces the ticks missed while asleep into one run at wake
+ * (StartInterval would drop them). Prune and backup stay weekly.
  */
 export const JOBS: readonly LaunchdJob[] = Object.freeze([
   {
-    name: "nflverse-schedules",
-    argv: ["refresh", "nflverse:schedules", "--notify"],
-    description: "refresh nflverse:schedules — every 30 min Thu/Sun/Mon, every 6 h otherwise",
-    calendar: [
-      ...[THU, SUN, MON].flatMap((d) => [
-        { Weekday: d, Minute: 0 },
-        { Weekday: d, Minute: 30 },
-      ]),
-      ...[TUE, WED, FRI, SAT].flatMap((d) => [0, 6, 12, 18].map((h) => at(h, 0, d))),
+    name: REFRESH_DUE_JOB,
+    argv: ["refresh", "due", "--notify"],
+    description:
+      "the refresh tick — every 15 min and at load; refreshes only what the NFL schedule makes due (schedules first)",
+    calendar: TICK_MINUTES.map((Minute) => ({ Minute })),
+    sources: [
+      "nflverse:schedules",
+      "nflverse:injuries",
+      "nflverse:roster_weekly",
+      "nflverse:stats_player_week",
+      "weather:open_meteo",
+      "weather:nws",
     ],
-    sources: ["nflverse:schedules"],
-  },
-  {
-    // Every 6 h, every day (QA-2-035): plan 06's "daily 10:30 + 16:30 Wed–Sat" left 18–24 h gaps
-    // against the 12 h injuries TTL (plan 01 §5.2: "2×/day + Wed–Sat afternoons"), so injuries read
-    // stale ~60 h a week with a healthy job, and one failed run passed the 36 h hard limit (STALE_ONLY).
-    // A 6 h cadence keeps the TTL and hard limit as planned, includes the 10:30 morning run and the
-    // 16:30 practice-report run every day, and holds the TTL through one missed run.
-    name: "nflverse-daily",
-    argv: ["refresh", "nflverse:daily", "--notify"],
-    description:
-      "refresh injuries + roster_weekly — every 6 h (04:30, 10:30, 16:30, 22:30), within the 12 h injuries TTL",
-    calendar: [at(4, 30), at(10, 30), at(16, 30), at(22, 30)],
-    sources: ["nflverse:injuries", "nflverse:roster_weekly"],
-  },
-  {
-    name: "nflverse-stats",
-    argv: ["refresh", "nflverse:stats", "--notify"],
-    description:
-      "refresh stats_player_week — daily 04:30; Sun 13:00/17:00/21:00; 00:30 after Thu/Sun/Mon games",
-    calendar: [
-      at(4, 30),
-      at(13, 0, SUN),
-      at(17, 0, SUN),
-      at(21, 0, SUN),
-      at(0, 30, FRI),
-      at(0, 30, MON),
-      at(0, 30, TUE),
-    ],
-    sources: ["nflverse:stats_player_week"],
-  },
-  {
-    name: "weather",
-    argv: ["refresh", "weather", "--notify"],
-    description:
-      "refresh weather — hourly Wed–Mon for the coming week's open-air games (exits 0 off-season)",
-    calendar: [WED, THU, FRI, SAT, SUN, MON].map((d) => ({ Weekday: d, Minute: 5 })),
-    sources: ["weather:open_meteo", "weather:nws"],
+    runAtLoad: true,
   },
   {
     name: "store-prune",
     argv: ["prune", "--notify"],
     description:
-      "store prune — weekly Sun 03:00 (cache rows past their hard limit, temp debris, old backups)",
+      "store prune — weekly Sun 03:00 (cache rows past their hard limit, old schedule history, temp debris, old backups)",
     calendar: [at(3, 0, SUN)],
     sources: [],
+    runAtLoad: false,
   },
   {
     name: "store-backup",
@@ -119,11 +93,24 @@ export const JOBS: readonly LaunchdJob[] = Object.freeze([
     description: "store backup — weekly Sun 03:10 (consistent backup of store.sqlite; keeps 4)",
     calendar: [at(3, 10, SUN)],
     sources: [],
+    runAtLoad: false,
   },
 ]);
 
 /** Every job name. */
 export const JOB_NAMES: readonly string[] = JOBS.map((j) => j.name);
+
+/**
+ * Job names an earlier version installed and this one replaced (by `refresh-due`). Never reused:
+ * `ff install-launchd` boots out and removes their plists, `ff uninstall` removes them too, and
+ * `ff doctor` row 11 warns while one is installed.
+ */
+export const RETIRED_JOB_NAMES: readonly string[] = Object.freeze([
+  "nflverse-schedules",
+  "nflverse-daily",
+  "nflverse-stats",
+  "weather",
+]);
 
 /** The label of a job. */
 export function labelOf(job: LaunchdJob | string): string {
@@ -145,7 +132,10 @@ export function plistPath(home: string, job: LaunchdJob | string): string {
   return path.join(launchAgentsDir(home), `${labelOf(job)}.plist`);
 }
 
-/** Selects jobs from a comma-separated `--jobs` value; unknown names throw RangeError. */
+/**
+ * Selects jobs from a comma-separated `--jobs` value; unknown names throw RangeError, and a retired
+ * name throws one naming the job that replaced it.
+ */
 export function selectJobs(spec: string | undefined): LaunchdJob[] {
   if (spec === undefined || spec.trim() === "" || spec.trim() === "all") return [...JOBS];
   const names = [
@@ -156,6 +146,11 @@ export function selectJobs(spec: string | undefined): LaunchdJob[] {
         .filter((s) => s !== ""),
     ),
   ];
+  const retired = names.filter((n) => RETIRED_JOB_NAMES.includes(n));
+  if (retired.length > 0)
+    throw new RangeError(
+      `job(s) retired: ${retired.join(", ")} — \`${REFRESH_DUE_JOB}\` now runs every data refresh (use --jobs ${REFRESH_DUE_JOB})`,
+    );
   const unknown = names.filter((n) => !JOB_NAMES.includes(n));
   if (unknown.length > 0)
     throw new RangeError(`unknown job(s): ${unknown.map((n) => n.slice(0, 40)).join(", ")}`);
@@ -236,7 +231,7 @@ export function renderPlist(p: PlistInput): string {
     `${ind(1)}<key>LowPriorityIO</key>`,
     `${ind(1)}<true/>`,
     `${ind(1)}<key>RunAtLoad</key>`,
-    `${ind(1)}<false/>`,
+    `${ind(1)}${p.job.runAtLoad ? "<true/>" : "<false/>"}`,
     `${ind(1)}<key>StartCalendarInterval</key>`,
     `${ind(1)}<array>`,
     ...p.job.calendar.flatMap((c) => [
@@ -303,7 +298,7 @@ export function writePlist(file: string, xml: string): void {
 
 /** One step of an install/uninstall, for printing and for tests. */
 export interface LaunchdStep {
-  readonly kind: "write" | "launchctl" | "remove" | "mkdir";
+  readonly kind: "write" | "launchctl" | "remove" | "mkdir" | "retire";
   readonly detail: string;
   readonly ok: boolean;
   /** Only for failed launchctl calls: its exit code. */
@@ -342,21 +337,67 @@ export async function installJobs(opts: {
   return steps;
 }
 
-/** The plists of ours present in LaunchAgents (known job names only). */
-export function installedPlists(home: string): { job: string; file: string }[] {
+/** One plist of ours in LaunchAgents: a current job's, or a retired job's (`retired`). */
+export interface InstalledPlist {
+  readonly job: string;
+  readonly file: string;
+  readonly retired: boolean;
+}
+
+/** The plists of ours present in LaunchAgents (current and retired job names only). */
+export function installedPlists(home: string): InstalledPlist[] {
   let names: string[];
   try {
     names = readdirSync(launchAgentsDir(home));
   } catch {
     return [];
   }
-  return JOB_NAMES.filter((j) => names.includes(`${labelOf(j)}.plist`)).map((j) => ({
-    job: j,
-    file: plistPath(home, j),
-  }));
+  return [...JOB_NAMES, ...RETIRED_JOB_NAMES]
+    .filter((j) => names.includes(`${labelOf(j)}.plist`))
+    .map((j) => ({ job: j, file: plistPath(home, j), retired: RETIRED_JOB_NAMES.includes(j) }));
 }
 
-/** Boots out and removes every installed plist of ours (plan 03 §8 step 1). */
+/**
+ * Retires the plists of RETIRED_JOB_NAMES (run by `ff install-launchd` once the new jobs are
+ * loaded): `bootout` each (a "not loaded" result is ignored), then remove its plist — never a
+ * symlink, which is refused and left for the user (a failed step). `dryRun` changes nothing and
+ * reports what would happen.
+ */
+export async function retireJobs(opts: {
+  readonly home: string;
+  readonly uid: number;
+  readonly exec: Exec;
+  readonly dryRun: boolean;
+}): Promise<LaunchdStep[]> {
+  const steps: LaunchdStep[] = [];
+  for (const p of installedPlists(opts.home).filter((x) => x.retired)) {
+    const label = labelOf(p.job);
+    let link = false;
+    try {
+      link = lstatSync(p.file).isSymbolicLink();
+    } catch {
+      continue; // gone meanwhile
+    }
+    if (opts.dryRun) {
+      steps.push({ kind: "retire", detail: label, ok: !link });
+      continue;
+    }
+    await opts.exec(LAUNCHCTL, launchctl.bootout(opts.uid, label));
+    if (link) {
+      steps.push({
+        kind: "retire",
+        detail: `${label}: refusing to remove a symlink at ${p.file}`,
+        ok: false,
+      });
+      continue;
+    }
+    rmSync(p.file, { force: true });
+    steps.push({ kind: "retire", detail: label, ok: true });
+  }
+  return steps;
+}
+
+/** Boots out and removes every installed plist of ours, current and retired (plan 03 §8 step 1). */
 export async function removeJobs(opts: {
   readonly home: string;
   readonly uid: number;

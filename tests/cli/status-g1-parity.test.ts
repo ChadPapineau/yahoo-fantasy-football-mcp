@@ -118,8 +118,11 @@ function renderSources(r: StatusReport): string[] {
       message: null,
     },
     sources: r.sources,
+    season: null,
+    schedule: null,
+    tick: null,
     journal: null,
-    launchd: { supported: false, installed: [], missing: [] },
+    launchd: { supported: false, installed: [], missing: [], legacy: [] },
   };
   return renderStatus(full).filter((l) => l.startsWith("→"));
 }

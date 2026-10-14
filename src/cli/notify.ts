@@ -1,4 +1,4 @@
-// notify.ts — the failure notification of a launchd job (plan 06 J2, §2 "Notifications: osascript
+// notify.ts — the failure and informational notifications of a launchd job (plan 06 J2, §2 "Notifications: osascript
 // … via execFile with an argument array; rate-limited per job to one per 6 h for failures"; §3 the
 // macOS-notification channel). The text is server-authored from a fixed vocabulary (job name +
 // error code) — never upstream text — and is passed to AppleScript as an escaped string literal in
@@ -31,12 +31,34 @@ export function failureText(job: string, error: string): string {
   return `${j} failed: ${e} — run \`ff status\``;
 }
 
-/** A notifier. `notifyFailure` never throws and reports whether a notification was shown. */
+/** Longest informational notification text shown (a server-authored line). */
+export const INFO_TEXT_MAX = 200;
+const INFO_UNSAFE_RE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}]+/gu;
+
+/**
+ * The text of an informational notification: control and format characters (escapes, bidi
+ * overrides) become a space and the line is capped at INFO_TEXT_MAX; empty → null (nothing shown).
+ * The callers pass fixed-vocabulary text only (e.g. a schedule change: NFL abbreviations and ET).
+ */
+export function infoText(text: string): string | null {
+  const clean = text.replace(INFO_UNSAFE_RE, " ").replace(/\s+/g, " ").trim();
+  if (clean === "") return null;
+  return clean.length > INFO_TEXT_MAX
+    ? `${clean.slice(0, INFO_TEXT_MAX - 1).replace(/[\uD800-\uDBFF]$/, "")}…`
+    : clean;
+}
+
+/** A notifier. Neither method throws; each reports whether a notification was shown. */
 export interface Notifier {
   notifyFailure(
     job: string,
     error: string,
   ): Promise<"shown" | "rate_limited" | "unsupported" | "failed">;
+  /**
+   * An informational notification (a schedule change): never rate-limited (plan 06 §2 limits
+   * failure notifications only), one per call — the caller collapses a run's changes into one.
+   */
+  notifyInfo(job: string, text: string): Promise<"shown" | "unsupported" | "failed">;
 }
 
 function readState(file: string): Record<string, number> {
@@ -85,6 +107,14 @@ export function createNotifier(opts: {
         // the notification was shown; a lost rate-limit stamp only means a possible repeat
       }
       return "shown";
+    },
+    async notifyInfo(_job, text) {
+      if (opts.platform !== "darwin") return "unsupported";
+      const body = infoText(text);
+      if (body === null) return "failed";
+      const script = `display notification ${appleScriptString(body)} with title ${appleScriptString(NOTIFY_TITLE)}`;
+      const r = await opts.exec(OSASCRIPT, ["-e", script], { timeoutMs: 5_000 });
+      return r.code === 0 ? "shown" : "failed";
     },
   };
 }

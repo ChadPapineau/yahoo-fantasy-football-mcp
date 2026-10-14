@@ -5,7 +5,14 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSy
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { EXIT } from "../../src/cli/exit.js";
-import { LAUNCHCTL, labelOf, launchAgentsDir, plistPath } from "../../src/cli/launchd.js";
+import {
+  JOBS,
+  LAUNCHCTL,
+  labelOf,
+  launchAgentsDir,
+  plistPath,
+  RETIRED_JOB_NAMES,
+} from "../../src/cli/launchd.js";
 import { main } from "../../src/cli/main.js";
 import { executePurge, purgePlan } from "../../src/cli/uninstall.js";
 import { runTempDir } from "../../src/config/paths.js";
@@ -48,6 +55,24 @@ describe("ff uninstall", () => {
     expect(io.out.text).toContain("kept your data");
     expect(io.out.text).toContain("claude mcp remove --scope user fantasy-football-mcp-server");
     expect(io.out.text).toContain("claude_desktop_config.json");
+  });
+
+  it("removes the current jobs' plists and every retired job's plist an earlier version left [upgrade orphans]", async () => {
+    const s = await populated();
+    for (const j of [...JOBS.map((x) => x.name), ...RETIRED_JOB_NAMES])
+      writeFileSync(plistPath(s.home, j), "x");
+    writeFileSync(path.join(launchAgentsDir(s.home), "com.other.agent.plist"), "x");
+    const fx = fakeExec(() => ({ code: 113 })); // "not loaded" is fine
+    const io = makeIo(s, { platform: "darwin", exec: fx.exec, uid: 502 });
+    expect(await main(["uninstall"], io)).toBe(EXIT.OK);
+    for (const j of [...JOBS.map((x) => x.name), ...RETIRED_JOB_NAMES]) {
+      expect(existsSync(plistPath(s.home, j)), j).toBe(false);
+      expect(fx.calls, j).toContainEqual({
+        file: LAUNCHCTL,
+        args: ["bootout", `gui/502/${labelOf(j)}`],
+      });
+    }
+    expect(readdirSync(launchAgentsDir(s.home))).toEqual(["com.other.agent.plist"]);
   });
 
   it("--purge without --yes changes nothing (not even launchd) and exits 2 listing what it would delete", async () => {

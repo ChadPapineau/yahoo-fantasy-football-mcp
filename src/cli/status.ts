@@ -2,7 +2,9 @@
 // J2 "`ff status` is the dashboard", §3 "any source past its hard limit; pending journal rows; jobs
 // not loaded"). Reads only: the store is opened without creating or migrating it. Per source: last
 // success, last error, age judged by the class's basis (stampState), consecutive failures, the
-// attached file. Exit 0 whenever the report was produced; 1 only when the store cannot be read.
+// attached file, the tick's next check and a provider pause; the season and schedule blocks G1 prints
+// (src/domain/league/status-blocks.ts — the same builders, so the two agree). Exit 0 whenever the
+// report was produced; 1 only when the store cannot be read.
 import { lstatSync } from "node:fs";
 import {
   freshnessClass,
@@ -11,6 +13,19 @@ import {
   type DatasetSourceId,
   type FreshnessState,
 } from "../config/freshness.js";
+import type { GameCalendar } from "../config/game-calendar.js";
+import { TOOL_INPUT_WEEK_MAX } from "../config/weeks.js";
+import { scheduleView, type ScheduleView } from "../domain/league/calendar.js";
+import { datasetCoverage } from "../domain/league/coverage.js";
+import {
+  scheduleBlock,
+  seasonBlock,
+  type ScheduleBlock,
+  type SeasonBlock,
+} from "../domain/league/status-blocks.js";
+import { nextTickAt, providerOf, tickDecisionOf } from "../mcp/refresh.js";
+import { ManualLeagueProvider } from "../providers/manual/index.js";
+import { NWS_PROVIDER, OPEN_METEO_PROVIDER } from "../sources/weather/index.js";
 import { datasetFilePath, storePath } from "../config/paths.js";
 import type { Config } from "../config/schema.js";
 import type { RefreshLogRow } from "../domain/analytics/types.js";
@@ -24,7 +39,7 @@ import type { Store, StoreFactory } from "../store/types.js";
 import { VERSION } from "../version.js";
 import { EXIT } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
-import { installedPlists, JOBS } from "./launchd.js";
+import { installedPlists, JOBS, REFRESH_DUE_JOB } from "./launchd.js";
 import type { Logger } from "./log.js";
 import { openExistingStore, type ExistingStore } from "./store-access.js";
 
@@ -51,9 +66,11 @@ export interface SourceStatus {
   /**
    * `never_loaded` when no successful refresh exists; `unreadable` when a successful refresh recorded
    * a current file the server cannot attach — missing, not a regular file, damaged, or another
-   * source's, version's or layout's — as G1 `ff_get_status` reads it (QA-1-038).
+   * source's, version's or layout's — as G1 `ff_get_status` reads it (QA-1-038); `not_published`
+   * when the season in progress is not published upstream yet (a recent season_check) — upstream's
+   * state, never an outage (G1 freshness `not_published`).
    */
-  readonly state: FreshnessState | "never_loaded" | "unreadable";
+  readonly state: FreshnessState | "never_loaded" | "unreadable" | "not_published";
   /** What the class does past its hard limit (`STALE_ONLY` error, or the driver is omitted). */
   readonly beyond_hard: string | null;
   readonly age_s: number | null;
@@ -68,6 +85,22 @@ export interface SourceStatus {
   readonly file_bytes: number | null;
   /** The current file's health (src/sources/dataset-health.ts); null when there is none to check. */
   readonly file_health: DatasetHealth | null;
+  /** When the refresh tick next checks this source (a UTC quarter-hour), as G1 says; null = never. */
+  readonly next_check_at: string | null;
+  /** The provider's 429 / Retry-After pause end, while it lasts. */
+  readonly backoff_until: string | null;
+  /** The season in progress that upstream has not published yet, and when that was checked. */
+  readonly not_published: { readonly season: number; readonly checked_at: string } | null;
+}
+
+/** What `sourceStatus` judges against besides refresh_log (all optional: absent = unknown). */
+export interface SourceJudgement {
+  /** The game calendar the TTL is judged by (the schedule-driven rule). */
+  readonly cal?: GameCalendar;
+  /** A recent season_check saying the season in progress is not published upstream. */
+  readonly notPublished?: { readonly season: number; readonly checked_at: string } | null;
+  readonly nextCheckAt?: string | null;
+  readonly backoffUntil?: string | null;
 }
 
 /** Judges one source from its refresh_log rows. */
@@ -79,8 +112,10 @@ export function sourceStatus(
   cacheDir: string,
   nowMs: number,
   checkFile: DatasetCheck = checkDatasetFile,
+  judge: SourceJudgement = {},
 ): SourceStatus {
   const cls = freshnessClass(SOURCE_REGISTRY[source].freshness);
+  const notPublished = judge.notPublished ?? null;
   let fileBytes: number | null = null;
   try {
     const st = lstatSync(datasetFilePath(cacheDir, source));
@@ -98,11 +133,14 @@ export function sourceStatus(
     file_present: fileBytes !== null,
     file_bytes: fileBytes,
     file_health: null,
+    next_check_at: judge.nextCheckAt ?? null,
+    backoff_until: judge.backoffUntil ?? null,
+    not_published: notPublished,
   };
   if (current === null) {
     return {
       ...base,
-      state: "never_loaded",
+      state: notPublished === null ? "never_loaded" : "not_published",
       age_s: null,
       basis_at: null,
       file_version: null,
@@ -119,6 +157,7 @@ export function sourceStatus(
       checked_at: current.checked_at,
     },
     nowMs,
+    judge.cal,
   );
   // never "fresh" for a file the server cannot attach (QA-1-038): the same checks the refresh runs.
   // A refreshed source whose file is gone or not a regular file is unreadable too, never "never
@@ -127,7 +166,7 @@ export function sourceStatus(
   return {
     ...base,
     file_health: health,
-    state: health !== "ok" ? "unreadable" : judged.state,
+    state: health !== "ok" ? "unreadable" : notPublished !== null ? "not_published" : judged.state,
     age_s: judged.age_s,
     basis_at: judged.basis_at,
     file_version: current.file_version,
@@ -137,20 +176,99 @@ export function sourceStatus(
   };
 }
 
-/** Every source's status from an open store. */
-export function sourceStatuses(store: Store, config: Config, nowMs: number): SourceStatus[] {
+/** The forecast horizon of the configured weather provider, in hours. */
+function weatherHorizonHours(id: DatasetSourceId): number {
+  return id === "weather:nws" ? NWS_PROVIDER.horizonHours : OPEN_METEO_PROVIDER.horizonHours;
+}
+
+/**
+ * Every source's status from an open store, judged as G1 judges it: the TTL by the schedule's
+ * game calendar, the season in progress by its coverage (a recent `not_published` season_check reads
+ * as such), the tick's next check and the provider's pause.
+ */
+export function sourceStatuses(
+  store: Store,
+  config: Config,
+  nowMs: number,
+  view: ScheduleView = scheduleView(store.datasets.schedules, nowMs),
+): SourceStatus[] {
   const rl = store.repos.refreshLog;
   const current = rl.current();
-  return configuredSources(config).map((s) =>
-    sourceStatus(
+  const ports = {
+    refreshLog: rl,
+    providerBackoff: store.repos.providerBackoff,
+    storeStats: () => store.stats(),
+  };
+  return configuredSources(config).map((s) => {
+    const cur = current.find((r) => r.source === s && r.ok) ?? null;
+    const cls = freshnessClass(SOURCE_REGISTRY[s].freshness);
+    const season = view.phase.season;
+    const coverage = s.startsWith("weather:")
+      ? null
+      : datasetCoverage({
+          stamp:
+            cur?.file_version == null
+              ? null
+              : {
+                  source: s,
+                  as_of: cur.release_updated_at ?? cur.finished_at,
+                  fetched_at: cur.finished_at,
+                  checked_at: cur.checked_at,
+                  freshness_class: cls.id,
+                  file_version: cur.file_version,
+                  seasons: cur.seasons,
+                },
+          season,
+          phase: view.phase,
+          check: store.repos.seasonChecks.latest(s, season),
+          hardLimitSeconds: cls.hardLimitSeconds,
+          nowMs,
+        });
+    const decision = tickDecisionOf(ports, s, view.calendar, nowMs, weatherHorizonHours(s));
+    const at = decision === null ? null : decision.due ? nowMs : decision.next_at_ms;
+    const backoff = store.repos.providerBackoff.get(providerOf(s));
+    const backoffMs = backoff === null ? Number.NaN : Date.parse(backoff.until_at);
+    return sourceStatus(
       s,
-      current.find((r) => r.source === s && r.ok) ?? null,
+      cur,
       rl.latest(s),
       rl.consecutiveFailures(s),
       config.cacheDir,
       nowMs,
-    ),
-  );
+      checkDatasetFile,
+      {
+        cal: view.calendar,
+        notPublished:
+          coverage?.state === "not_published" && coverage.checked_at !== null
+            ? { season, checked_at: coverage.checked_at }
+            : null,
+        nextCheckAt: at === null ? null : new Date(nextTickAt(at)).toISOString(),
+        backoffUntil:
+          Number.isFinite(backoffMs) && backoffMs > nowMs
+            ? new Date(backoffMs).toISOString()
+            : null,
+      },
+    );
+  });
+}
+
+/** How far back the status surfaces list kickoff changes (the notification horizon, as G1). */
+export const STATUS_CHANGES_WINDOW_MS = 14 * 86_400_000;
+/** The most change rows the status surfaces read. */
+export const STATUS_CHANGES_MAX_ROWS = 200;
+
+/** The league file's season, or null when there is no readable league file. */
+export function leagueSeasonOf(io: CliIo, config: Config, log: Logger): number | null {
+  try {
+    return new ManualLeagueProvider({
+      file: config.leagueFile,
+      clock: io.clock,
+      logger: log,
+      requirePrivate: false,
+    }).load().data.season;
+  } catch {
+    return null;
+  }
 }
 
 /** The whole report (`--json` shape; the text view renders the same object). */
@@ -177,6 +295,16 @@ export interface StatusReport {
     readonly message: string | null;
   };
   readonly sources: readonly SourceStatus[];
+  /** Where the NFL season is (the same block as G1's `season`); null when the store is not open. */
+  readonly season: SeasonBlock | null;
+  /** The game calendar and recent kickoff changes (G1's `schedule`); null when the store is not open. */
+  readonly schedule: (ScheduleBlock & { readonly next_check_at: string | null }) | null;
+  /** The refresh tick's last run (job_run), when recorded. */
+  readonly tick: {
+    readonly last_run_at: string;
+    readonly exit: number;
+    readonly summary: string | null;
+  } | null;
   readonly journal: {
     readonly counts: Readonly<Record<string, number>>;
     readonly oldest_pending_age_s: number | null;
@@ -185,6 +313,8 @@ export interface StatusReport {
     readonly supported: boolean;
     readonly installed: readonly string[];
     readonly missing: readonly string[];
+    /** Plists of retired jobs still installed (`ff install-launchd` retires them). */
+    readonly legacy: readonly string[];
   };
 }
 
@@ -257,12 +387,39 @@ export function collectStatus(
   const now = io.clock.nowMs();
   const ex = openExistingStore(config, io.clock, log, factory);
   try {
+    const view = ex.kind === "open" ? scheduleView(ex.store.datasets.schedules, now) : null;
     const sources =
-      ex.kind === "open"
-        ? sourceStatuses(ex.store, config, now)
+      ex.kind === "open" && view !== null
+        ? sourceStatuses(ex.store, config, now, view)
         : configuredSources(config).map((s) =>
             sourceStatus(s, null, null, 0, config.cacheDir, now),
           );
+    let season: StatusReport["season"] = null;
+    let schedule: StatusReport["schedule"] = null;
+    let tick: StatusReport["tick"] = null;
+    if (ex.kind === "open" && view !== null) {
+      const since = new Date(now - STATUS_CHANGES_WINDOW_MS).toISOString();
+      season = seasonBlock(
+        view,
+        leagueSeasonOf(io, config, log),
+        ex.store.repos.seasonChecks.all(),
+        now,
+      );
+      schedule = {
+        ...scheduleBlock(
+          view,
+          ex.store.repos.scheduleChanges.recent(since, STATUS_CHANGES_MAX_ROWS),
+          now,
+        ),
+        next_check_at:
+          sources.find((x) => x.source === "nflverse:schedules")?.next_check_at ?? null,
+      };
+      const run = ex.store.repos.jobRuns.list().find((j) => j.job === REFRESH_DUE_JOB);
+      tick =
+        run === undefined
+          ? null
+          : { last_run_at: run.last_run_at, exit: run.exit, summary: run.summary };
+    }
     const journal =
       ex.kind === "open"
         ? {
@@ -272,7 +429,9 @@ export function collectStatus(
             ),
           }
         : null;
-    const installed = installedPlists(io.home).map((p) => p.job);
+    const plists = installedPlists(io.home);
+    const installed = plists.filter((p) => !p.retired).map((p) => p.job);
+    const legacy = plists.filter((p) => p.retired).map((p) => p.job);
     return {
       version: VERSION,
       node: io.nodeVersion,
@@ -288,11 +447,15 @@ export function collectStatus(
       },
       store: storeBlock(ex, config),
       sources,
+      season,
+      schedule,
+      tick,
       journal,
       launchd: {
         supported: io.platform === "darwin",
         installed,
         missing: JOBS.map((j) => j.name).filter((j) => !installed.includes(j)),
+        legacy,
       },
     };
   } finally {
@@ -315,7 +478,57 @@ const STATE_LABEL: Record<SourceStatus["state"], string> = {
   expired: "EXPIRED",
   never_loaded: "NEVER LOADED",
   unreadable: "UNREADABLE",
+  not_published: "not published",
 };
+
+/** The season and schedule lines of the dashboard (from the same blocks as G1). */
+export function renderSeason(r: StatusReport): string[] {
+  const out: string[] = [];
+  const s = r.season;
+  if (s !== null) {
+    const week = s.week === null ? "" : ` week ${String(s.week)}`;
+    const league =
+      s.league_season === null
+        ? "no league file"
+        : `league season ${String(s.league_season)}${s.league_matches === false ? " — NOT the NFL season in progress: run the onboard Skill's new-season step" : ""}`;
+    out.push(
+      `season  ${String(s.nfl_season)} ${s.phase}${week} (${s.basis})${s.next_kickoff === null ? "" : `; next kickoff ${s.next_kickoff}`}; ${league}`,
+    );
+    for (const n of s.not_published)
+      out.push(
+        `        ${n.source} ${String(n.season)}: not published upstream yet (checked ${n.checked_at}) — upstream's state; nothing to repair`,
+      );
+    for (const v of s.reference_past_vintage)
+      out.push(
+        `        reference table ${v.id} is verified through ${String(v.verified_through_season)}; it still works, re-check it`,
+      );
+    if (s.week_bound_exceeded)
+      out.push(
+        `        a loaded season runs past week ${String(TOOL_INPUT_WEEK_MAX)}, the tool-input bound: tools cannot ask for its last weeks`,
+      );
+  }
+  const c = r.schedule;
+  if (c !== null) {
+    out.push(
+      `schedule calendar ${c.calendar}${c.fallback_reason === null ? "" : ` (${c.fallback_reason}: every hour is treated as a game window)`}; ${c.in_window ? "in a game window" : "outside game windows"}${c.next_check_at === null ? "" : `; next check ${c.next_check_at}`}`,
+    );
+    for (const x of c.recent_changes)
+      out.push(
+        `        ${x.game} ${String(x.season)} week ${String(x.week)} ${x.kind}: ${x.old ?? "—"} → ${x.new ?? "—"} (detected ${x.detected_at})`,
+      );
+    if (c.recent_changes_more > 0)
+      out.push(`        … ${String(c.recent_changes_more)} more schedule change(s)`);
+    for (const t of c.tentative_weeks)
+      out.push(
+        `        ${String(t.season)} week ${String(t.week)} kickoffs are tentative (${t.reason})${t.until === null ? "" : ` until ${t.until}`}`,
+      );
+  }
+  if (r.tick !== null)
+    out.push(
+      `tick    last run ${r.tick.last_run_at} (exit ${String(r.tick.exit)})${r.tick.summary === null ? "" : ` — ${r.tick.summary}`}`,
+    );
+  return out;
+}
 
 /** Renders the text dashboard. */
 export function renderStatus(r: StatusReport): string[] {
@@ -329,6 +542,8 @@ export function renderStatus(r: StatusReport): string[] {
       ? `store   schema v${String(s.schema_version)}  ${String(Math.round((s.size_bytes ?? 0) / 1024))} KB  busy cache misses ${String(s.cache_misses_busy)}`
       : `store   ${s.state.toUpperCase()}: ${s.message ?? ""}`,
   );
+  const seasonLines = renderSeason(r);
+  if (seasonLines.length > 0) out.push(...seasonLines);
   out.push("");
   out.push("source                       state         age    version / rows            failures");
   for (const src of r.sources) {
@@ -349,6 +564,14 @@ export function renderStatus(r: StatusReport): string[] {
     out.push(`→ run \`ff refresh all\` (${String(red.length)} source(s) expired or never loaded)`);
   for (const x of r.sources.filter((y) => y.state === "unreadable"))
     out.push(`→ ${x.source}: dataset file unreadable — run \`ff refresh ${x.source}\``);
+  for (const x of r.sources)
+    if (x.state === "not_published" && x.not_published !== null)
+      out.push(
+        `→ ${x.source}: season ${String(x.not_published.season)} not published upstream yet (checked ${x.not_published.checked_at}) — upstream's state, not a failure`,
+      );
+  for (const x of r.sources)
+    if (x.backoff_until !== null)
+      out.push(`→ ${x.source}: upstream asked for a pause; next try after ${x.backoff_until}`);
   if (r.journal !== null) {
     const pending =
       (r.journal.counts.prepared ?? 0) +
@@ -359,12 +582,18 @@ export function renderStatus(r: StatusReport): string[] {
   }
   out.push("");
   if (!r.launchd.supported)
-    out.push("launchd: not available on this platform (schedule `ff refresh` yourself)");
+    out.push(
+      "launchd: not available on this platform (schedule `ff refresh due` every 15 min with systemd or cron)",
+    );
   else if (r.launchd.installed.length === 0)
     out.push("launchd: no jobs installed — `ff install-launchd`");
   else
     out.push(
       `launchd: ${String(r.launchd.installed.length)}/${String(r.launchd.installed.length + r.launchd.missing.length)} jobs installed${r.launchd.missing.length > 0 ? ` (missing: ${r.launchd.missing.join(", ")})` : ""} — \`ff doctor\` checks they are loaded`,
+    );
+  if (r.launchd.legacy.length > 0)
+    out.push(
+      `launchd: an earlier version's jobs are still installed (${r.launchd.legacy.join(", ")}) — \`ff install-launchd\` replaces them with refresh-due`,
     );
   for (const w of r.config.warnings) out.push(`warning: ${w}`);
   return out;
