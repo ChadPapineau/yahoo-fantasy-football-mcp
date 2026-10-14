@@ -29,8 +29,16 @@ with their re-check time; (3) the newest data — every answer revalidates its s
 bounded, single-flight `ff refresh --on-demand` child (6 s; 15 s to repair) while the server process
 stays network-free, and a season upstream has not published yet reads `not_published`, never an
 outage; (4) game days from the schedule data (QA-2-037, decided and fixed). QA-2-062, the
-lineup-exclude property failure the dependency round found, is fixed. Records: the QA register's
-§ Season and freshness build (SF-01 to SF-26), `CHANGELOG.md`, plans 01–10 amended (plan
+lineup-exclude property failure the dependency round found, is fixed. A verification round on the
+build found and fixed 14 more (SF-27 to SF-40, `013830d` … `28938b9`): a season upstream has not
+published no longer escapes the 14-minute floor (it was re-polled every quarter-hour for months and
+starved the answer-time spawn cap), the floor counts from each run's start, a transient spawn error
+backs off instead of disabling answer-time refresh (G1 `on_demand` now says when it is disabled), a
+locked child joins the other run, a week move marks logged recs `moved`, the next season's schedule
+before its release is `not_published` (never an emptied schedules file), a league file without
+`end_week` ends at its season's `last_reg_week − 1`, international open-air venues keep their
+weather past the venue vintage, and the last literal week bounds are gone. Records: the QA
+register's § Season and freshness build (SF-01 to SF-40), `CHANGELOG.md`, plans 01–10 amended (plan
 `changelog.md`). Merging is the owner's decision.
 
 Owner's next steps, in order:
@@ -49,11 +57,8 @@ Owner's next steps, in order:
    (a server started before the upgrade turns its answer-time refresh off and says so).
    A new install: README § Getting started (`print-config` → add to Claude, copy the Skills,
    `ff refresh all`, `/onboard`, `ff install-launchd`).
-3. **One wiring left open by the build** (a file no part of it owned): `src/providers/manual/provider.ts`
-   should call `normalizeLeague(parsed.data, { lastRegularWeek: lastRegularWeek(scheduleView(…).schedule(season)) })`,
-   include that value in its league cache key, and surface `ManualLeagueData.warnings` in
-   `ff_get_league`. Until then a league file without `end_week` gets week 17 (the named fallback,
-   right for an 18-week season); the onboard Skill asks for the week instead of relying on it.
+3. *(closed 2026-10-14, SF-34)* The league `end_week` default now comes from the league season's
+   schedule (`last_reg_week − 1`), and its fallback's warning reaches every tool that reads the league.
 4. **Owner decisions, each with a recommendation** (register § Open after round 2 has the evidence
    and reopen triggers):
    - **QA-1-080 with QA-2-050** — E2's truncation contract for lineups deeper than about 14 starting

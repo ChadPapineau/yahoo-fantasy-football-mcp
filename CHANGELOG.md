@@ -150,7 +150,8 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
   `refresh_failed` variants.
 - Week bounds come from each season's schedule (a structural bound of 30 in the data layer); the
   tool-input bound stays 22 under tool contract 1, flagged by doctor row 23 and G1 when a schedule
-  passes it. A league file without `end_week` keeps the named fallback of week 17 for now.
+  passes it. A league file without `end_week` ends one week before its season's last regular week
+  (the named fallback, week 17, only while that season's schedule is not loaded, with a warning).
 - Analytics no longer assume an 18- or 22-week season: input freshness is judged under the game
   calendar (`collectInputs(stamps, clock, cal)`); the trailing window's prior-season games are that
   season's own regular weeks (never a postseason week), with the assumption "the <S−1> schedule is
@@ -227,6 +228,52 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
   lineup (the solver's tie-break chose which entrant took which freed seat): the made changes are now
   chosen canonically (largest made gain, then the highest sum of made-change p10s, then a fixed
   key/seat order) and lineup totals are summed in `player_key` order.
+- **The season-fresh verification round (2026-10-14, SF-27 to SF-40 in the QA register; each fix
+  has a regression test, mutation-checked):**
+  - A run that found its season unpublished upstream (injuries from the May schedule release to the
+    first report) wrote only `season_check` rows, which the 14-minute floor did not read: the tick
+    re-polled it every quarter-hour (about 190 GitHub requests a day for months), every answer
+    reading injuries spawned a child that polled it again, and those spawns used up the hourly cap
+    so the schedules revalidation itself was `throttled`. A season check is now an attempt; such a
+    season is re-checked at its phase cadence from that attempt (2 h around games, 6 h otherwise),
+    never by a repair every tick, never by the TTL guard on another season's file, and never waited
+    on at answer time (SF-27).
+  - The 14-minute floor was measured from the end of a run, so a run ending more than a minute after
+    its quarter-hour left the next tick `min_gap` (the pregame 15-minute schedules cadence became
+    30): a publish's `refresh_log.started_at`, an unchanged check's `checked_at` and every
+    `season_check` now carry the run's start (SF-28).
+  - Answer time: a transient spawn error (EAGAIN, EMFILE, ENOMEM) turned answer-time refresh off for
+    the life of the server; only a missing or non-executable binary or a sandbox refusal does now —
+    any other fails that call (`failed`/`spawn` with its retry time) and holds new children back
+    15 min (`backoff`/`spawn`) (SF-29). G1's `on_demand` check reported the configured mode after
+    the server had turned the refresh off; it now reports `disabled_spawn` / `disabled_version` as
+    not ok (SF-30). A child that found the run lock taken (the tick starting at its quarter-hour)
+    answered `joined` at once; it now joins that run within the budget, so the answer usually
+    carries the new release (SF-31).
+  - A recommendation whose lock came from a game moved to another week read `unknown`, never
+    `moved`, because the diff files both of the move's rows under the new week (SF-32).
+  - The next season's schedule before its release: `games.parquet` holds every season, so S+1 was
+    copied as an empty season, never recorded, and the tools' hint asked for `ff refresh
+    nflverse:schedules --seasons S+1` — which published a schedules file with no game, dropping
+    every season. S+1 is now recorded `not_published` (the tools then say `season_not_published`),
+    a schedules file without a game is never published, a manual `--seasons` run adds to the
+    seasons the file holds, and the hint asks for `--seasons` only for a past season (SF-33).
+  - A league file without `end_week` always ended at week 17: the provider now passes the league
+    season's last regular week (`last_reg_week − 1`), re-normalises when that schedule arrives, and
+    the fallback's warning reaches every tool that reads the league (SF-34).
+  - Past the venue table's vintage the game row's roof won for every venue, so the open-air MCG,
+    Stade de France and Allianz Arena (nflverse: `dome`) lost their weather; a venue whose roof
+    cannot change (a fixed dome, an open-air venue abroad) now keeps its physical roof in every
+    season, one rule for the reader and the weather sources (SF-35).
+  - The tools' week input, the `ff://rec/week/{week}` resource and `ff_get_league`'s weeks list
+    used a literal 22, the manual provider read weeks 1–22 only, and D2's base-rate note named its
+    seasons in a string: all read `TOOL_INPUT_WEEK_MAX`, `ALL_WEEK_INDEXES` and the reference
+    registry now (SF-36).
+  - Tests: the politeness property reads a simulated store through the production `sourceStateOf`
+    with not-published attempts; the launchd replay models 0–120 s runs; the rollover end-to-end
+    publishes injuries, rosters and stats as upstream does and holds D2 and E1–E3, E5 to "never
+    `STALE_ONLY`"; the on-demand path's kickoff-change hook and the answer-time repair of an expired
+    required file are covered (SF-37 to SF-40).
 - Two concurrent refreshes of one source both downloaded; a 429 was recorded as `network` and its
   `Retry-After` ignored; weather re-fetched every venue on every run; stats post-game runs fired only
   after Thursday, Sunday and Monday games; G1 `jobs[]` was always empty; a renamed or removed

@@ -13,7 +13,7 @@ Every data tool first checks its NFL data against upstream and waits a few secon
 
 - `updated` or `revalidated` — the answer uses the newest release; nothing to say.
 - `in_progress` — the refresh was still running when the answer was given: the warning names the release the answer used. When the decision is close (a coin flip, or a lock within the hour), say so and ask the same question again about a minute later — once; that re-ask is allowed by the re-fetch rules below.
-- `failed`, `backoff`, `throttled` — the answer uses the stored release, named in the warning with its age. Repeat the warning; do not retry in a loop. A warning that says to restart the client means the installed `ff` was upgraded under the running server: ask the user to restart the client.
+- `failed`, `backoff`, `throttled` — the answer uses the stored release, named in the warning with its age. Repeat the warning; do not retry in a loop. A warning that says to restart the client means the installed `ff` was upgraded under the running server: ask the user to restart the client. Code `spawn` with a `next_retry_at` is a passing limit of the machine (the server tries again then); without one — or when `ff_get_status` `checks[]` shows `on_demand` not ok (`disabled_spawn`, `disabled_version`) — answers are no longer re-checked until the client restarts: say so.
 - `joined`, `skipped` — another refresh was running, or none was needed.
 
 `STALE_ONLY` carries a reason in its message: a refresh still running (retryable — ask once more a minute later), a refresh that failed (the hint names the code; `ff refresh <source>` in a terminal shows why, `ff doctor` says what is wrong), or a season upstream has not published yet (upstream's state — never suggest `ff refresh` for it).
