@@ -11,6 +11,7 @@ import { pastVintage, type VintageWarning } from "../../config/reference-vintage
 import { TOOL_INPUT_WEEK_MAX } from "../../config/weeks.js";
 import type { ScheduleChange, ScheduleChangeKind, SeasonCheckRow } from "../analytics/types.js";
 import type { ScheduleView } from "./calendar.js";
+import { isRecentCheck } from "./coverage.js";
 import { matchupLabel, type TentativeWeek } from "./kickoff-status.js";
 import type { SeasonPhaseName } from "./season.js";
 import type { IsoInstant, Week } from "./types.js";
@@ -56,12 +57,16 @@ export function seasonBlock(
 ): SeasonBlock {
   const p = view.phase;
   const notPublished = checks
-    .filter((c) => {
-      if (c.status !== "not_published" || c.season !== p.season) return false;
-      const at = Date.parse(c.checked_at);
-      const hard = freshnessClass(SOURCE_REGISTRY[c.source].freshness).hardLimitSeconds;
-      return Number.isFinite(at) && (hard === null || nowMs - at <= hard * 1000);
-    })
+    .filter(
+      (c) =>
+        c.status === "not_published" &&
+        c.season === p.season &&
+        isRecentCheck(
+          c,
+          freshnessClass(SOURCE_REGISTRY[c.source].freshness).hardLimitSeconds,
+          nowMs,
+        ),
+    )
     .sort((a, b) => a.source.localeCompare(b.source) || a.season - b.season)
     .slice(0, NOT_PUBLISHED_MAX)
     .map((c) => Object.freeze({ source: c.source, season: c.season, checked_at: c.checked_at }));

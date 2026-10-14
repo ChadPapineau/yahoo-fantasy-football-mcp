@@ -22,6 +22,21 @@ export interface Coverage {
   readonly checked_at: IsoInstant | null;
 }
 
+/**
+ * Whether a `not_published` season check is recent enough to trust: checked within the class's hard
+ * limit (any age when the class has none). An unreadable instant is never recent.
+ */
+export function isRecentCheck(
+  check: SeasonCheckRow,
+  hardLimitSeconds: number | null,
+  nowMs: number,
+): boolean {
+  const at = Date.parse(check.checked_at);
+  return (
+    Number.isFinite(at) && (hardLimitSeconds === null || nowMs - at <= hardLimitSeconds * 1000)
+  );
+}
+
 /** The coverage of `season` by a source's attached file (§3.3). */
 export function datasetCoverage(i: {
   readonly stamp: DatasetStamp | null;
@@ -42,14 +57,9 @@ export function datasetCoverage(i: {
     check !== null &&
     check.season === season &&
     check.status === "not_published" &&
-    (stamp === null || check.source === stamp.source)
-  ) {
-    const at = Date.parse(check.checked_at);
-    const recent =
-      Number.isFinite(at) &&
-      (i.hardLimitSeconds === null || i.nowMs - at <= i.hardLimitSeconds * 1000);
-    if (recent)
-      return Object.freeze({ state: "not_published", season, checked_at: check.checked_at });
-  }
+    (stamp === null || check.source === stamp.source) &&
+    isRecentCheck(check, i.hardLimitSeconds, i.nowMs)
+  )
+    return Object.freeze({ state: "not_published", season, checked_at: check.checked_at });
   return Object.freeze({ state: "missing", season, checked_at: null });
 }

@@ -25,6 +25,20 @@ const msOf = (v: string | null): number | null => {
 };
 const isoOf = (ms: number): IsoInstant => new Date(ms).toISOString();
 
+/** The most recently detected of `rows` (rows with an unreadable instant rank last), or null. */
+function newestDetected(rows: readonly ScheduleChange[]): ScheduleChange | null {
+  let best: ScheduleChange | null = null;
+  let bestMs = Number.NEGATIVE_INFINITY;
+  for (const r of rows) {
+    const t = msOf(r.detected_at) ?? Number.NEGATIVE_INFINITY;
+    if (best === null || t > bestMs) {
+      best = r;
+      bestMs = t;
+    }
+  }
+  return best;
+}
+
 const UNKNOWN: LockCheck = Object.freeze({
   status: "unknown",
   old_lock: null,
@@ -34,8 +48,9 @@ const UNKNOWN: LockCheck = Object.freeze({
 
 /**
  * The lock mark of one recommendation (§5.4): `unknown` when it has no deadline or the week has no
- * games (for its subject teams, when known); `moved` when a kickoff/gameday/week/removed change of its season-week has the rec's deadline
- * as its old value, or when the deadline matches no current kickoff of the week's games involving the
+ * games (for its subject teams, when known); `moved` when a kickoff/gameday/week/removed change of
+ * its season-week (of a game of its subject teams, when known) has the rec's deadline as its old
+ * value, or when the deadline matches no current kickoff of the week's games involving the
  * rec's subject teams (all games when the teams are unknown — pass null for a weekly-lock league,
  * whose deadline is the week's first kickoff); else `current`.
  */
@@ -54,17 +69,16 @@ export function lockCheck(
   if (deadline === null || weekGames.length === 0) return UNKNOWN;
   const old = isoOf(deadline);
 
-  const hits = changes
-    .filter(
-      (c) =>
-        c.season === rec.season &&
-        c.week === rec.week &&
-        MOVE_KINDS.has(c.kind) &&
-        msOf(c.old_value) === deadline,
-    )
-    .sort((a, b) => (msOf(b.detected_at) ?? 0) - (msOf(a.detected_at) ?? 0));
-  const hit = hits[0];
-  if (hit !== undefined) {
+  const teams = rec.subject_teams;
+  const involves = (x: { readonly away: NflTeam; readonly home: NflTeam }): boolean =>
+    teams === null || teams.has(x.away) || teams.has(x.home);
+  const ofWeek = changes.filter(
+    (c) => c.season === rec.season && c.week === rec.week && involves(c),
+  );
+  const hit = newestDetected(
+    ofWeek.filter((c) => MOVE_KINDS.has(c.kind) && msOf(c.old_value) === deadline),
+  );
+  if (hit !== null) {
     const next = hit.kind === "kickoff" ? msOf(hit.new_value) : null;
     return Object.freeze({
       status: "moved",
@@ -74,12 +88,8 @@ export function lockCheck(
     });
   }
 
-  const teams = rec.subject_teams;
   const games = weekGames.filter(
-    (g) =>
-      g.season === rec.season &&
-      g.week === rec.week &&
-      (teams === null || teams.has(g.away) || teams.has(g.home)),
+    (g) => g.season === rec.season && g.week === rec.week && involves(g),
   );
   if (games.length === 0) return UNKNOWN; // none of the subject teams plays that week
   const kickoffs = games.map((g) => msOf(g.kickoff)).filter((k): k is number => k !== null);
@@ -88,14 +98,11 @@ export function lockCheck(
   // No current kickoff matches: the earliest kickoff still ahead of the recording is the new lock.
   const recorded = msOf(rec.recorded_at) ?? Number.NEGATIVE_INFINITY;
   const ahead = kickoffs.filter((k) => k >= recorded).sort((a, b) => a - b);
-  const newest = changes
-    .filter((c) => c.season === rec.season && c.week === rec.week)
-    .map((c) => c.detected_at)
-    .sort((a, b) => (msOf(b) ?? 0) - (msOf(a) ?? 0));
+  const first = ahead[0];
   return Object.freeze({
     status: "moved",
     old_lock: old,
-    new_lock: ahead[0] === undefined ? null : isoOf(ahead[0]),
-    detected_at: newest[0] ?? null,
+    new_lock: first === undefined ? null : isoOf(first),
+    detected_at: newestDetected(ofWeek)?.detected_at ?? null,
   });
 }

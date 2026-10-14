@@ -37,7 +37,7 @@ export const PLACEHOLDER_MIN_GAMES = 4;
 export const SCHEDULE_WARNING_MAX = 3;
 /** Kickoff changes older than this are not repeated in tool warnings. */
 export const SCHEDULE_WARNING_LOOKBACK_MS = 7 * 86_400_000;
-/** The cap on any one warning line. */
+/** The cap on any one warning line (met by construction: fixed vocabulary and bounded labels). */
 export const SCHEDULE_WARNING_MAX_CHARS = 400;
 
 const iso = (ms: number): IsoInstant => new Date(ms).toISOString();
@@ -132,10 +132,10 @@ export function tentativeWeeks(
     byWeek.set(g.week, list);
   }
   const out: TentativeWeek[] = [];
-  for (const week of [...byWeek.keys()].sort((a, b) => a - b)) {
+  for (const [week, weekGames] of [...byWeek.entries()].sort((a, b) => a[0] - b[0])) {
     let best: TentativeReason | null = null;
     let until: number | null = null;
-    for (const g of byWeek.get(week) ?? []) {
+    for (const g of weekGames) {
       const st = kickoffStatus(g, { nowMs, schedule, placeholders });
       if (st.reason === null) continue;
       if (best === null || REASON_RANK[st.reason] < REASON_RANK[best]) best = st.reason;
@@ -183,8 +183,6 @@ const detectedLabel = (v: string): string => {
   const ms = Date.parse(v);
   return Number.isFinite(ms) ? iso(ms).replace(/\.000Z$/, "Z") : "unknown";
 };
-const cap = (s: string): string =>
-  s.length <= SCHEDULE_WARNING_MAX_CHARS ? s : `${s.slice(0, SCHEDULE_WARNING_MAX_CHARS - 1)}…`;
 
 /** `CHI@BUF` (NFL abbreviations from the typed row). */
 export function matchupLabel(c: { readonly away: NflTeam; readonly home: NflTeam }): string {
@@ -197,29 +195,17 @@ export function kickoffChangeWarning(c: ScheduleChange): string {
   const detected = `(detected ${detectedLabel(c.detected_at)})`;
   switch (c.kind) {
     case "kickoff":
-      return cap(
-        `kickoff changed for ${game}: ${easternLabel(c.old_value)} → ${easternLabel(c.new_value)} ${detected}; lock times use the new kickoff`,
-      );
+      return `kickoff changed for ${game}: ${easternLabel(c.old_value)} → ${easternLabel(c.new_value)} ${detected}; lock times use the new kickoff`;
     case "gameday":
-      return cap(
-        `game date changed for ${game}: ${easternDayLabel(c.old_value)} → ${easternDayLabel(c.new_value)} ${detected}; lock times use the new date`,
-      );
+      return `game date changed for ${game}: ${easternDayLabel(c.old_value)} → ${easternDayLabel(c.new_value)} ${detected}; lock times use the new date`;
     case "venue":
-      return cap(
-        `venue changed for ${game}: ${venueLabel(c.old_value)} → ${venueLabel(c.new_value)} ${detected}`,
-      );
+      return `venue changed for ${game}: ${venueLabel(c.old_value)} → ${venueLabel(c.new_value)} ${detected}`;
     case "added":
-      return cap(
-        `game added: ${game} at ${easternLabel(c.new_value)} ${detected}; lock times include it`,
-      );
+      return `game added: ${game} at ${easternLabel(c.new_value)} ${detected}; lock times include it`;
     case "removed":
-      return cap(
-        `game removed: ${game}, was ${easternLabel(c.old_value)} ${detected}; lock times no longer include it`,
-      );
+      return `game removed: ${game}, was ${easternLabel(c.old_value)} ${detected}; lock times no longer include it`;
     case "week":
-      return cap(
-        `${matchupLabel(c)} moved from week ${weekLabel(c.old_value)} to week ${weekLabel(c.new_value)} ${detected}; lock times use the new week`,
-      );
+      return `${matchupLabel(c)} moved from week ${weekLabel(c.old_value)} to week ${weekLabel(c.new_value)} ${detected}; lock times use the new week`;
   }
 }
 
@@ -228,17 +214,11 @@ export function tentativeWeekWarning(t: TentativeWeek): string {
   const w = String(t.week);
   switch (t.reason) {
     case "placeholder_week":
-      return cap(
-        `week ${w} kickoff times are placeholders until the NFL sets them; lock times may move`,
-      );
+      return `week ${w} kickoff times are placeholders until the NFL sets them; lock times may move`;
     case "flex_window":
-      return cap(
-        `week ${w} kickoff times may still be flexed until ${easternLabel(t.until)}; re-check after then`,
-      );
+      return `week ${w} kickoff times may still be flexed until ${easternLabel(t.until)}; re-check after then`;
     case "tbd_time":
-      return cap(
-        `week ${w} has kickoff times still to be set (TBD); lock times may move once they are`,
-      );
+      return `week ${w} has kickoff times still to be set (TBD); lock times may move once they are`;
   }
 }
 
