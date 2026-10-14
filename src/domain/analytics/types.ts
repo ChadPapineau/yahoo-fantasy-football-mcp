@@ -556,6 +556,13 @@ export interface NflGame {
   readonly lines: GameLines | null;
   readonly is_final: boolean;
   readonly score: { readonly away: number; readonly home: number } | null;
+  /**
+   * `REG` | `WC` | `DIV` | `CON` | `SB` (nflverse `game_type`). Optional so existing literals
+   * compile; the store reader always fills it (null when the file has none) — season-fresh §8.7.
+   */
+  readonly game_type?: string | null;
+  /** Eastern `YYYY-MM-DD` (nflverse `gameday`); a TBD game has a gameday and a null kickoff. */
+  readonly gameday?: string | null;
 }
 
 /** One practice-report day. */
@@ -629,6 +636,8 @@ export interface DatasetStamp {
   readonly freshness_class: FreshnessClassId;
   /** The attached file version. */
   readonly file_version: string;
+  /** Seasons the attached file holds (its refresh_log row); absent = unknown (judged as today). */
+  readonly seasons?: readonly number[];
 }
 
 /**
@@ -790,4 +799,106 @@ export type JournalStatus =
 export interface WriteJournalRepository {
   countByStatus(): Readonly<Partial<Record<JournalStatus, number>>>;
   oldestPendingAgeSeconds(now: IsoInstant): number | null;
+}
+
+// --- schedule monitoring and refresh-policy ports (season-fresh spec §8.7; store migration 003) ------
+
+/** What changed about a game between two schedules releases. */
+export const SCHEDULE_CHANGE_KINDS = [
+  "kickoff",
+  "gameday",
+  "venue",
+  "added",
+  "removed",
+  "week",
+] as const;
+/** One kind of schedule change. */
+export type ScheduleChangeKind = (typeof SCHEDULE_CHANGE_KINDS)[number];
+
+/** The grammar of an nflverse game id (`2026_15_CHI_BUF`), validated on append. */
+export const GAME_ID_RE = /^\d{4}_\d{2}_[A-Z]{2,3}_[A-Z]{2,3}$/;
+
+/**
+ * One detected change (immutable once recorded). Values are fixed-vocabulary: a kickoff ISO instant,
+ * an Eastern `YYYY-MM-DD`, a venue id, or a week number as a string — never third-party free text.
+ */
+export interface ScheduleChange {
+  readonly detected_at: IsoInstant;
+  readonly release_updated_at: IsoInstant | null;
+  readonly season: number;
+  /** The game's week after the change (before, for "removed"). */
+  readonly week: Week;
+  /** `^\d{4}_\d{2}_[A-Z]{2,3}_[A-Z]{2,3}$` (validated on append). */
+  readonly game_id: string;
+  readonly away: NflTeam;
+  readonly home: NflTeam;
+  readonly kind: ScheduleChangeKind;
+  /** ISO kickoff | YYYY-MM-DD | venue id | week number. */
+  readonly old_value: string | null;
+  readonly new_value: string | null;
+}
+
+/** schedule_change (required write; store migration 003). */
+export interface ScheduleChangeRepository {
+  /** Required write; idempotent on (game_id, kind, old_value, new_value, release_updated_at). Resolves to rows inserted. */
+  append(rows: readonly ScheduleChange[]): Promise<number>;
+  /** Newest first, detected_at ≥ since, at most `limit` (≤ 200). */
+  recent(since: IsoInstant, limit: number): readonly ScheduleChange[];
+  forWeek(season: number, week: Week): readonly ScheduleChange[];
+}
+
+/** One job's last run (job_run; the tick's heartbeat). */
+export interface JobRunRow {
+  readonly job: string;
+  readonly last_run_at: IsoInstant;
+  readonly exit: number;
+  readonly summary: string | null;
+}
+
+/** job_run (required write). */
+export interface JobRunRepository {
+  record(row: JobRunRow): Promise<void>;
+  list(): readonly JobRunRow[];
+}
+
+/** Whether upstream has published a season's file of a source. */
+export type SeasonCheckStatus = "not_published" | "published";
+
+/** One season_check row: the latest finding for (source, season). */
+export interface SeasonCheckRow {
+  readonly source: DatasetSourceId;
+  readonly season: number;
+  readonly checked_at: IsoInstant;
+  readonly status: SeasonCheckStatus;
+}
+
+/** season_check (required write). */
+export interface SeasonCheckRepository {
+  /** Upsert on (source, season). */
+  record(row: SeasonCheckRow): Promise<void>;
+  latest(source: DatasetSourceId, season: number): SeasonCheckRow | null;
+  all(): readonly SeasonCheckRow[];
+}
+
+/** The providers a 429 / Retry-After backoff is kept for. */
+export type BackoffProvider = "nflverse" | "weather:open_meteo" | "weather:nws";
+
+/** One provider_backoff row. */
+export interface ProviderBackoffRow {
+  readonly provider: BackoffProvider;
+  readonly until_at: IsoInstant;
+  readonly reason: "rate_limited" | "server_error";
+  readonly set_at: IsoInstant;
+}
+
+/** provider_backoff (required write). */
+export interface ProviderBackoffRepository {
+  set(row: ProviderBackoffRow): Promise<void>;
+  get(provider: BackoffProvider): ProviderBackoffRow | null;
+  clear(provider: BackoffProvider): Promise<void>;
+}
+
+/** Another process's `refresh:<source>` run lock, when held by a live pid and not stale. */
+export interface RunLockReader {
+  held(source: DatasetSourceId): { readonly pid: number; readonly acquired_at: IsoInstant } | null;
 }

@@ -4,7 +4,9 @@
 // including `stampState` — the ONE place a class's AgeBasis picks which instant an input is judged
 // from (release → last successful check, age → fetch, file → mtime; critics C-12/C-08).
 // Every number here is an assumption (plan 01 A-4..A-9): tests assert the SHAPE (fresh < hard),
-// never the values.
+// never the values. The 30-minute classes take their TTL from the game calendar (season-fresh spec
+// §3.1, QA-2-037): kickoff-relative windows from the schedule data, never a weekday rule.
+import { inHotWindow, nextHotStart, type GameCalendar } from "./game-calendar.js";
 
 /** The envelope's freshness label (plan 01 §4.2): `provisional` = platform scoring not yet final. */
 export type Freshness = "fresh" | "stale" | "provisional";
@@ -48,10 +50,10 @@ export interface FreshnessClass {
   /** The plan 01 §13 assumption id(s) behind the numbers, when they are assumed. */
   readonly assumption: string | null;
   /**
-   * The TTL off game days, or null (the same TTL every day). Release-basis only: a check made on a
-   * Tuesday, Wednesday, Friday or Saturday (local time, like launchd's calendar) is judged against
-   * this, matching the refresh job's 6-hourly off-day cadence; Thursday, Sunday and Monday keep
-   * `ttlSeconds` (QA-1-036).
+   * The TTL outside the game calendar's hot windows, or null (the same TTL at every instant).
+   * Release-basis only: a check made outside every hot window ([k − 24 h, k + 4 h) of a kickoff k)
+   * stays fresh until the next hot window opens, never longer than this nor shorter than
+   * `ttlSeconds` (season-fresh spec §3.1; QA-1-036, QA-2-037).
    */
   readonly offDayTtlSeconds: number | null;
 }
@@ -117,9 +119,12 @@ const row = (
     offDayTtlSeconds,
   });
 
-/** The local weekdays the schedules job checks every 30 min (Date#getDay: Thu, Sun, Mon). */
+/**
+ * The legacy local weekdays (Date#getDay: Thu, Sun, Mon) — used only when a caller passes no game
+ * calendar. Deprecated: removed once every caller passes one (season-fresh spec §9 wave 2).
+ */
 export const GAME_DAYS: readonly number[] = Object.freeze([4, 0, 1]);
-/** The off-day TTL of the 30-minute classes: the 6-hourly cadence plus a run's duration. */
+/** The off-window TTL of the 30-minute classes: the 6-hourly off-season cadence plus a run. */
 const OFF_DAY_TTL = 6 * HOUR + 30 * MIN;
 
 /**
@@ -406,12 +411,22 @@ export function classifyAge(
 }
 
 /**
- * The TTL that applies to a check made at `basisMs` (QA-1-036): `offDayTtlSeconds` when the class
- * has one and the check's local weekday is not a game day, else `ttlSeconds`.
+ * The TTL that applies to a check made at `basisMs` (season-fresh spec §3.1). For a release-basis
+ * class with `offDayTtlSeconds` (schedules, lines): `ttlSeconds` when the calendar is a fallback or
+ * the check lies inside a hot window; otherwise `min(offDayTtlSeconds, max(ttlSeconds, nextHotStart
+ * − basis))` — an off-window check expires when the next hot window opens, never sooner than
+ * `ttlSeconds` (no next window → `offDayTtlSeconds`). Every other class: `ttlSeconds`.
+ * `cal` omitted = the deprecated local-weekday rule (removed in wave 2).
  */
-export function ttlAt(cls: FreshnessClass, basisMs: number): number | null {
+export function ttlAt(cls: FreshnessClass, basisMs: number, cal?: GameCalendar): number | null {
   if (cls.offDayTtlSeconds === null || cls.basis !== "release") return cls.ttlSeconds;
-  return GAME_DAYS.includes(new Date(basisMs).getDay()) ? cls.ttlSeconds : cls.offDayTtlSeconds;
+  if (cal === undefined)
+    return GAME_DAYS.includes(new Date(basisMs).getDay()) ? cls.ttlSeconds : cls.offDayTtlSeconds;
+  if (cal.basis === "fallback" || inHotWindow(cal, basisMs)) return cls.ttlSeconds;
+  const next = nextHotStart(cal, basisMs);
+  if (next === null) return cls.offDayTtlSeconds;
+  const untilNext = Math.floor((next - basisMs) / 1000);
+  return Math.min(cls.offDayTtlSeconds, Math.max(cls.ttlSeconds ?? 0, untilNext));
 }
 
 /**
@@ -441,35 +456,69 @@ function isoMs(s: string): number {
   return ms;
 }
 
+/** The instant a stamp's age is measured from, by the class's basis (see `stampState`). */
+function judgedFromMs(cls: FreshnessClass, t: StampInstants): number {
+  const fetched = isoMs(t.fetched_at);
+  switch (cls.basis) {
+    case "release":
+      return t.checked_at === null ? fetched : Math.max(isoMs(t.checked_at), fetched);
+    case "file":
+      return isoMs(t.as_of);
+    case "age":
+    case "immutable":
+      return fetched;
+  }
+}
+
+/** Whole seconds from `basis` to `nowMs`, ≥ 0 (clock skew reads 0). */
+function ageSeconds(basis: number, nowMs: number): number {
+  if (!Number.isFinite(nowMs)) throw new RangeError("freshness: now must be finite");
+  return Math.max(0, Math.floor((nowMs - basis) / 1000));
+}
+
 /**
  * Judges one input against its class (plan 01 §5.4) from the instant its AgeBasis names:
  * `age` → `fetched_at`; `release` → the later of `checked_at` and `fetched_at` (an unchanged release
  * checked an hour ago is fresh, however old the download); `file` → `as_of` (the file's mtime);
  * `immutable` → always fresh, measured from `fetched_at`. Every tool uses this, so a quiet week can
- * never turn an unchanged nflverse release STALE_ONLY and a stale warning names the right age.
+ * never turn an unchanged nflverse release STALE_ONLY and a stale warning names the right age. The
+ * TTL comes from `ttlAt` under `cal`; whether the state is `expired` never depends on `cal`.
  */
-export function stampState(cls: FreshnessClass, t: StampInstants, nowMs: number): StampState {
+export function stampState(
+  cls: FreshnessClass,
+  t: StampInstants,
+  nowMs: number,
+  cal?: GameCalendar,
+): StampState {
   if (!Number.isFinite(nowMs)) throw new RangeError("freshness: now must be finite");
-  const fetched = isoMs(t.fetched_at);
-  let basis: number;
-  switch (cls.basis) {
-    case "release":
-      basis = t.checked_at === null ? fetched : Math.max(isoMs(t.checked_at), fetched);
-      break;
-    case "file":
-      basis = isoMs(t.as_of);
-      break;
-    case "age":
-    case "immutable":
-      basis = fetched;
-      break;
-  }
-  const age = Math.max(0, Math.floor((nowMs - basis) / 1000));
+  const basis = judgedFromMs(cls, t);
+  const age = ageSeconds(basis, nowMs);
   return {
-    state: cls.basis === "immutable" ? "fresh" : classifyAge(cls, age, ttlAt(cls, basis)),
+    state: cls.basis === "immutable" ? "fresh" : classifyAge(cls, age, ttlAt(cls, basis, cal)),
     basis_at: new Date(basis).toISOString(),
     age_s: age,
   };
+}
+
+/**
+ * Past the hard limit — calendar-independent (`classifyAge` uses only `hardLimitSeconds` for
+ * `expired`). Equals `stampState(...).state === "expired"` under every calendar.
+ */
+export function isExpired(cls: FreshnessClass, t: StampInstants, nowMs: number): boolean {
+  if (cls.basis === "immutable" || cls.hardLimitSeconds === null) return false;
+  return ageSeconds(judgedFromMs(cls, t), nowMs) > cls.hardLimitSeconds;
+}
+
+/** basis + TTL (epoch ms) under `cal`; null for never-stale classes (immutable, or no TTL). */
+export function freshUntilMs(
+  cls: FreshnessClass,
+  t: StampInstants,
+  cal: GameCalendar,
+): number | null {
+  if (cls.basis === "immutable") return null;
+  const basis = judgedFromMs(cls, t);
+  const ttl = ttlAt(cls, basis, cal);
+  return ttl === null ? null : basis + ttl * 1000;
 }
 
 /** The worse of two envelope labels: stale > provisional > fresh. */

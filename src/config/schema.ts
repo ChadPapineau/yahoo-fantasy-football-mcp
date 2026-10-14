@@ -122,6 +122,15 @@ export const WEATHER_SOURCES = ["open-meteo", "nws", "off"] as const;
 /** A weather source. */
 export type WeatherSource = (typeof WEATHER_SOURCES)[number];
 
+/**
+ * Answer-time refresh modes (season-fresh spec §6): `wait` = a tool call may wait (bounded) for a
+ * fresher release fetched by a `ff refresh --on-demand` child; `background` = start it, never wait;
+ * `off` = never start one.
+ */
+export const ON_DEMAND_MODES = ["wait", "background", "off"] as const;
+/** An answer-time refresh mode. */
+export type OnDemandMode = (typeof ON_DEMAND_MODES)[number];
+
 /** Documentation row for one key — the single source of the README/.env.example tables. */
 export interface ConfigKeySpec {
   /** The environment variable name (also the config.json property name when file-settable). */
@@ -146,6 +155,7 @@ export const CONFIG_KEYS = [
   "FF_LOG_LEVEL",
   "FF_TOOLSET",
   "FF_WEATHER_SOURCE",
+  "FF_ON_DEMAND_REFRESH",
   "FF_FIXTURE_DIR",
   "FF_LEAGUE_KEYS",
   "FF_WRITE_ENABLED",
@@ -197,6 +207,11 @@ export const CONFIG_KEY_SPECS: readonly ConfigKeySpec[] = Object.freeze([
     "FF_WEATHER_SOURCE",
     "Weather driver: open-meteo (non-commercial) | nws (US, public domain) | off.",
     "open-meteo",
+  ),
+  spec(
+    "FF_ON_DEMAND_REFRESH",
+    "Answer-time refresh: wait (a tool call may wait up to 6-15 s for a newer release) | background | off.",
+    "wait (off in fixture mode)",
   ),
   spec(
     "FF_FIXTURE_DIR",
@@ -292,6 +307,8 @@ export interface Config {
   readonly toolset: Toolset;
   /** Weather driver. */
   readonly weatherSource: WeatherSource;
+  /** Answer-time refresh (FF_ON_DEMAND_REFRESH; default `wait`, `off` in fixture mode unless set). */
+  readonly onDemandRefresh: OnDemandMode;
   /** Absolute fixture dir, or null outside fixture mode. */
   readonly fixtureDir: string | null;
   /**
@@ -543,6 +560,13 @@ export function loadConfig(input: ConfigInput): Config {
   const logLevel = oneOf("FF_LOG_LEVEL", LOG_LEVELS, "info");
   const toolset = oneOf("FF_TOOLSET", TOOLSETS, "core");
   const weatherSource = oneOf("FF_WEATHER_SOURCE", WEATHER_SOURCES, "open-meteo");
+  const onDemandRaw = pick("FF_ON_DEMAND_REFRESH");
+  let onDemandRefresh: OnDemandMode = fixtureRaw === undefined ? "wait" : "off";
+  if (onDemandRaw !== undefined) {
+    if ((ON_DEMAND_MODES as readonly string[]).includes(onDemandRaw))
+      onDemandRefresh = onDemandRaw as OnDemandMode;
+    else issues.push({ key: "FF_ON_DEMAND_REFRESH", reason: "invalid" });
+  }
 
   // FF_LEAGUE_KEYS
   const lkRaw = pick("FF_LEAGUE_KEYS");
@@ -631,6 +655,7 @@ export function loadConfig(input: ConfigInput): Config {
     logLevel,
     toolset,
     weatherSource,
+    onDemandRefresh,
     fixtureDir,
     fixtureLeague,
     leagueKeys: Object.freeze(leagueKeys),

@@ -4,6 +4,7 @@
 // 03 §D.2 default lock = the player's own kickoff, weekly-lock leagues lock everyone at once):
 // bye weeks, per-player and weekly lock instants, the lock schedule, and the current/next week from
 // the schedule and a Clock. Pure: time comes in as epoch ms, never from Date.now().
+import { GAME_WINDOW_MS } from "../../config/game-calendar.js";
 import type { NflTeam } from "../../config/schema.js";
 import type { NflGame } from "../analytics/types.js";
 import type { IsoInstant, LeagueWeek, LockScheduleEntry, PlayerKey, Week } from "./types.js";
@@ -12,7 +13,7 @@ import type { IsoInstant, LeagueWeek, LockScheduleEntry, PlayerKey, Week } from 
 export type LockMode = "per_game" | "weekly";
 
 /** After a week's last kickoff, how long until the week counts as over (a game plus overtime). */
-export const GAME_WINDOW_MS = 4 * 60 * 60 * 1000;
+export { GAME_WINDOW_MS } from "../../config/game-calendar.js";
 
 /** Epoch ms of an ISO instant, or null when it is missing or not a valid instant. */
 export function kickoffMs(kickoff: IsoInstant | null): number | null {
@@ -38,9 +39,16 @@ export function scheduledWeeks(games: readonly NflGame[], season: number): Week[
   return [...s].sort((a, b) => a - b);
 }
 
+/** Whether a week's games are postseason games (their `game_type` is known and not `REG`). */
+function isPostseasonWeek(weekGames: readonly NflGame[]): boolean {
+  return weekGames.some((g) => typeof g.game_type === "string" && g.game_type !== "REG");
+}
+
 /**
- * Bye weeks per team: for every week the schedule has games in, each of `teams` with no game that
- * week is on bye. Weeks with no games at all are not byes (the schedule simply does not cover them).
+ * Bye weeks per team: for every regular-season week the schedule has games in, each of `teams` with
+ * no game that week is on bye. Weeks with no games at all are not byes (the schedule simply does not
+ * cover them), and neither are postseason weeks when `game_type` is known (a team out of the playoffs
+ * is not on bye — season-fresh spec §2.5).
  */
 export function byeWeeks(
   games: readonly NflGame[],
@@ -50,8 +58,10 @@ export function byeWeeks(
   const out = new Map<NflTeam, Week[]>();
   for (const t of teams) out.set(t, []);
   for (const w of scheduledWeeks(games, season)) {
+    const weekGames = gamesOfWeek(games, season, w);
+    if (isPostseasonWeek(weekGames)) continue;
     const playing = new Set<string>();
-    for (const g of gamesOfWeek(games, season, w)) {
+    for (const g of weekGames) {
       playing.add(g.away);
       playing.add(g.home);
     }
