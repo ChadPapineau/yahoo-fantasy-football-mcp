@@ -7,15 +7,22 @@
 //   - ff_project_players for 32 players with n_sims = 4000 in < 3 s.
 // Both data sizes are measured and printed (the league file's players/bytes; each dataset file's
 // bytes and the excerpt bytes). Wall-clock: run alone (`npm run test:process` runs one file at a time).
+// Answer-time refresh (season-fresh §6, §13): the server runs with FF_ON_DEMAND_REFRESH=wait, so A15
+// is "warm and fresh" — every source was just checked, no child starts, nothing waits; one fast
+// source checked 2 h ago is revalidated within 6.5 s; and ff_record_recommendation never answers
+// STORE_BUSY while five on-demand refreshes publish beside it.
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { toolNames } from "../../src/mcp/registry.js";
 import {
   ROOT,
+  logRecords,
   makeHome,
   publishFixtures,
   requireDist,
+  runCli,
   serve,
   type E2eHome,
   type Served,
@@ -110,7 +117,10 @@ describe("A15: the data sizes measured", () => {
 
 describe("A15: startup < 1 s without network, on a fresh store with the datasets attached", () => {
   it("spawn → initialize answered", async () => {
-    srv = await serve(home.env);
+    // weather off: the fixture tree has no forecast for the real clock's week, and a never-loaded
+    // weather source would be fetched at answer time (on a healthy install the tick keeps it in the
+    // current hour bucket); every other source was just published, so nothing is due
+    srv = await serve({ ...home.env, FF_ON_DEMAND_REFRESH: "wait", FF_WEATHER_SOURCE: "off" });
     process.stdout.write(`A15 startup (spawn → initialize): ${srv.connectMs.toFixed(0)} ms\n`);
     expect(srv.connectMs).toBeLessThan(STARTUP_LIMIT_MS);
     const status = await srv.client.callTool({ name: "ff_get_status", arguments: {} });
@@ -168,6 +178,12 @@ describe("A15: every P0 tool < 500 ms on a warm cache", () => {
   }, 30_000);
 });
 
+describe("A15 is warm and fresh: no answer waited on a refresh", () => {
+  it("no on-demand child started during the timed calls (every source was just checked)", () => {
+    expect(logRecords(srv.stderr).some((l) => l.event === "refresh.child_started")).toBe(false);
+  });
+});
+
 describe("A15: ff_project_players, 32 players × 4000 sims < 3 s", () => {
   it("the 32 team defences (pool DEF top 32) at n_sims 4000", async () => {
     const args = {
@@ -193,4 +209,57 @@ describe("A15: ff_project_players, 32 players × 4000 sims < 3 s", () => {
     process.stdout.write(`A15 ff_project_players 32 × 4000: ${t.ms.toFixed(0)} ms\n`);
     expect(t.ms).toBeLessThan(PROJECT_32_LIMIT_MS);
   }, 30_000);
+});
+
+describe("answer-time refresh latency (season-fresh §6.1)", () => {
+  it("one fast source checked 2 h ago is revalidated within 6.5 s", async () => {
+    const db = new DatabaseSync(path.join(home.env.FF_CACHE_DIR ?? "", "store.sqlite"));
+    try {
+      const back = new Date(Date.now() - 2 * 3_600_000).toISOString();
+      db.prepare(
+        "UPDATE refresh_log SET started_at = ?, finished_at = ?, checked_at = ? WHERE source = 'nflverse:injuries'",
+      ).run(back, back, back);
+    } finally {
+      db.close();
+    }
+    const t = await timed("ff_get_injuries", {});
+    expect(t.r.isError, t.text.slice(0, 300)).not.toBe(true);
+    const env = JSON.parse(t.text) as {
+      meta: { refresh?: { sources: { source: string; outcome: string }[] } };
+    };
+    process.stdout.write(`on-demand ff_get_injuries (2 h stale): ${t.ms.toFixed(0)} ms\n`);
+    expect(env.meta.refresh?.sources.find((x) => x.source === "nflverse:injuries")?.outcome).toBe(
+      "revalidated",
+    );
+    expect(t.ms).toBeLessThan(6_500);
+  }, 30_000);
+
+  it("ff_record_recommendation ×50 during 5 concurrent on-demand publishes never answers STORE_BUSY", async () => {
+    // five forced republishes (what an on-demand child does when a release changed), so the
+    // store's write lock is really contended while the records are written
+    const child = (target: string) => runCli(home.env, ["refresh", "--json", "--force", target]);
+    const publishes = Promise.all(
+      [
+        "nflverse:schedules",
+        "nflverse:injuries",
+        "nflverse:roster_weekly",
+        "nflverse:stats_player_week",
+        "nflverse:schedules",
+      ].map(child),
+    );
+    const codes: string[] = [];
+    for (let i = 0; i < 50; i++) {
+      const t = await timed("ff_record_recommendation", {
+        ...recordArgs,
+        client_ref: `busy-${String(i)}`,
+      });
+      if (t.r.isError === true)
+        codes.push((JSON.parse(t.text) as { error: { code: string } }).error.code);
+    }
+    const runs = await publishes;
+    expect(codes.filter((c) => c === "STORE_BUSY")).toEqual([]);
+    expect(codes).toEqual([]);
+    // the five runs all finished (published, or skipped: two of one source meet at the run lock)
+    for (const r of runs) expect(r.code, r.stderr.slice(0, 300)).toBe(0);
+  }, 120_000);
 });
