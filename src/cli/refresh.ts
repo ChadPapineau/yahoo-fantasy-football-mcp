@@ -884,9 +884,7 @@ async function releaseTickLock(store: Store, io: CliIo): Promise<void> {
  * lock); after a schedules publish, diff the kickoffs and re-read the calendar before the next
  * decision; record the heartbeat (job_run). Nothing due → no request at all.
  */
-async function runDue(
-  ctx: RunContext,
-): Promise<{
+async function runDue(ctx: RunContext): Promise<{
   results: RefreshResult[];
   lines: string[];
   decisions: DueDecision[];
