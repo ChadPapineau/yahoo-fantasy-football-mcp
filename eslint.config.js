@@ -23,7 +23,9 @@ const ROOT = import.meta.dirname;
  */
 export const FORBIDDEN_LAYERS = Object.freeze({
   domain: ["providers", "sources", "store", "mcp", "auth", "http", "cli", "cli-entry"],
-  mcp: ["store", "cli", "cli-entry"],
+  // the server process never downloads: no HTTP client and no source runner (season-fresh §6.6);
+  // answer-time refresh is a child `ff refresh --on-demand` started by src/cli
+  mcp: ["store", "http", "sources", "cli", "cli-entry"],
   providers: ["mcp", "cli", "cli-entry"],
   sources: ["mcp", "providers", "cli", "cli-entry"],
   store: ["mcp", "providers", "sources", "auth", "http", "cli", "cli-entry"],
@@ -172,6 +174,11 @@ const DOMAIN_IO_BAN = [
   "dgram",
   "node:dgram",
 ].map((name) => ({ name, message: "src/domain is pure (plan 01 §1.1): no I/O modules." }));
+/** Only src/cli may start a process (season-fresh §6.6: the on-demand refresh child). */
+const CHILD_PROCESS_BAN = CHILD_PROCESS.map((name) => ({
+  name,
+  message: "Only src/cli may start a process (season-fresh §6.6); src/mcp and src/domain may not.",
+}));
 const MCP_SDK_BAN = {
   regex: "^@modelcontextprotocol/",
   message: "src/domain may not import the MCP SDK (plan 01 §1.1).",
@@ -381,7 +388,7 @@ export default [
   },
   {
     files: ["src/mcp/**/*.ts"],
-    rules: restrictions({ paths: FS_BAN, fetch: true, stdout: true }),
+    rules: restrictions({ paths: [...FS_BAN, ...CHILD_PROCESS_BAN], fetch: true, stdout: true }),
   },
 
   // --- tests: vitest idioms ----------------------------------------------------------------------

@@ -76,6 +76,14 @@ describe("layer table (plan 01 §1.1), every import form", () => {
     ["src/domain/probe.ts", `import "../store/x.js";`],
     ["src/mcp/probe.ts", `import { x } from "../store/db.js"; export const y = x;`],
     ["src/mcp/tools/probe.ts", `import { x } from "../../store/db.js"; export const y = x;`],
+    // the server process never downloads (season-fresh spec §6.6): no HTTP client, no source runner
+    ["src/mcp/probe.ts", `import { x } from "../http/client.js"; export const y = x;`],
+    ["src/mcp/tools/probe.ts", `import { x } from "../../http/allowlist.js"; export const y = x;`],
+    ["src/mcp/probe.ts", `import { x } from "../sources/runner.js"; export const y = x;`],
+    [
+      "src/mcp/tools/probe.ts",
+      `import type { T } from "../../sources/nflverse/x.js"; export type U = T;`,
+    ],
     ["src/providers/yahoo/probe.ts", `import { x } from "../../mcp/x.js"; export const y = x;`],
     ["src/sources/nflverse/probe.ts", `import { x } from "../../mcp/x.js"; export const y = x;`],
     [
@@ -167,6 +175,28 @@ describe("module bans per layer", () => {
     ],
     ["src/domain/probe.ts", `console.log("x");`, "no-console"],
     ["src/store/probe.ts", `console.error("x");`, "no-console"],
+    // only src/cli may start a process (season-fresh spec §6.6: the on-demand child is spawned by
+    // the composition root, never by the MCP surface or the pure domain)
+    [
+      "src/mcp/probe.ts",
+      `import { spawn } from "node:child_process"; export const s = spawn;`,
+      "no-restricted-imports",
+    ],
+    [
+      "src/mcp/tools/probe.ts",
+      `import { execFile } from "child_process"; export const s = execFile;`,
+      "no-restricted-imports",
+    ],
+    [
+      "src/domain/probe.ts",
+      `import { spawn } from "node:child_process"; export const s = spawn;`,
+      "no-restricted-imports",
+    ],
+    [
+      "src/domain/league/probe.ts",
+      `import { fork } from "child_process"; export const s = fork;`,
+      "no-restricted-imports",
+    ],
   ];
   it.each(cases)("%s: %s -> %s", async (file, code, rule) => {
     expect(rules(await lint(file, code))).toContain(rule);
@@ -178,6 +208,13 @@ describe("module bans per layer", () => {
     ).toEqual([]);
     expect(boundaryHits(await lint("src/cli.ts", `console.log("x");`))).toEqual([]);
     expect(boundaryHits(await lint("tests/probe.test.ts", `console.log("x");`))).toEqual([]);
+  });
+
+  it("allows spawn in the CLI layer only (the on-demand refresh orchestrator)", async () => {
+    const code = `import { spawn } from "node:child_process"; export const s = () => spawn("x", [], { shell: false });`;
+    expect(boundaryHits(await lint("src/cli/probe.ts", code))).toEqual([]);
+    expect(rules(await lint("src/mcp/probe.ts", code))).toContain("no-restricted-imports");
+    expect(rules(await lint("src/domain/probe.ts", code))).toContain("no-restricted-imports");
   });
 
   it("allows fs in the store and sources layers", async () => {
@@ -251,6 +288,8 @@ describe("import-x/no-restricted-paths on a real tree (same zone table)", () => 
     tmp = tempDir();
     writeTree(tmp.dir, {
       "src/store/x.ts": "export const x = 1;\n",
+      "src/http/client.ts": "export const h = 1;\n",
+      "src/sources/runner.ts": "export const r = 1;\n",
       "src/domain/league/model.ts": "export const m = 1;\n",
       "src/version.ts": 'export const VERSION = "0.0.0";\n',
     });
@@ -295,6 +334,17 @@ describe("import-x/no-restricted-paths on a real tree (same zone table)", () => 
     );
     expect(hit).not.toContain("import-x/no-restricted-paths");
     expect(hit).not.toContain("ff/layer-boundaries");
+  });
+
+  it("fires both layer rules on src/mcp importing src/http or src/sources (season-fresh §6.6)", async () => {
+    for (const spec of ["../http/client.js", "../sources/runner.js"]) {
+      const [r] = await linter.lintText(`import { x } from "${spec}";\nexport const y = x;\n`, {
+        filePath: path.join(tmp.dir, "src/mcp/probe.ts"),
+      });
+      const hit = rules(r?.messages ?? []);
+      expect(hit).toContain("import-x/no-restricted-paths");
+      expect(hit).toContain("ff/layer-boundaries");
+    }
   });
 
   it("silently skips an unresolvable target — the lexical rule still fires", async () => {
