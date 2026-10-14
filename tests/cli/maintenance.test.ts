@@ -117,8 +117,37 @@ describe("ff prune", () => {
     expect(col("SELECT new_value FROM schedule_change")).toEqual(["b"]);
     expect(col("SELECT season FROM season_check")).toEqual([2026]);
     expect(col("SELECT provider FROM provider_backoff")).toEqual(["weather:nws"]);
-    expect(col("SELECT job FROM job_run")).toEqual(["refresh-due"]);
+    // job_run is never pruned (the prune adds its own heartbeat)
+    expect(col("SELECT job FROM job_run ORDER BY job")).toEqual(["refresh-due", "store-prune"]);
     after.close();
+  });
+
+  it("each run of ff prune and the weekly ff backup records its heartbeat (job_run); a backup --to does not", async () => {
+    const s = sandbox();
+    sb = s;
+    const clock = fixedClock(NOW);
+    expect(await main(["prune"], makeIo(s, { clock }))).toBe(EXIT.OK);
+    clock.advance(10 * 60_000);
+    expect(await main(["backup"], makeIo(s, { clock }))).toBe(EXIT.OK);
+    const jobs = (): unknown[] => {
+      const db = new DatabaseSync(storePath(s.cacheDir), { readOnly: true });
+      try {
+        return db.prepare("SELECT job, last_run_at, exit FROM job_run ORDER BY job").all();
+      } finally {
+        db.close();
+      }
+    };
+    expect(jobs()).toEqual([
+      { job: "store-backup", last_run_at: new Date(NOW + 10 * 60_000).toISOString(), exit: 0 },
+      { job: "store-prune", last_run_at: new Date(NOW).toISOString(), exit: 0 },
+    ]);
+    clock.advance(10 * 60_000);
+    const to = path.join(s.dir, "elsewhere.sqlite");
+    expect(await main(["backup", "--to", to], makeIo(s, { clock }))).toBe(EXIT.OK);
+    expect(jobs()).toHaveLength(2);
+    expect((jobs()[0] as { last_run_at: string }).last_run_at).toBe(
+      new Date(NOW + 10 * 60_000).toISOString(),
+    );
   });
 
   it("removes a symlink planted as debris without following it", () => {

@@ -33,7 +33,7 @@ import {
 import type { Config } from "../config/schema.js";
 import { prunePreMigrationBackups } from "../store/backup.js";
 import { PRUNE_HISTORY_MAX_AGE_MS, PUBLISH_LOCK_STALE_MS } from "../store/index.js";
-import type { StoreFactory } from "../store/types.js";
+import type { Store, StoreFactory } from "../store/types.js";
 import { EXIT, UsageError } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
 import type { Logger } from "./log.js";
@@ -52,6 +52,19 @@ const DS_DEBRIS_RE =
   /^[a-z][a-z0-9_]*__[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+\.[0-9a-f]{12}\.tmp(?:-journal)?$/;
 /** The name of a run temp directory: `<source>-XXXXXX` (mkdtemp under `<cache>/tmp`). */
 export const RUN_TMP_RE = /^[A-Za-z0-9_]{1,80}-[A-Za-z0-9]{6}$/;
+
+/** The launchd job names of the two maintenance jobs (src/cli/launchd.ts JOBS). */
+export const PRUNE_JOB = "store-prune";
+export const BACKUP_JOB = "store-backup";
+
+/** Records a maintenance job's run in job_run (G1 jobs[]); a busy store only costs the row. */
+async function heartbeat(store: Store, job: string, at: string, log: Logger): Promise<void> {
+  try {
+    await store.repos.jobRuns.record({ job, last_run_at: at, exit: 0, summary: null });
+  } catch {
+    log.warn("maintenance.heartbeat_not_recorded", { job });
+  }
+}
 
 /** What a prune removed. */
 export interface PruneReport {
@@ -180,14 +193,15 @@ export async function prune(
         (await store.repos.scheduleChanges.prune(before)) +
         (await store.repos.seasonChecks.prune(before)) +
         (await store.repos.providerBackoff.prune(new Date(now).toISOString()));
+      report = {
+        platform_cache_rows: rows,
+        history_rows: history,
+        ...pruneFiles(config.cacheDir, io.clock.nowMs()),
+      };
+      await heartbeat(store, PRUNE_JOB, io.clock.nowIso(), log);
     } finally {
       store.close();
     }
-    report = {
-      platform_cache_rows: rows,
-      history_rows: history,
-      ...pruneFiles(config.cacheDir, io.clock.nowMs()),
-    };
   } catch (e) {
     // a refused path names which directory (local output: the user's own paths)
     await writeLine(
@@ -415,6 +429,8 @@ export async function backup(
       let r;
       try {
         r = await store.backup(dest);
+        // the weekly job's heartbeat (a copy to a path of the user's is not the job)
+        if (userDest === null) await heartbeat(store, BACKUP_JOB, io.clock.nowIso(), log);
       } finally {
         store.close();
       }
