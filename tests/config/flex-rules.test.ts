@@ -128,6 +128,19 @@ describe("flexDeadlineMs over synthetic seasons", () => {
     ).toBeNull();
   });
 
+  it("when several rules cover a game the shortest notice wins", () => {
+    // a short season whose final week is week 15: Thursday night (21 d) and the final week (6 d)
+    const thu = easternWallTimeMs("2028-12-14", 20, 15);
+    expect(flexDeadlineMs({ week: 15, game_type: "REG", kickoff_ms: thu, last_reg_week: 15 })).toBe(
+      thu - 6 * D,
+    );
+    // Sunday night in week 17 when it is also the final week: both rules say 6 d
+    const sun = easternWallTimeMs("2028-12-31", 20, 20);
+    expect(flexDeadlineMs({ week: 17, game_type: "REG", kickoff_ms: sun, last_reg_week: 17 })).toBe(
+      sun - 6 * D,
+    );
+  });
+
   it("is the same in every zone", () => {
     const games = syntheticSeason({ season: 2030, regWeeks: 20, seed: 9 });
     const probe = () =>
