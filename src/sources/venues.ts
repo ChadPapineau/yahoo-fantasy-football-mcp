@@ -10,9 +10,12 @@
 // incl. canopies), `dome` (fixed roof), `closed` (retractable — assumed closed when unknown, since a
 // retractable roof is closed exactly in the weather that would matter). Where nflverse's own `roof`
 // disagrees (it says `dome` for the open-air MCG, Stade de France and Allianz Arena), the physical
-// roof wins for open-air and fixed-roof venues (the store reader's gameRoof and the weather sources'
-// needsWeather); only a retractable venue's game row carries its own state.
+// roof wins (src/domain/league/roof.ts, read by the store reader and the weather sources): in every
+// season for a venue whose roof cannot change (`roof_fixed`: a fixed dome, an open-air venue
+// abroad), within the table's vintage for a US open-air stadium; a retractable venue's game row
+// carries its own state.
 import type { VenueInfo } from "../domain/analytics/types.js";
+import { isRoofFixed } from "../domain/league/roof.js";
 import type { DatasetRow } from "../store/types.js";
 
 /** A venue plus what the loader needs to resolve it. */
@@ -24,6 +27,12 @@ export interface VenueReference extends VenueInfo {
   /** ISO 3166-1 alpha-2 country. */
   readonly country: string;
   readonly retractable: boolean;
+  /**
+   * The physical roof stands in every season, nflverse's `roof` notwithstanding: a fixed dome or an
+   * open-air venue abroad (src/domain/league/roof.ts isRoofFixed). False for a US open-air team
+   * stadium, which may be rebuilt with a roof under its id, and for a retractable venue.
+   */
+  readonly roof_fixed: boolean;
   /** `nflverse` = an id nflverse uses; `local` = ours, for a venue nflverse never coded. */
   readonly origin: "nflverse" | "local";
 }
@@ -52,6 +61,7 @@ const v = (
     roof_default,
     country,
     retractable,
+    roof_fixed: isRoofFixed({ roof_default, retractable, country }),
     origin,
   });
 

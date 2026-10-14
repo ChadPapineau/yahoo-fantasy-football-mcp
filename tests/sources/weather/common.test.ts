@@ -89,8 +89,13 @@ describe("roof decision (grounding open issue: the physical roof wins)", () => {
   );
 
   it.each([
-    ["CLE00", "dome", false], // the table says open-air; a later season's game row says dome
-    ["DET00", "outdoors", true],
+    ["CLE00", "dome", false], // a US open-air stadium; a later season's game row says dome
+    // a venue whose roof cannot change keeps it: a fixed dome, an open-air venue abroad (nflverse
+    // codes the MCG, Stade de France and Allianz Arena as `dome`)
+    ["DET00", "outdoors", false],
+    ["MEL00", "dome", true],
+    ["PAR00", "dome", true],
+    ["GER00", "dome", true],
     ["HOU00", "open", true],
     ["HOU00", null, false], // unknown → the table's default (retractable: assumed closed)
     ["CLE00", null, true],

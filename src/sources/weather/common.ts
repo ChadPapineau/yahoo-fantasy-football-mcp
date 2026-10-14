@@ -4,16 +4,17 @@
 // and how to read one response; this file selects the games, writes the per-run temp file, asserts
 // its schema and publishes the kickoff-hour rows into the tables.ts weather table.
 //
-// Roof decision (grounding open issue, owned here): the physical roof wins for a fixed-roof or
-// open-air venue — venues.ts `roof_default` — so the MCG, Stade de France and Allianz Arena (nflverse
-// says `dome`) get weather and a fixed dome never does; for a RETRACTABLE venue only the game's own
-// roof decides, and only an explicit `open`/`outdoors` fetches (unknown → assumed closed).
+// Roof decision: the store reader's rule (src/domain/league/roof.ts) — the physical roof wins for a
+// venue whose roof cannot change (a fixed dome, an open-air venue abroad: the MCG, Stade de France
+// and Allianz Arena, which nflverse says `dome`, get weather in every season, a fixed dome never
+// does), and within the venue table's vintage for a US open-air stadium; for a RETRACTABLE venue only
+// the game's own roof decides, and only an explicit `open`/`outdoors` fetches (unknown → closed).
 import { createHash } from "node:crypto";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { SOURCE_REGISTRY, type DatasetSourceId } from "../../config/freshness.js";
-import { REFERENCE_VINTAGES } from "../../config/reference-vintage.js";
 import type { NflGame } from "../../domain/analytics/types.js";
+import { isOpenAir } from "../../domain/league/roof.js";
 import type { IsoInstant } from "../../domain/league/types.js";
 import { HttpError, isTransientNetworkError } from "../../http/errors.js";
 import type { DatasetTableContract } from "../../store/datasets/tables.js";
@@ -183,21 +184,17 @@ export function decodeJson(body: Uint8Array): unknown {
 // --- game selection -------------------------------------------------------------------------------------
 
 /**
- * Whether a game at `venue` is played open-air (see the roof decision in the header). For a season
- * past the venue table's vintage (REFERENCE_VINTAGES.venues) the game row's own roof decides when it
- * is known — the table may describe a stadium as it was — and the venue default only fills a gap; the
- * schedules publish warns about every such disagreement. The same rule as the store reader's
- * gameRoof.
+ * Whether a game at `venue` is played open-air: the store reader's roof rule
+ * (src/domain/league/roof.ts gameRoofOf) — a fixed dome or an open-air venue abroad keeps its
+ * physical roof in every season (nflverse codes the MCG, Stade de France and Allianz Arena as
+ * `dome`); past the venue table's vintage a known game roof wins for a venue that may have changed;
+ * a retractable venue's game row carries its state.
  */
 export function needsWeather(
   game: Pick<NflGame, "roof" | "season">,
   venue: VenueReference,
 ): boolean {
-  const r = (game.roof ?? "").trim().toLowerCase();
-  if (game.season > REFERENCE_VINTAGES.venues.verified_through_season && r !== "")
-    return r === "open" || r === "outdoors";
-  if (venue.retractable) return r === "open" || r === "outdoors";
-  return venue.roof_default === "outdoors";
+  return isOpenAir(game.roof, venue, game.season);
 }
 
 /** The venue of a schedules game: its resolved id, else its stadium name. */

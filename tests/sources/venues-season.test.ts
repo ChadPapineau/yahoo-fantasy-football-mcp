@@ -13,6 +13,7 @@ import type { NflGame } from "../../src/domain/analytics/types.js";
 import { schedulesSource, type NflversePublishStats } from "../../src/sources/nflverse/index.js";
 import { venueWarnings, type VenueCheckRow } from "../../src/sources/nflverse/schedules.js";
 import type { SourceContext } from "../../src/sources/source.js";
+import { venueById } from "../../src/sources/venues.js";
 import { selectGames } from "../../src/sources/weather/common.js";
 import { gameRoof } from "../../src/store/readers.js";
 import { SqliteWriter } from "./nflverse/helpers/harness.js";
@@ -114,7 +115,7 @@ describe("a season past the vintage end to end: Nissan Stadium reported as a dom
       `${String(season)}_15_IND_TEN`,
     )[0];
     expect(g).toEqual({ roof: "dome", roof_default: "outdoors" });
-    expect(gameRoof("dome", "outdoors", season)).toBe("dome");
+    expect(gameRoof("dome", venueById("NAS00"), season)).toBe("dome");
 
     // the weather source, reading the game as the reader maps it, forecasts nothing for it
     const kickoff = Date.parse(`${String(season)}-12-20T18:00:00.000Z`);
@@ -128,7 +129,7 @@ describe("a season past the vintage end to end: Nissan Stadium reported as a dom
       stadium_id: "NAS00",
       stadium: "Nissan Stadium",
       venue_tz: "America/Chicago",
-      roof: gameRoof("dome", "outdoors", season),
+      roof: gameRoof("dome", venueById("NAS00"), season),
       surface: null,
       divisional: true,
       rest_days: { away: null, home: null },
@@ -144,7 +145,7 @@ describe("a season past the vintage end to end: Nissan Stadium reported as a dom
     const picked = selectGames(ctx, { usOnly: false, horizonHours: 168 }, { games: () => [game] });
     expect(picked.games).toEqual([]);
     // the same game in a verified season would be forecast (the table's open-air roof stands)
-    const verified = { ...game, season: V, roof: gameRoof("dome", "outdoors", V) };
+    const verified = { ...game, season: V, roof: gameRoof("dome", venueById("NAS00"), V) };
     const picked2 = selectGames(
       ctx,
       { usOnly: false, horizonHours: 168 },

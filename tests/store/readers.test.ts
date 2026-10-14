@@ -5,6 +5,9 @@
 // parameters staying data, and stamps carrying the release instant and check time.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SOURCE_REGISTRY } from "../../src/config/freshness.js";
+import { REFERENCE_VINTAGES } from "../../src/config/reference-vintage.js";
+import { venueRows } from "../../src/sources/venues.js";
+import { DS_GAMES, DS_VENUES } from "../../src/store/datasets/tables.js";
 import { ALL_WEEK_INDEXES, WEEK_INDEX_MAX } from "../../src/config/weeks.js";
 import type { DatasetPublisher, Store } from "../../src/store/types.js";
 import {
@@ -17,6 +20,7 @@ import {
   playerWeekRows,
   publishAllFixtures,
   publishTables,
+  row,
   rosterRows,
   weatherRows,
 } from "./helpers/datasets.js";
@@ -400,5 +404,60 @@ describe("partial datasets", () => {
       },
     });
     expect(s.datasets.schedules.games(SEASON, [2]).rows).toEqual([]);
+  });
+});
+
+describe("ScheduleReader.games: the roof of a game past the venue table's vintage", () => {
+  // the reader joins the venue's roof_default, retractable and country (ds_venues) to the one rule
+  // (src/domain/league/roof.ts): an open-air venue abroad stays open-air whatever nflverse says,
+  // a US open-air team stadium reported as a dome is a dome, a retractable venue's state is its own
+  it("MEL00 'dome' → outdoors; NAS00 'dome' → dome; ATL97 'open' → open; an unknown venue keeps its row", async () => {
+    const S = REFERENCE_VINTAGES.venues.verified_through_season + 1;
+    const venue = (id: string) => {
+      const v = venueRows().find((r) => r.stadium_id === id);
+      if (v === undefined) throw new Error(id);
+      return v;
+    };
+    const game = (id: string, venueId: string | null, roof: string | null, k: number) =>
+      row(DS_GAMES, {
+        game_id: `${String(S)}_01_${id}`,
+        season: S,
+        game_type: "REG",
+        week: 1,
+        gameday: `${String(S)}-09-1${String(k)}`,
+        kickoff_utc: `${String(S)}-09-1${String(k)}T17:00:00.000Z`,
+        away_team: "PHI",
+        home_team: "LA",
+        roof,
+        stadium_id: venueId,
+        venue_id: venueId,
+      });
+    expect(
+      (
+        await publishTables(
+          pub,
+          "nflverse:schedules",
+          `v-roof-${String(S)}`,
+          [
+            {
+              spec: DS_GAMES,
+              rows: [
+                game("A_MEL", "MEL00", "dome", 1),
+                game("B_NAS", "NAS00", "dome", 2),
+                game("C_ATL", "ATL97", "open", 3),
+                game("D_UNK", null, "dome", 4),
+              ],
+            },
+            { spec: DS_VENUES, rows: ["MEL00", "NAS00", "ATL97"].map(venue) },
+          ],
+          [S],
+        )
+      ).ok,
+    ).toBe(true);
+    open();
+    const roofs = Object.fromEntries(
+      s.datasets.schedules.games(S, [1]).rows.map((g) => [g.game_id.slice(8), g.roof]),
+    );
+    expect(roofs).toEqual({ A_MEL: "outdoors", B_NAS: "dome", C_ATL: "open", D_UNK: "dome" });
   });
 });

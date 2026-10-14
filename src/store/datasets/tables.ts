@@ -599,14 +599,15 @@ export const READER_QUERIES = Object.freeze({
         "nflverse:schedules",
         ["ds_games", "ds_venues"],
         ["season", "weeks"],
-        `SELECT g.*, v.tz AS venue_tz, v.roof_default AS venue_roof_default
+        `SELECT g.*, v.tz AS venue_tz, v.roof_default AS venue_roof_default,
+  v.retractable AS venue_retractable, v.country AS venue_country
 FROM {schema}.ds_games AS g LEFT JOIN {schema}.ds_venues AS v ON v.stadium_id = g.venue_id
 WHERE g.season = :season AND g.week IN (SELECT value FROM json_each(:weeks))
 ORDER BY g.kickoff_utc IS NULL, g.kickoff_utc, g.game_id`,
       ),
     ],
     mapping:
-      "kickoff ← kickoff_utc; away/home ← away_team/home_team (rows with a non-NflTeam abbreviation are skipped and warned); stadium_id ← venue_id (resolved venue, not the raw nflverse id); stadium ← stadium; venue_tz ← venue_tz; roof ← COALESCE(roof, venue_roof_default); divisional ← div_game = 1 (null → null); rest_days ← away_rest/home_rest; lines ← null when spread_line, total_line and both moneylines are all null, else { spread_line, total_line, implied: impliedPoints(spread_line, total_line), moneyline: away/home_moneyline, as_of: stamp.as_of }; is_final ← away_score AND home_score non-null ([U] nflverse fills scores only at final); score ← both scores when final, else null",
+      "kickoff ← kickoff_utc; away/home ← away_team/home_team (rows with a non-NflTeam abbreviation are skipped and warned); stadium_id ← venue_id (resolved venue, not the raw nflverse id); stadium ← stadium; venue_tz ← venue_tz; roof ← gameRoofOf(roof, the venue's roof_default/retractable/country, season) (src/domain/league/roof.ts: a fixed dome or an open-air venue abroad keeps its physical roof; past the venue table's vintage a known game roof wins for the others); divisional ← div_game = 1 (null → null); rest_days ← away_rest/home_rest; lines ← null when spread_line, total_line and both moneylines are all null, else { spread_line, total_line, implied: impliedPoints(spread_line, total_line), moneyline: away/home_moneyline, as_of: stamp.as_of }; is_final ← away_score AND home_score non-null ([U] nflverse fills scores only at final); score ← both scores when final, else null",
   }),
   /** ScheduleReader.firstKickoff(season, week) — MIN(kickoff_utc) over ds_games. */
   "ScheduleReader.firstKickoff": Object.freeze({

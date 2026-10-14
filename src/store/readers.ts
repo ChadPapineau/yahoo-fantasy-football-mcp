@@ -4,7 +4,6 @@
 // file is absent answers `{ rows: [], stamp: null }` — the contract's "never loaded" outcome
 // (DATASET_NEVER_LOADED_HINT at the tool layer), never an exception.
 import type { DatabaseSync } from "node:sqlite";
-import { REFERENCE_VINTAGES } from "../config/reference-vintage.js";
 import { isNflTeam, type NflTeam } from "../config/schema.js";
 import { WEEK_INDEX_MAX } from "../config/weeks.js";
 import type {
@@ -20,6 +19,7 @@ import type {
   WeatherObservation,
 } from "../domain/analytics/types.js";
 import type { NflRosterPlayer, RosterWeeklyReader } from "../domain/crosswalk/types.js";
+import { gameRoofOf, type VenueRoofFacts } from "../domain/league/roof.js";
 import type { IsoInstant, Week } from "../domain/league/types.js";
 import type { Attachments } from "./attach.js";
 import { impliedPoints } from "./datasets/derive.js";
@@ -34,25 +34,19 @@ import {
 /** Most ids/weeks/teams one reader call accepts (bounded statement; 20 k ids is well inside). */
 
 /**
- * A game's roof. For a season the venue table is verified through
- * (REFERENCE_VINTAGES.venues.verified_through_season), the venue's physical roof decides for
- * open-air (`outdoors`) and fixed-roof (`dome`) venues — nflverse says `dome` for the open-air MCG,
- * Stade de France and Allianz Arena — and only for a retractable venue (`closed`/`open` default)
- * does the game row's own state win, falling back to the venue default. For a later season the
- * table may be out of date (a renovated or new stadium), so a non-null game roof wins and the
- * schedules publish warns when it disagrees (src/sources/nflverse/schedules.ts). The same rule as
- * the weather sources' needsWeather, so analytics and the published forecasts agree on which games
- * are outdoors.
+ * A game's roof — the one rule the weather sources' needsWeather also applies
+ * (src/domain/league/roof.ts gameRoofOf): a venue whose roof cannot change under its id (a fixed
+ * dome, an open-air venue abroad — nflverse codes the MCG, Stade de France and Allianz Arena as
+ * `dome`) keeps its physical roof in every season; within the venue table's vintage an open-air US
+ * venue does too and a retractable venue's game row carries its state; past the vintage a known
+ * game roof wins for a venue that may have changed; an unknown venue keeps the game row's value.
  */
 export function gameRoof(
   gameRoofValue: string | null,
-  venueDefault: string | null,
+  venue: VenueRoofFacts | null,
   season: number,
 ): string | null {
-  if (season > REFERENCE_VINTAGES.venues.verified_through_season)
-    return gameRoofValue ?? venueDefault;
-  if (venueDefault === "outdoors" || venueDefault === "dome") return venueDefault;
-  return gameRoofValue ?? venueDefault;
+  return gameRoofOf(gameRoofValue, venue, season);
 }
 
 export const READER_LIST_MAX = 100_000;
@@ -66,6 +60,16 @@ const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const numOrNull = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : typeof v === "bigint" ? Number(v) : null;
 const team = (v: unknown): NflTeam | null => (typeof v === "string" && isNflTeam(v) ? v : null);
+/** The joined ds_venues facts of a games row (null when the venue is not in the table). */
+function venueFactsOf(r: SqlRow): VenueRoofFacts | null {
+  const roof = str(r.venue_roof_default);
+  if (roof === null) return null;
+  return {
+    roof_default: roof,
+    retractable: r.venue_retractable === 1 || r.venue_retractable === 1n,
+    country: str(r.venue_country) ?? "",
+  };
+}
 
 function season(v: unknown): number {
   if (typeof v !== "number" || !Number.isInteger(v) || v < 1990 || v > 2100)
@@ -161,7 +165,7 @@ export function createReaders(o: ReadersOptions): {
       stadium_id: str(r.venue_id),
       stadium: str(r.stadium),
       venue_tz: str(r.venue_tz),
-      roof: gameRoof(str(r.roof), str(r.venue_roof_default), gameSeason),
+      roof: gameRoof(str(r.roof), venueFactsOf(r), gameSeason),
       surface: str(r.surface),
       divisional: div === null ? null : div === 1,
       rest_days: { away: numOrNull(r.away_rest), home: numOrNull(r.home_rest) },
