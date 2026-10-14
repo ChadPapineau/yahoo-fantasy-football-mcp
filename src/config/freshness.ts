@@ -119,20 +119,16 @@ const row = (
     offDayTtlSeconds,
   });
 
-/**
- * The legacy local weekdays (Date#getDay: Thu, Sun, Mon) — used only when a caller passes no game
- * calendar. Deprecated: removed once every caller passes one (season-fresh spec §9 wave 2).
- */
-export const GAME_DAYS: readonly number[] = Object.freeze([4, 0, 1]);
 /** The off-window TTL of the 30-minute classes: the 6-hourly off-season cadence plus a run. */
 const OFF_DAY_TTL = 6 * HOUR + 30 * MIN;
 
 /**
  * The table (plan 01 §5.2 "TTL (fresh)" and "Hard limit", §5.4 "beyond"). Release-based nflverse
  * classes are fresh while the last successful release check is within the TTL — "fresh until the
- * next release" cannot be observed between checks — so each class's launchd job (src/cli/launchd.ts)
- * checks at least once per TTL and one failed run never passes the hard limit (QA-1-036, QA-2-035;
- * tests/cli/launchd-cadence.test.ts holds both).
+ * next release" cannot be observed between checks — so the 15-minute refresh tick
+ * (src/config/cadence.ts, `ff refresh due`) checks each source before its TTL under the game calendar
+ * runs out, and one failed run never passes the hard limit (QA-1-036, QA-2-035;
+ * tests/property/cadence-politeness.test.ts and tests/cli/launchd-cadence.test.ts hold both).
  */
 export const FRESHNESS_TABLE: Readonly<Record<FreshnessClassId, FreshnessClass>> = Object.freeze({
   manual_league: row(
@@ -415,13 +411,11 @@ export function classifyAge(
  * class with `offDayTtlSeconds` (schedules, lines): `ttlSeconds` when the calendar is a fallback or
  * the check lies inside a hot window; otherwise `min(offDayTtlSeconds, max(ttlSeconds, nextHotStart
  * − basis))` — an off-window check expires when the next hot window opens, never sooner than
- * `ttlSeconds` (no next window → `offDayTtlSeconds`). Every other class: `ttlSeconds`.
- * `cal` omitted = the deprecated local-weekday rule (removed in wave 2).
+ * `ttlSeconds` (no next window → `offDayTtlSeconds`). Every other class: `ttlSeconds`. Game days
+ * come from the schedule's kickoff instants only (QA-2-037): never a weekday, never a local zone.
  */
-export function ttlAt(cls: FreshnessClass, basisMs: number, cal?: GameCalendar): number | null {
+export function ttlAt(cls: FreshnessClass, basisMs: number, cal: GameCalendar): number | null {
   if (cls.offDayTtlSeconds === null || cls.basis !== "release") return cls.ttlSeconds;
-  if (cal === undefined)
-    return GAME_DAYS.includes(new Date(basisMs).getDay()) ? cls.ttlSeconds : cls.offDayTtlSeconds;
   if (cal.basis === "fallback" || inHotWindow(cal, basisMs)) return cls.ttlSeconds;
   const next = nextHotStart(cal, basisMs);
   if (next === null) return cls.offDayTtlSeconds;
@@ -488,7 +482,7 @@ export function stampState(
   cls: FreshnessClass,
   t: StampInstants,
   nowMs: number,
-  cal?: GameCalendar,
+  cal: GameCalendar,
 ): StampState {
   if (!Number.isFinite(nowMs)) throw new RangeError("freshness: now must be finite");
   const basis = judgedFromMs(cls, t);

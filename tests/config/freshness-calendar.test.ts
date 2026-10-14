@@ -48,7 +48,7 @@ const cal = (ks: readonly number[]): GameCalendar =>
   scheduleCalendar({ kickoffs: ks, outdoorKickoffs: ks, fileVersion: "v" });
 
 describe("QA-2-037: game days come from the schedule", () => {
-  it("lines checked Sat 2026-12-19 12:00 ET and judged 16:59 ET read stale (fresh under the weekday rule)", async () => {
+  it("lines checked Sat 2026-12-19 12:00 ET and judged 16:59 ET read stale, in every zone", async () => {
     const c = gameCalendarFromGames(await loadFixtureGames(), "fixture");
     const checked = easternWallTimeMs("2026-12-19", 12, 0);
     const judged = easternWallTimeMs("2026-12-19", 16, 59);
@@ -57,10 +57,6 @@ describe("QA-2-037: game days come from the schedule", () => {
         expect(stampState(LINES, at(checked), judged, c).state, tz).toBe("stale");
         expect(stampState(SCHEDULES, at(checked), judged, c).state, tz).toBe("stale");
       });
-    // the weekday rule this replaces calls a US Saturday an off day (the reproduction)
-    expect(withTz("America/New_York", () => stampState(LINES, at(checked), judged).state)).toBe(
-      "fresh",
-    );
   });
 
   it("a check 1 h before each off-weekday kickoff of the fixtures gets 30 min", async () => {
@@ -167,7 +163,6 @@ describe("properties over synthetic seasons and zones", () => {
             checked_at: new Date(NOW - checkedAgo * 1000).toISOString(),
           };
           const want = isExpired(cls, t, NOW);
-          expect(stampState(cls, t, NOW).state === "expired").toBe(want);
           for (const c of cals) expect(stampState(cls, t, NOW, c).state === "expired").toBe(want);
         },
       ),
