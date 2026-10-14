@@ -164,13 +164,13 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
   store. To roll back, restore `store.sqlite.bak-v2` from the backup directory (taken before the
   migration), boot out and delete `io.github.fantasy-football-mcp.ff.refresh-due`, and run the older
   build's `ff install-launchd`.
-- **Dependencies** (`80fdbbf`, the same pins as Dependabot PR #7): `@modelcontextprotocol/server`
+- **Dependencies** (`67dd174`, the same pins as Dependabot PR #7): `@modelcontextprotocol/server`
   and `@modelcontextprotocol/client` 2.2.0 → 2.3.1 (`@modelcontextprotocol/core` 2.3.1; the SDK's
   manifest licence is Apache-2.0 since 2.3.0, on the licence allow-list), `hyparquet` 1.31.2 →
   1.31.3, `@types/node` 24.19.2, `eslint` 10.12.0, `typescript-eslint` 8.71.1; still a
   five-package runtime tree. Visible change: `prompts/get` without `arguments` now answers for
   `ff.start_sit` and `ff.retro` (validated as `{}`); `ff.stream` still refuses. `ff_get_status`
-  reports `sdk_version` 2.3.1. Rollback: revert `80fdbbf` (lockfile and allow-list move together).
+  reports `sdk_version` 2.3.1. Rollback: revert `67dd174` (lockfile and allow-list move together).
 - **QA round 2 behaviour changes** (`docs/qa/2026-10-06-qa-round2.md`):
   - **Dataset files are now `ds_schema` 3** (QA-2-032): a file written by an earlier build may hold
     the opponent's sack yardage with the wrong sign, so it is refused until it is republished. Run
@@ -207,7 +207,7 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
 - **Public history rewritten (2026-10-06, the owner's decision; QA-1-095).** Every commit's author
   and committer is the GitHub no-reply address, the co-author trailers are gone, and the local
   working notes (`docs/scratch/`, `CLAUDE.md`) were removed from every commit: 312 commits became
-  250. The commit ids cited in the docs and the gitleaks allow-list were remapped (`1446c7a`).
+  250. The commit ids cited in the docs and the gitleaks allow-list were remapped (`57c3763`).
   **Old commit ids no longer resolve in a clone of the rewritten history** (GitHub may still serve
   pre-rewrite commits by URL until they are purged); a clone taken before 2026-10-06 must be
   re-cloned (or reset to `origin/main`). Details: `docs/qa/2026-09-30-phase1a-qa-pentest.md` § Open items.
@@ -370,7 +370,7 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
     file kept its mode; each run left a Claude Code session record behind; a result subtype error
     after the tool call gave an empty note (QA-2-014 to QA-2-016, QA-2-018). Its tests now cover
     SIGINT, SIGTERM and SIGHUP each, the SIGKILL step, and clean up after a failed run
-    (QA-2-012, QA-2-013). `b1dcd85` made SIGTERM and SIGHUP interrupt like Ctrl-C.
+    (QA-2-012, QA-2-013). `34ed379` made SIGTERM and SIGHUP interrupt like Ctrl-C.
   - Docs: plan 04 §5 said its whole "Now" column is applied, but Dependabot security updates and
     vulnerability alerts were off (QA-2-019; both enabled on 2026-10-06); plan 07 G3 and plan 01 §4.2
     now say "Build facts" (QA-2-017); plan 09 §3.4 no longer promises a per-candidate range
