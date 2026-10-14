@@ -219,6 +219,10 @@ describe("answer-time refresh latency (season-fresh §6.1)", () => {
       db.prepare(
         "UPDATE refresh_log SET started_at = ?, finished_at = ?, checked_at = ? WHERE source = 'nflverse:injuries'",
       ).run(back, back, back);
+      // the run's season checks are attempts too (the 14-minute floor counts them)
+      db.prepare("UPDATE season_check SET checked_at = ? WHERE source = 'nflverse:injuries'").run(
+        back,
+      );
     } finally {
       db.close();
     }

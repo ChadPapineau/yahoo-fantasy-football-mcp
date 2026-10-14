@@ -24,7 +24,10 @@ import {
 
 const H = 3_600_000;
 
-/** Ages every refresh_log row by `ms` (as if the last checks were that long ago). */
+/**
+ * Ages every refresh_log row and every season_check row by `ms` (as if the last runs were that long
+ * ago: a run's season checks are attempts too, and the 14-minute floor counts them).
+ */
 function ageRefreshLog(home: E2eHome, ms: number): void {
   const db = new DatabaseSync(path.join(home.env.FF_CACHE_DIR ?? "", "store.sqlite"));
   try {
@@ -37,6 +40,12 @@ function ageRefreshLog(home: E2eHome, ms: number): void {
     );
     for (const r of rows)
       upd.run(back(r.started_at), back(r.finished_at), back(r.checked_at), r.id);
+    const checks = db.prepare("SELECT rowid AS id, checked_at FROM season_check").all() as {
+      id: number;
+      checked_at: string;
+    }[];
+    const updCheck = db.prepare("UPDATE season_check SET checked_at = ? WHERE rowid = ?");
+    for (const c of checks) updCheck.run(back(c.checked_at), c.id);
   } finally {
     db.close();
   }
