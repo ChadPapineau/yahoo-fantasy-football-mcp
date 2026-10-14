@@ -175,19 +175,18 @@ export const MARKET = Object.freeze({
   leagueAverageImplied: 22.5,
 });
 
+const NO_BASIS_SEASONS: Readonly<Record<string, readonly [number, number]>> = Object.freeze({});
+
 /**
- * The base rates' basis seasons (POSITION_CV, P_ACTIVE, CORRELATION below), and the vintage the
- * reference registry records for them (season-fresh §2.7): the newest basis season is the registry's
- * `verified_through_season` (a test holds the two equal). Past that season plus its grace the tables
- * still work, E1 names it in its assumptions, and `ff doctor` / G1 report it.
+ * The base rates' vintage and basis seasons (season-fresh §2.7), read from the reference registry
+ * (`REFERENCE_VINTAGES.analytics_base_rates`): POSITION_CV, P_ACTIVE and CORRELATION below are read
+ * off those seasons, the newest of which is the registry's `verified_through_season`. A season year is
+ * written only in the registry (tests/lint/season-agnostic). Past the vintage plus its grace the
+ * tables still work, E1 names it in its assumptions, and `ff doctor` / G1 report it.
  */
 export const BASE_RATES = Object.freeze({
   vintage: REFERENCE_VINTAGES.analytics_base_rates,
-  seasons: Object.freeze({
-    position_cv: Object.freeze([2015, 2021] as const),
-    p_active: Object.freeze([2017, 2023] as const),
-    correlation: Object.freeze([2022, 2025] as const),
-  }),
+  seasons: REFERENCE_VINTAGES.analytics_base_rates.basis_seasons ?? NO_BASIS_SEASONS,
 });
 
 /**

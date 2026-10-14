@@ -276,10 +276,18 @@ describe("the K/DEF look-ahead ends at the season's own last week (§2.6)", () =
 });
 
 describe("the base rates carry the reference registry's vintage (§2.7)", () => {
-  it("the newest basis season is the registry's verified_through_season", () => {
-    const newest = Math.max(...Object.values(BASE_RATES.seasons).map((s) => s[1]));
-    expect(newest).toBe(REFERENCE_VINTAGES.analytics_base_rates.verified_through_season);
-    expect(BASE_RATES.vintage).toBe(REFERENCE_VINTAGES.analytics_base_rates);
+  it("the base rates' basis seasons come from the registry; the newest is its verified_through_season", () => {
+    const v = REFERENCE_VINTAGES.analytics_base_rates;
+    expect(BASE_RATES.vintage).toBe(v);
+    expect(BASE_RATES.seasons).toBe(v.basis_seasons);
+    const spans = Object.values(BASE_RATES.seasons);
+    expect(Object.keys(BASE_RATES.seasons).sort()).toEqual([
+      "correlation",
+      "p_active",
+      "position_cv",
+    ]);
+    for (const [from, to] of spans) expect(from).toBeLessThanOrEqual(to);
+    expect(Math.max(...spans.map(([, to]) => to))).toBe(v.verified_through_season);
   });
 
   it("E1 names the vintage once the season in progress is past it and its grace — never before", () => {
