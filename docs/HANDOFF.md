@@ -457,7 +457,7 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
     answers in a ≈ 293 ms median over real stdio (was 729–830 ms), so A15 is met as literally
     written; the latency test holds it to 500 ms (the pro-rata allowance is gone). 32 × 4000:
     693 ms. Root cause and fix in the Log below; `n_sims` defaults are unchanged.
-11. `tools/list` under `core` is 19,483 of its 20,000-char, downward-only ceiling (2.6 % headroom):
+11. `tools/list` under `core` is 19,731 of its 20,000-char, downward-only ceiling (1.3 % headroom, re-measured 2026-10-14 after the season-fresh build; 19,483 before):
     the next tool added to `core` must shrink a schema or go to `full`.
 12. **E5 under the manual league ignores what `league.yaml` does know (product call).** Plan 07 E5
     (round 2) says every K/DEF candidate carries `availability: "unknown"` under

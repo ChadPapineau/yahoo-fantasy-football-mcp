@@ -151,6 +151,13 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
 - Week bounds come from each season's schedule (a structural bound of 30 in the data layer); the
   tool-input bound stays 22 under tool contract 1, flagged by doctor row 23 and G1 when a schedule
   passes it. A league file without `end_week` keeps the named fallback of week 17 for now.
+- Analytics no longer assume an 18- or 22-week season: input freshness is judged under the game
+  calendar (`collectInputs(stamps, clock, cal)`); the trailing window's prior-season games are that
+  season's own regular weeks (never a postseason week), with the assumption "the <S−1> schedule is
+  not loaded: the trailing window holds <S> games only" when it is missing; a week without a game
+  reads "bye" only in a regular-season week, otherwise the postseason round, "the <S> season ended in
+  week <L>" or "no game scheduled"; the K/DEF look-ahead stops at the season's own last week; E1
+  names the analytics base rates once a season passes their vintage.
 - ESLint: `src/mcp` may not import `src/http`, `src/sources` or `node:child_process`.
 - **Store version 3 (migration 003) — rollback note:** a build from before this change refuses a v3
   store. To roll back, restore `store.sqlite.bak-v2` from the backup directory (taken before the

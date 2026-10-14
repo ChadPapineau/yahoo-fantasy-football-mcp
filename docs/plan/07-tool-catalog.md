@@ -454,6 +454,8 @@ Claude Code warns at 10 000 tokens and truncates at 25 000 by default (06 §A.1)
 
 `core` sits at 97.4 % of its ceiling: by the downward-only rule, the next tool added to `core` shrinks a schema or goes to `full`.
 
+**Re-measured 2026-10-14, after the season-fresh build** (CI run 38564520839, `64d570e`; no tool added, no `datasets` advertised in `tools/list` — `tests/mcp/refresh-meta.test.ts` holds that): `tools/list` under `core` (and `full`) **19,731 chars** ≈ 4.9k tokens (≤ 6.6k) — **269 chars (1.3 %) of headroom**, the growth being G1's and D3's larger output schemas; Skills listing 1,181 chars (onboard's description names the new-season step); prompts list 440. Largest results: `ff_list_players` 14,827 / 15,777, `ff_get_league` 13,914, `ff_search_players` 13,279, `ff_get_schedule` 9,295, analytics max `ff_analyze_lineup` 8,980 / 9,087, `ff_get_status` 4,264 — every tool within its column, including results that carry `meta.refresh`. The next schema growth in `core` must be paid for by a shrink elsewhere.
+
 ### 5.2 What `detail: "compact"` drops (and why the Skills can rely on it)
 
 `compact` keeps every identifier, every number a decision needs, and every `Dist`; it drops per-game rows (usage), per-week arrays beyond three weeks (projections `ros`), `stat_line_expectation`, `shrinkage[]`, `flex_allocation_trace`, `weekly_impact` beyond the next four weeks, and `evidence` strings inside signals. `full` is for the retrospective and for debugging. The cheat-sheet (`ff://docs/tool-outputs`) lists the exact field set per tool per level so a Skill never asks for `full` to find a field that `compact` already has.
