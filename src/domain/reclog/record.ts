@@ -11,6 +11,7 @@ import {
   isLeagueKey,
   isNflTeam,
 } from "../../config/schema.js";
+import { TOOL_INPUT_WEEK_MAX } from "../../config/weeks.js";
 import type { Assumption, Driver, InputFreshness, Rec, RecSubject } from "../analytics/types.js";
 import { parseIso, type Clock, type Rng } from "../clock.js";
 import { SLOT_NAME_RE } from "../league/types.js";
@@ -29,7 +30,7 @@ import {
 
 /** Bounds of an E12 record (mirrors plan 02 §5 / src/mcp BOUNDS, RECORD_LIMITS, REC_LIMITS). */
 export const RECORD_BOUNDS = Object.freeze({
-  week: { min: 1, max: 22 },
+  week: { min: 1, max: TOOL_INPUT_WEEK_MAX },
   season: { min: 2001, max: 2100 },
   /** rec.action, drivers[].name, assumptions[].*, alternatives[].action (TEXT_CAPS.rec_log_text). */
   textChars: 200,

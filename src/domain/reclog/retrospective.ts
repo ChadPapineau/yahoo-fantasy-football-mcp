@@ -7,6 +7,7 @@
 // a final outcome's answer is the one E14 lists. Regret compares like with like (QA-2-041).
 
 import type { NflTeam } from "../../config/schema.js";
+import { TOOL_INPUT_WEEK_MAX } from "../../config/weeks.js";
 import type { InputFreshness, NflGame, Rec, RecSubject, SubjectRole } from "../analytics/types.js";
 import { parseIso, type Clock } from "../clock.js";
 import { firstKickoff, lastKickoff, type LockMode } from "../league/schedule.js";
@@ -738,8 +739,8 @@ export const METRIC_ORDER: readonly MetricName[] = Object.freeze([
  */
 export function buildRetrospective(input: RetrospectiveInput, clock: Clock): RetrospectiveResult {
   const { week, min_n: minN } = input;
-  if (!Number.isInteger(week) || week < 1 || week > 22)
-    throw new RangeError("reclog: week must be an integer 1..22");
+  if (!Number.isInteger(week) || week < 1 || week > TOOL_INPUT_WEEK_MAX)
+    throw new RangeError(`reclog: week must be an integer 1..${String(TOOL_INPUT_WEEK_MAX)}`);
   if (!Number.isInteger(minN) || minN < 1 || minN > 10_000)
     throw new RangeError("reclog: min_n must be an integer 1..10000");
   const warnings: string[] = [];

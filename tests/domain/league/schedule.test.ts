@@ -26,6 +26,7 @@ import {
   weekEndsAt,
   weekPosition,
 } from "../../../src/domain/league/schedule.js";
+import { syntheticSeason } from "../../helpers/season/synthetic.js";
 import { game, WEEK1, WEEK4_PART } from "./fixtures.js";
 
 const ms = (iso: string): number => Date.parse(iso);
@@ -263,5 +264,33 @@ describe("league weeks and the current week", () => {
     expect(easternDate(ms("2026-12-01T05:00:00Z"))).toBe("2026-12-01");
     expect(shiftDate("2026-09-03", -6)).toBe("2026-08-28");
     expect(shiftDate("2026-12-29", 6)).toBe("2027-01-04");
+  });
+});
+
+describe("byes count only regular-season weeks (season-fresh spec §2.5)", () => {
+  it("a team out of the playoffs is never 'on bye' in a postseason week, in any season shape", () => {
+    for (const regWeeks of [18, 19, 20] as const) {
+      const games = syntheticSeason({ season: 2028, regWeeks, seed: regWeeks });
+      const byes = byeWeeks(games, 2028, NFL_TEAMS);
+      for (const t of NFL_TEAMS) {
+        const weeks = byes.get(t) ?? [];
+        expect(
+          weeks.every((w) => w <= regWeeks),
+          `${t} ${String(regWeeks)}`,
+        ).toBe(true);
+        expect(weeks.length, t).toBe(1); // the synthetic schedule gives each team one bye
+      }
+    }
+  });
+
+  it("without game_type (older readers) every scheduled week still counts", () => {
+    const games = syntheticSeason({ season: 2027 }).map((g) => {
+      const { game_type: _t, ...rest } = g;
+      return rest;
+    });
+    const byes = byeWeeks(games, 2027, NFL_TEAMS);
+    // the 18 teams outside the playoffs read as on bye in the postseason weeks (today's rule)
+    const late = NFL_TEAMS.filter((t) => (byes.get(t) ?? []).some((w) => w > 18));
+    expect(late.length).toBeGreaterThanOrEqual(18);
   });
 });

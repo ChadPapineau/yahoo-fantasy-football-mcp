@@ -8,6 +8,7 @@
 // an absent key, and the `{ defense: TEAM }` form for a defence written as a player.
 import { z } from "zod/v4";
 import { GSIS_ID_RE, isNflTeam, NFL_TEAMS } from "../../config/schema.js";
+import { TOOL_INPUT_WEEK_MAX } from "../../config/weeks.js";
 import { normalizeTeam } from "../../domain/crosswalk/teams.js";
 import { KNOWN_CANONICAL } from "../../domain/scoring/types.js";
 import { defineSlot } from "../../domain/league/slots.js";
@@ -89,7 +90,7 @@ const slotName = z
     error: (iss) => slotNameReason(typeof iss.input === "string" ? iss.input : ""),
   });
 const statusCode = z.string().max(8).regex(STATUS_CODE_RE, { message: "not a status code" });
-const week = z.int().min(1).max(22);
+const week = z.int().min(1).max(TOOL_INPUT_WEEK_MAX);
 const teamId = z.int().min(1).max(32);
 const slug = z
   .string()
@@ -298,7 +299,7 @@ export const leagueFileSchema = z
       .optional(),
     opponents: z
       .array(z.object({ week, team: teamId }).strict())
-      .max(22)
+      .max(TOOL_INPUT_WEEK_MAX)
       .optional(),
     free_agents: z.array(rosterEntrySchema).max(500).optional(),
     waivers: z.array(rosterEntrySchema).max(500).optional(),
