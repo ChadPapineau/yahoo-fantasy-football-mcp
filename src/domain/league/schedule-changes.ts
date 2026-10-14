@@ -181,11 +181,10 @@ export function diffSchedules(
 
 // --- the collapsed informational notification ---------------------------------------------------
 
-/** `Sat 20:20` (Eastern) for an ISO instant; null when it is not one. */
-function shortEt(value: string | null): string | null {
-  if (value === null) return null;
-  const ms = Date.parse(value);
-  if (!Number.isFinite(ms)) return null;
+/** `Sat 20:20` (Eastern) for an ISO kickoff value; `TBD` when there is none. */
+function shortEt(value: string | null): string {
+  const ms = value === null ? Number.NaN : Date.parse(value);
+  if (!Number.isFinite(ms)) return "TBD";
   const c = easternClockOf(ms);
   return `${c.weekday} ${String(c.hour).padStart(2, "0")}:${String(c.minute).padStart(2, "0")}`;
 }
@@ -193,44 +192,50 @@ function shortEt(value: string | null): string | null {
 /** The instants a change is about (its old and new kickoff or date), for the 14-day horizon. */
 function changeInstants(c: ScheduleChange): number[] {
   const out: number[] = [];
-  const take = (v: string | null): void => {
-    if (v === null) return;
+  for (const v of [c.old_value, c.new_value]) {
+    if (v === null) continue;
     if (c.kind === "gameday") {
       if (isIsoDate(v)) out.push(easternWallTimeMs(v, 0, 0), easternWallTimeMs(v, 23, 59));
-      return;
+    } else if (c.kind === "kickoff" || c.kind === "added" || c.kind === "removed") {
+      const ms = Date.parse(v);
+      if (Number.isFinite(ms)) out.push(ms);
     }
-    const ms = Date.parse(v);
-    if (Number.isFinite(ms)) out.push(ms);
-  };
-  if (c.kind === "kickoff" || c.kind === "added" || c.kind === "removed" || c.kind === "gameday") {
-    take(c.old_value);
-    take(c.new_value);
   }
   return out;
 }
 
-/** One game's short description from its rows (the kickoff row first). */
-function describe(head: ScheduleChange, rows: readonly ScheduleChange[]): string {
-  const game = `${head.away}@${head.home}`;
-  const k = rows.find((r) => r.kind === "kickoff");
-  if (k !== undefined) {
-    const o = shortEt(k.old_value);
-    const n = shortEt(k.new_value);
-    return `${game} ${o ?? "TBD"} → ${n === null ? "TBD" : `${n} ET`}`;
+/** An Eastern date value, or `TBD`. */
+const dayLabel = (v: string | null): string => (v !== null && isIsoDate(v) ? v : "TBD");
+
+/** Which row describes a game in a notification (only rows that carry an instant). */
+const LEAD_RANK: Readonly<Record<ScheduleChangeKind, number>> = Object.freeze({
+  kickoff: 0,
+  added: 1,
+  removed: 2,
+  gameday: 3,
+  week: 4,
+  venue: 5,
+});
+
+/** One game's short description from its lead row (a kickoff, added, removed or gameday row). */
+function describe(lead: ScheduleChange): string {
+  const game = `${lead.away}@${lead.home}`;
+  switch (lead.kind) {
+    case "kickoff":
+      return `${game} ${shortEt(lead.old_value)} → ${shortEt(lead.new_value)}${lead.new_value === null ? "" : " ET"}`;
+    case "added":
+      return `${game} added ${shortEt(lead.new_value)} ET`;
+    case "removed":
+      return `${game} removed (was ${shortEt(lead.old_value)} ET)`;
+    default:
+      return `${game} ${dayLabel(lead.old_value)} → ${dayLabel(lead.new_value)}`;
   }
-  const add = rows.find((r) => r.kind === "added");
-  if (add !== undefined) return `${game} added ${shortEt(add.new_value) ?? "TBD"}`;
-  const rem = rows.find((r) => r.kind === "removed");
-  if (rem !== undefined) return `${game} removed (was ${shortEt(rem.old_value) ?? "TBD"})`;
-  const day = rows.find((r) => r.kind === "gameday");
-  if (day !== undefined) return `${game} ${day.old_value ?? "TBD"} → ${day.new_value ?? "TBD"}`;
-  return `${game} schedule changed`;
 }
 
 /** One game's changes inside the notification horizon. */
 interface GameGroup {
-  readonly head: ScheduleChange;
-  readonly rows: ScheduleChange[];
+  readonly week: number;
+  lead: ScheduleChange;
   first: number;
 }
 
@@ -254,40 +259,41 @@ export function changeNotificationText(
   nowMs: number,
 ): string | null {
   const games = new Map<string, GameGroup>();
+  const byWeek = new Map<string, GameGroup[]>();
   for (const c of changes) {
     const inside = changeInstants(c).filter((ms) => ms >= nowMs && ms <= nowMs + NOTIFY_HORIZON_MS);
-    const g = games.get(c.game_id) ?? { head: c, rows: [], first: Number.POSITIVE_INFINITY };
-    g.rows.push(c);
-    g.first = Math.min(g.first, ...inside);
-    games.set(c.game_id, g);
-  }
-  const byWeek = new Map<string, { readonly week: number; readonly list: GameGroup[] }>();
-  for (const g of games.values()) {
-    if (!Number.isFinite(g.first)) continue;
-    const key = `${String(g.head.season)}:${String(g.head.week)}`;
-    const w = byWeek.get(key) ?? { week: g.head.week, list: [] };
-    w.list.push(g);
-    byWeek.set(key, w);
+    if (inside.length === 0) continue;
+    const first = Math.min(...inside);
+    const g = games.get(c.game_id);
+    if (g === undefined) {
+      const fresh: GameGroup = { week: c.week, lead: c, first };
+      games.set(c.game_id, fresh);
+      const key = `${String(c.season)}:${String(c.week)}`;
+      byWeek.set(key, [...(byWeek.get(key) ?? []), fresh]);
+    } else {
+      if (LEAD_RANK[c.kind] < LEAD_RANK[g.lead.kind]) g.lead = c;
+      g.first = Math.min(g.first, first);
+    }
   }
   const segments: Segment[] = [];
-  for (const { week, list } of byWeek.values()) {
+  for (const list of byWeek.values()) {
+    const at = Math.min(...list.map((g) => g.first));
     if (list.length >= WEEK_SET_COLLAPSE)
       segments.push({
-        at: Math.min(...list.map((g) => g.first)),
+        at,
         games: list.length,
         collapsed: true,
-        text: `Week ${String(week)} schedule set: ${String(list.length)} games moved`,
+        text: `Week ${String(list[0]?.week)} schedule set: ${String(list.length)} games moved`,
       });
     else
       for (const g of list)
-        segments.push({ at: g.first, games: 1, collapsed: false, text: describe(g.head, g.rows) });
+        segments.push({ at: g.first, games: 1, collapsed: false, text: describe(g.lead) });
   }
   if (segments.length === 0) return null;
   const order = (a: Segment, b: Segment): number => a.at - b.at || a.text.localeCompare(b.text);
   const head = segments.reduce((a, b) => (order(b, a) < 0 ? b : a));
-  const more = segments.reduce((n, s) => n + s.games, 0) - head.games;
+  const more = segments.reduce((n, x) => n + x.games, 0) - head.games;
   const suffix = more > 0 ? ` (+${String(more)} more)` : "";
-  const body = head.collapsed ? head.text : `NFL schedule changed: ${head.text}`;
-  const room = NOTIFICATION_MAX_CHARS - suffix.length;
-  return (body.length <= room ? body : `${body.slice(0, room - 1)}…`) + suffix;
+  // fixed vocabulary only (abbreviations, weekdays, times, dates, counts): well under the cap
+  return `${head.collapsed ? head.text : `NFL schedule changed: ${head.text}`}${suffix}`;
 }
