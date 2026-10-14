@@ -4,7 +4,7 @@
 // weather). Third-party text is wrapped or path-listed; practice rows become fixed codes (plan 02
 // §6.4: news/injury text feeds analytics only as extracted structured features).
 import { z } from "zod/v4";
-import { freshnessClass, stampState } from "../../config/freshness.js";
+import { freshnessClass, isExpired } from "../../config/freshness.js";
 import { GAME_DAY_WINDOW_MS, INJURY_REPORT } from "../../domain/analytics/constants.js";
 import {
   pActive,
@@ -14,6 +14,7 @@ import {
   type ReportState,
 } from "../../domain/analytics/availability.js";
 import type { InjuryReport } from "../../domain/analytics/types.js";
+import { kickoffStatus, placeholderWeeks } from "../../domain/league/kickoff-status.js";
 import { byeWeeks, kickoffMs, teamGame } from "../../domain/league/schedule.js";
 import { isIrEligibleStatus } from "../../domain/league/slots.js";
 import { STATUS_CODE_RE, codeOrNull, type Week } from "../../domain/league/types.js";
@@ -38,14 +39,16 @@ import {
   type UntrustedField,
 } from "../envelope.js";
 import {
+  addScheduleNotes,
   bare,
   inputOf,
   leagueContext,
-  optionalDataset,
+  noScheduleNote,
+  optionalSource,
   requiredSource,
   rosterRows,
   seasonGames,
-  seasonOfInstant,
+  seasonLoaded,
   textSource,
   weekOf,
   type LeagueContext,
@@ -203,6 +206,7 @@ export const getInjuries = defineTool({
   }),
   data: d2Data,
   budget: "list",
+  datasets: ["nflverse:schedules", "nflverse:injuries", "nflverse:roster_weekly"],
   run: async (args, ctx) => {
     const lc = await leagueContext(ctx, args);
     const inputs: InputStamp[] = [lc.input];
@@ -215,22 +219,26 @@ export const getInjuries = defineTool({
         : await selectTargets(ctx, lc, args.players, w, inputs, warnings);
     const gsis = targets.flatMap((t) => (t.subject.kind === "player" ? [t.subject.gsis_id] : []));
     const reports = ctx.services.datasets.injuries.reports(season, w, gsis);
-    const rIn = requiredSource(ctx, "nflverse:injuries", reports, lc.allowStale);
+    // a season upstream has not published yet answers with the named note, never STALE_ONLY
+    // (season-fresh §3.3: the September case)
+    const rIn = requiredSource(ctx, "nflverse:injuries", reports, lc.allowStale, season, {
+      unpublished: "note",
+    });
     if (rIn !== null) inputs.push(rIn);
     const games = seasonGames(ctx, season);
-    const gIn = optionalDataset(games, ctx.nowMs, lc.allowStale);
+    const gIn = optionalSource(ctx, "nflverse:schedules", games, lc.allowStale, season);
     if (gIn !== null) inputs.push(gIn);
     const weekRows = games.rows.filter((g) => g.week === w);
     // the NFL roster status (RES, INA, CUT …) feeds p_active as the projection does (QA-1-035)
     const rr = rosterRows(ctx, season);
-    const rrIn = optionalDataset(rr, ctx.nowMs, lc.allowStale);
+    const rrIn = optionalSource(ctx, "nflverse:roster_weekly", rr, lc.allowStale, season);
     if (rrIn !== null && !inputs.some((i) => i.source === rrIn.source)) inputs.push(rrIn);
     const roster = new Map(rr.rows.map((r) => [r.gsis_id, r]));
     // The official report as the projection reads it (QA-1-021, QA-2-034): each week's report state
     // per team (none / practice report only / game-status report out) from every team's rows, weeks
     // 1..w, so a practice-only row is not "cleared" and a look-ahead week finds the newest
     // game-status report before it; the players' own rows in those weeks.
-    const loaded = reports.stamp !== null;
+    const loaded = seasonLoaded(ctx, "nflverse:injuries", reports.stamp, season);
     const states = new Map<Week, ReadonlyMap<string, ReportState>>();
     const mine = new Map<string, InjuryReport>();
     const wanted = new Set(gsis);
@@ -429,6 +437,11 @@ const d3Game = z.strictObject({
     .nullable(),
   is_final: z.boolean(),
   score: z.strictObject({ away: z.number(), home: z.number() }).nullable(),
+  /** The kickoff may still move (season-fresh §5.3): a placeholder week, a TBD time, a flex window. */
+  kickoff_tentative: z.boolean(),
+  tentative_reason: z.enum(["placeholder_week", "flex_window", "tbd_time"]).nullable(),
+  /** When the flex window of this game closes (advisory, from the NFL's flex rules). */
+  flex_deadline: iso.nullable(),
 });
 
 const d3Data = z.strictObject({
@@ -436,7 +449,10 @@ const d3Data = z.strictObject({
   byes: z.record(z.string().regex(/^\d{1,2}$/), z.array(nflTeam).max(32)),
 });
 
-/** The season a D3 call means: the league's, or — with no league configured — the clock's NFL season. */
+/**
+ * The season a D3 call means: the league's, or — with no league configured — the NFL season in
+ * progress from the loaded schedule (season-fresh §2.3; the bootstrap rule only before any loads).
+ */
 async function scheduleSeason(
   ctx: ToolContext,
   args: { readonly league_key?: string | undefined; readonly allow_stale?: boolean | undefined },
@@ -446,7 +462,7 @@ async function scheduleSeason(
     return { lc, season: lc.league.season };
   } catch (e) {
     if (args.league_key === undefined && e instanceof LeagueFileError && e.kind === "missing")
-      return { lc: null, season: seasonOfInstant(ctx.nowMs) };
+      return { lc: null, season: ctx.view.phase.season };
     throw e;
   }
 }
@@ -492,24 +508,28 @@ export const getSchedule = defineTool({
   }),
   data: d3Data,
   budget: "list",
+  datasets: ["nflverse:schedules", "weather"],
   hint: TRUNCATION_HINTS.schedule,
   run: async (args, ctx) => {
     const allowStale = args.allow_stale === true;
     const { lc, season } = await scheduleSeason(ctx, args);
     const inputs: InputStamp[] = lc === null ? [] : [lc.input];
     const warnings: string[] = [];
-    const weeks: Week[] = [...(args.weeks ?? [lc === null ? 1 : weekOf(lc, undefined)])].sort(
-      (a, b) => a - b,
-    );
+    const phaseWeek = ctx.view.phase.week ?? 1;
+    const weeks: Week[] = [
+      ...(args.weeks ?? [lc === null ? phaseWeek : weekOf(lc, undefined)]),
+    ].sort((a, b) => a - b);
     if (lc === null && args.weeks === undefined)
-      warnings.push("no league configured: week 1 of the current NFL season is shown");
+      warnings.push(
+        `no league configured: week ${String(phaseWeek)} of the ${String(season)} NFL season is shown`,
+      );
     const all = seasonGames(ctx, season);
-    const sIn = requiredSource(ctx, "nflverse:schedules", all, allowStale);
+    const sIn = requiredSource(ctx, "nflverse:schedules", all, allowStale, season);
     if (sIn !== null) inputs.push(sIn);
-    // betting lines past their hard limit (24 h) are not served, as the projections omit them (QA-1-004)
+    // betting lines past their hard limit (24 h) are not served, as the projections omit them
+    // (QA-1-004); expiry never depends on the calendar (season-fresh §3.1)
     const linesExpired =
-      all.stamp !== null &&
-      stampState(freshnessClass("lines"), all.stamp, ctx.nowMs).state === "expired";
+      all.stamp !== null && isExpired(freshnessClass("lines"), all.stamp, ctx.nowMs);
     const wanted = new Set(weeks);
     const games = all.rows
       .filter((g) => wanted.has(g.week))
@@ -529,7 +549,7 @@ export const getSchedule = defineTool({
     >();
     if (args.include_weather && ctx.options.weatherSource !== "off" && games.length > 0) {
       const w = ctx.services.datasets.weather.forGames(games.map((g) => g.game_id));
-      const wIn = w.stamp === null ? null : inputOf(w.stamp, ctx.nowMs, allowStale);
+      const wIn = w.stamp === null ? null : inputOf(ctx, w.stamp, allowStale);
       if (wIn !== null) {
         inputs.push(wIn);
         for (const o of w.rows) {
@@ -545,8 +565,11 @@ export const getSchedule = defineTool({
         }
       }
     }
+    const placeholders = placeholderWeeks(all.rows, season);
+    const schedule = ctx.view.schedule(season);
     const out = games.map((g) => {
       const k = kickoffMs(g.kickoff);
+      const ks = kickoffStatus(g, { nowMs: ctx.nowMs, schedule, placeholders });
       const tz = g.venue_tz !== null && TZ_RE.test(g.venue_tz) ? g.venue_tz : null;
       return {
         game_id: g.game_id,
@@ -574,10 +597,22 @@ export const getSchedule = defineTool({
         weather: wx.get(g.game_id) ?? null,
         is_final: g.is_final,
         score: g.score === null ? null : { away: g.score.away, home: g.score.home },
+        kickoff_tentative: ks.tentative,
+        tentative_reason: ks.reason,
+        flex_deadline: ks.reason === "flex_window" ? ks.until : null,
       };
     });
     if (args.include_lines && linesExpired && games.some((g) => g.lines !== null))
       warnings.push(LINES_EXPIRED_WARNING);
+    for (const w of weeks)
+      if (all.stamp !== null && !all.rows.some((g) => g.week === w))
+        warnings.push(noScheduleNote(season, w));
+    addScheduleNotes(
+      ctx,
+      season,
+      weeks,
+      args.nfl_team === undefined ? null : new Set([args.nfl_team]),
+    );
     const byesAll = byeWeeks(all.rows, season, NFL_TEAMS);
     const byes: Record<string, (typeof NFL_TEAMS)[number][]> = {};
     for (const w of weeks) {

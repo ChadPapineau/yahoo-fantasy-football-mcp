@@ -1,12 +1,18 @@
 // services.ts — what the MCP surface is given by the composition root (plan 01 §1.1: src/mcp may
 // not import src/store or node:fs, so `ff serve` builds this object from the real store, provider
 // and files and hands it to createServer). Typed only by domain/provider interfaces.
+import type { DueSource } from "../config/cadence.js";
 import type { DatasetSourceId } from "../config/freshness.js";
-import type { Toolset, WeatherSource } from "../config/schema.js";
+import type { OnDemandMode, Toolset, WeatherSource } from "../config/schema.js";
 import type {
   DatasetReaders,
+  JobRunRepository,
   ProjectionRepository,
+  ProviderBackoffRepository,
   RefreshLogRepository,
+  RunLockReader,
+  ScheduleChangeRepository,
+  SeasonCheckRepository,
   StoreStats,
   WriteJournalRepository,
 } from "../domain/analytics/types.js";
@@ -16,6 +22,7 @@ import type {
   CrosswalkRepository,
   RosterWeeklyReader,
 } from "../domain/crosswalk/types.js";
+import type { ScheduleView } from "../domain/league/calendar.js";
 import type { IsoInstant, TransactionsSeenRepository } from "../domain/league/types.js";
 import type { RecommendationLogRepository } from "../domain/reclog/types.js";
 import type { FantasyPlatform } from "../providers/platform.js";
@@ -118,8 +125,28 @@ export interface McpServices {
   readonly transactionsSeen: Pick<TransactionsSeenRepository, "list" | "oldestSeen">;
   /** The checked-in crosswalk overrides (loaded once by the composition root). */
   readonly crosswalkOverrides: readonly CrosswalkOverride[];
+  /** The kickoff-change history (season-fresh §5; written by `ff refresh` after a schedules publish). */
+  readonly scheduleChanges: Pick<ScheduleChangeRepository, "recent" | "forWeek">;
+  /** The scheduled jobs' heartbeats (G1 `jobs[]`). */
+  readonly jobRuns: Pick<JobRunRepository, "list">;
+  /** Whether upstream has published a source's season yet (coverage, §3.3). */
+  readonly seasonChecks: Pick<SeasonCheckRepository, "latest" | "all">;
+  /** A provider's 429 / Retry-After pause (G1 `sources[].backoff_until`). */
+  readonly providerBackoff: Pick<ProviderBackoffRepository, "get">;
+  /** Another process's `refresh:<source>` run lock. */
+  readonly runLocks: RunLockReader;
   /** Store health for G1 (`path` is never shown to the model). */
   storeStats(): StoreStats;
+  /** The schedule view over `datasets.schedules` at `nowMs` (calendar, seasons, phase); never throws. */
+  scheduleView(nowMs: number): ScheduleView;
+  /**
+   * Answer-time revalidation (season-fresh §6): may start or join a bounded `ff refresh --on-demand`
+   * child and wait within its budget; never throws; absent = off. The server process never fetches.
+   */
+  ensureFresh?(
+    sources: readonly DueSource[],
+    opts: { readonly requestId: string },
+  ): Promise<RefreshReport | null>;
   /** Called at the start of every tool call / resource read (e.g. `Store.reattachIfChanged`). */
   beforeCall?(): void;
   /** Seed source for calls without `seed` (default: crypto). */
@@ -141,5 +168,9 @@ export interface McpServerOptions {
   readonly weatherSource: WeatherSource;
   /** Whether the operator set FF_WRITE_ENABLED=1 (reported, never honoured — plan 02 §3.4). */
   readonly writeRequested: boolean;
+  /** FF_ON_DEMAND_REFRESH (G1 reports it; `off` means `ensureFresh` is absent). */
+  readonly onDemand: OnDemandMode;
+  /** The configured weather provider's forecast horizon in hours (G1's weather `next_check_at`). */
+  readonly weatherHorizonHours?: number;
   readonly texts: ServerTexts;
 }

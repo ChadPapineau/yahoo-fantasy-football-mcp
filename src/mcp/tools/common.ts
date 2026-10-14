@@ -3,9 +3,21 @@
 // (stampToInput; STALE_ONLY past a hard limit unless allow_stale — plan 01 §5.4), the never-loaded
 // dataset answer (C-14 (c)), provenance tags for untrusted text (plan 02 §6.2), the crosswalk run
 // behind every gsis id a tool shows (research 04 §D; plan 07 C1), and week/lock helpers (plan 07 B1).
-import { freshnessClass, type DatasetSourceId } from "../../config/freshness.js";
+import {
+  SOURCE_REGISTRY,
+  freshnessClass,
+  isDatasetSourceId,
+  type DatasetSourceId,
+} from "../../config/freshness.js";
 import type { NflTeam } from "../../config/schema.js";
+import { ALL_WEEK_INDEXES } from "../../config/weeks.js";
 import type { DatasetResult, DatasetStamp, NflGame } from "../../domain/analytics/types.js";
+import { datasetCoverage, type Coverage } from "../../domain/league/coverage.js";
+import {
+  scheduleWarnings,
+  tentativeWeeks,
+  type TentativeWeek,
+} from "../../domain/league/kickoff-status.js";
 import {
   buildRosterIndex,
   resolveCrosswalk,
@@ -32,13 +44,21 @@ import { positionTypeForLeaguePosition, withPositionType } from "../../domain/sc
 import type { ProjectionSubject, ScoringSettings, StatLine } from "../../domain/scoring/types.js";
 import { isProvisionalWeek } from "../../config/freshness.js";
 import {
+  humanAge,
   isUntrustedSource,
   stampToInput,
   type InputStamp,
   type UntrustedField,
 } from "../envelope.js";
-import { DATASET_NEVER_LOADED_HINT, FfError } from "../errors.js";
+import {
+  DATASET_NEVER_LOADED_HINT,
+  FfError,
+  REFRESH_IN_PROGRESS_HINT,
+  refreshFailedHint,
+  seasonNotPublishedHint,
+} from "../errors.js";
 import type { ToolContext } from "../define.js";
+import { refreshRowOf } from "../refresh.js";
 
 /** Which league and team a call is about, with the platform provenance of the league read. */
 export interface LeagueContext {
@@ -67,48 +87,60 @@ export function readOpts(args: {
   };
 }
 
+/** What judging a stamp needs from a call: its instant, its schedule view and refresh report. */
+export type CallView = Pick<ToolContext, "nowMs" | "view" | "refresh">;
+
 /**
- * A platform or dataset stamp as an envelope input — refusing an input past its class's hard limit
- * with STALE_ONLY unless `allow_stale` (plan 01 §5.4); an `omit`-class input past it is dropped.
+ * The STALE_ONLY for a required input this call cannot serve (season-fresh §6.4): when its
+ * answer-time refresh is still running (or another process's is), `refresh_in_progress` (ask again in
+ * a minute); when it failed or is backing off, `refresh_failed` naming the code; otherwise the table's
+ * error (or `fallback`).
+ */
+function staleOnly(ctx: CallView, source: string, fallback?: FfError): FfError {
+  const row = isDatasetSourceId(source) ? refreshRowOf(ctx.refresh, source) : null;
+  if (row?.outcome === "in_progress" || row?.outcome === "joined")
+    return new FfError("STALE_ONLY", {
+      variant: "refresh_in_progress",
+      hint: REFRESH_IN_PROGRESS_HINT,
+    });
+  if (row?.outcome === "failed" || row?.outcome === "backoff")
+    return new FfError("STALE_ONLY", {
+      variant: "refresh_failed",
+      hint: refreshFailedHint(source, row.code ?? row.outcome),
+    });
+  return fallback ?? new FfError("STALE_ONLY");
+}
+
+/**
+ * A platform or dataset stamp as an envelope input — judged under the call's game calendar
+ * (QA-2-037) — refusing an input past its class's hard limit with STALE_ONLY unless `allow_stale`
+ * (plan 01 §5.4); an `omit`-class input past it is dropped.
  */
 export function inputOf(
+  ctx: CallView,
   stamp: PlatformStamp | DatasetStamp,
-  nowMs: number,
   allowStale: boolean,
 ): InputStamp | null {
-  const input = stampToInput(stamp, nowMs);
+  const input = stampToInput(stamp, ctx.nowMs, ctx.view.calendar);
   if (input.state === "expired" && !allowStale) {
     const cls = freshnessClass(
       "freshness_class" in stamp ? stamp.freshness_class : stamp.freshness,
     );
     if (cls.beyondHard === "omit") return null;
-    throw new FfError("STALE_ONLY");
+    throw staleOnly(ctx, stamp.source);
   }
   return input;
 }
 
 /** `inputOf` for a stamp that can never be `omit`-class (platform facts). */
 export function platformInput(
+  ctx: CallView,
   stamp: PlatformStamp,
-  nowMs: number,
   allowStale: boolean,
 ): InputStamp {
-  const i = inputOf(stamp, nowMs, allowStale);
+  const i = inputOf(ctx, stamp, allowStale);
   if (i === null) throw new FfError("INTERNAL");
   return i;
-}
-
-/**
- * The input of a REQUIRED dataset read: a never-loaded dataset (stamp null) is STALE_ONLY with the
- * "run ff refresh" hint, never an empty success (plan 07 §2; critic C-14 (c)).
- */
-export function requiredDataset<T>(
-  r: DatasetResult<T>,
-  nowMs: number,
-  allowStale: boolean,
-): InputStamp | null {
-  if (r.stamp === null) throw new FfError("STALE_ONLY", { hint: DATASET_NEVER_LOADED_HINT });
-  return inputOf(r.stamp, nowMs, allowStale);
 }
 
 /** The hint for a current dataset whose file is missing or unreadable: a plain refresh repairs it. */
@@ -116,33 +148,146 @@ export function datasetUnreadableHint(source: DatasetSourceId): string {
   return `Run \`ff refresh ${source}\` in a terminal, then retry.`;
 }
 
+/** The hint when the file holds other seasons but not the one asked for (and no check says why). */
+export function seasonMissingHint(source: DatasetSourceId, season: number): string {
+  return `No ${String(season)} data of ${source} is loaded: run \`ff refresh ${source} --seasons ${String(season)}\` in a terminal, then retry.`;
+}
+
+/** The note an optional source's unpublished season adds (season-fresh §3.3). */
+export function notPublishedNote(source: DatasetSourceId, season: number, age: string): string {
+  return `no ${String(season)} ${source} published upstream yet (checked ${age} ago)`;
+}
+
+/** Whole-second age of an instant at the call, as `humanAge` prints it. */
+function ageOf(ctx: CallView, iso: string | null): string {
+  const ms = iso === null ? Number.NaN : Date.parse(iso);
+  return Number.isFinite(ms) ? humanAge(Math.max(0, Math.floor((ctx.nowMs - ms) / 1000))) : "?";
+}
+
+/** Whether the attached file of `source` covers `season` (season-fresh §3.3). */
+export function coverageOf(
+  ctx: Pick<ToolContext, "nowMs" | "view" | "services">,
+  source: DatasetSourceId,
+  stamp: DatasetStamp | null,
+  season: number,
+): Coverage {
+  return datasetCoverage({
+    stamp,
+    season,
+    phase: ctx.view.phase,
+    check: ctx.services.seasonChecks.latest(source, season),
+    hardLimitSeconds: freshnessClass(SOURCE_REGISTRY[source].freshness).hardLimitSeconds,
+    nowMs: ctx.nowMs,
+  });
+}
+
 /**
- * `requiredDataset` for a named source (QA-1-038): when nothing could be read but the refresh log
- * lists a current file for `source`, that file is missing or unreadable (a torn copy, a restore, a
- * disk problem) — not "never loaded" and not "older than its hard limit". The error says so and
- * names the one refresh that repairs it.
+ * A covered stamp as an input: a finished season's data does not age (`complete` — an `expired`
+ * judgment is served as `stale`, never STALE_ONLY); otherwise `inputOf`.
+ */
+function coveredInput(
+  ctx: CallView,
+  stamp: DatasetStamp,
+  cov: Coverage,
+  allowStale: boolean,
+): InputStamp | null {
+  if (cov.state === "complete") {
+    const i = stampToInput(stamp, ctx.nowMs, ctx.view.calendar);
+    return i.state === "expired" ? { ...i, state: "stale" } : i;
+  }
+  return inputOf(ctx, stamp, allowStale);
+}
+
+/** How a required read treats a season upstream has not published yet. */
+export interface RequiredUse {
+  /**
+   * `fatal` (default): STALE_ONLY `season_not_published` naming the season; `note`: answer without
+   * it, with the named note (the projections' trailing window reaches the previous season; D2's
+   * September case).
+   */
+  readonly unpublished?: "fatal" | "note";
+}
+
+/**
+ * The input of a REQUIRED dataset read of `season` (plan 07 §2; critic C-14 (c); QA-1-038;
+ * season-fresh §3.3, §6.4): never an empty success. Not published upstream yet → STALE_ONLY
+ * `season_not_published` (or, with `unpublished: "note"`, the named note); never loaded → STALE_ONLY
+ * (`refresh_in_progress` / `refresh_failed` when this call's refresh says so, `dataset_unreadable`
+ * when the refresh log lists a current file the server cannot attach, else the "run ff refresh"
+ * hint); a file without that season → STALE_ONLY naming it; a finished season never expires.
  */
 export function requiredSource<T>(
   ctx: ToolContext,
   source: DatasetSourceId,
   r: DatasetResult<T>,
   allowStale: boolean,
+  season: number,
+  use: RequiredUse = {},
 ): InputStamp | null {
-  if (r.stamp === null && ctx.services.refreshLog.current().some((c) => c.source === source))
-    throw new FfError("STALE_ONLY", {
-      variant: "dataset_unreadable",
-      hint: datasetUnreadableHint(source),
-    });
-  return requiredDataset(r, ctx.nowMs, allowStale);
+  const cov = coverageOf(ctx, source, r.stamp, season);
+  if (cov.state === "not_published") {
+    if (use.unpublished !== "note")
+      throw new FfError("STALE_ONLY", {
+        variant: "season_not_published",
+        hint: seasonNotPublishedHint(source, season, ageOf(ctx, cov.checked_at)),
+      });
+    ctx.notes.push(notPublishedNote(source, season, ageOf(ctx, cov.checked_at)));
+    return r.stamp === null
+      ? null
+      : coveredInput(ctx, r.stamp, { ...cov, state: "complete" }, true);
+  }
+  if (r.stamp === null) {
+    const unreadable = ctx.services.refreshLog.current().some((c) => c.source === source);
+    throw staleOnly(
+      ctx,
+      source,
+      unreadable
+        ? new FfError("STALE_ONLY", {
+            variant: "dataset_unreadable",
+            hint: datasetUnreadableHint(source),
+          })
+        : new FfError("STALE_ONLY", { hint: DATASET_NEVER_LOADED_HINT }),
+    );
+  }
+  if (cov.state === "missing")
+    throw staleOnly(
+      ctx,
+      source,
+      new FfError("STALE_ONLY", { hint: seasonMissingHint(source, season) }),
+    );
+  return coveredInput(ctx, r.stamp, cov, allowStale);
 }
 
-/** The input of an OPTIONAL dataset read (injuries, weather): null when never loaded. */
-export function optionalDataset<T>(
+/**
+ * The input of an OPTIONAL dataset read of `season` (injuries, weekly rosters, the schedule as a
+ * driver): null when never loaded or without that season; a season not published upstream yet adds
+ * the named note (season-fresh §3.3).
+ */
+export function optionalSource<T>(
+  ctx: ToolContext,
+  source: DatasetSourceId,
   r: DatasetResult<T>,
-  nowMs: number,
   allowStale: boolean,
+  season: number,
 ): InputStamp | null {
-  return r.stamp === null ? null : inputOf(r.stamp, nowMs, allowStale);
+  const cov = coverageOf(ctx, source, r.stamp, season);
+  if (cov.state === "not_published") {
+    ctx.notes.push(notPublishedNote(source, season, ageOf(ctx, cov.checked_at)));
+    return null;
+  }
+  if (r.stamp === null || cov.state === "missing") return null;
+  return coveredInput(ctx, r.stamp, cov, allowStale);
+}
+
+/** Whether a source's season is loaded (covered or complete) — e.g. D2's "report loaded". */
+export function seasonLoaded(
+  ctx: ToolContext,
+  source: DatasetSourceId,
+  stamp: DatasetStamp | null,
+  season: number,
+): boolean {
+  const st = coverageOf(ctx, source, stamp, season).state;
+  return stamp !== null && (st === "covered" || st === "complete");
 }
 
 /** Drops nulls. */
@@ -183,7 +328,7 @@ export async function leagueContext(
   const lc: LeagueContext = {
     ref,
     league: got.value,
-    input: platformInput(got.stamp, ctx.nowMs, allowStale),
+    input: platformInput(ctx, got.stamp, allowStale),
     allowStale,
   };
   ctx.memo.set(key, lc);
@@ -197,7 +342,7 @@ export function take<T>(
   inputs: InputStamp[],
   allowStale: boolean,
 ): T {
-  inputs.push(platformInput(s.stamp, ctx.nowMs, allowStale));
+  inputs.push(platformInput(ctx, s.stamp, allowStale));
   return s.value;
 }
 
@@ -243,16 +388,19 @@ export function weekGames(ctx: ToolContext, season: number, week: Week): Dataset
   );
 }
 
-/** Every week 1..22 of a season (for byes). */
-export const ALL_WEEKS: readonly Week[] = Object.freeze(
-  Array.from({ length: 22 }, (_, i) => i + 1),
-);
-
-/** A season's games (memoised per call). */
+/** A season's games, every week the data holds (memoised per call; no assumed season length). */
 export function seasonGames(ctx: ToolContext, season: number): DatasetResult<NflGame> {
   return memo(ctx, `season:${String(season)}`, () =>
-    ctx.services.datasets.schedules.games(season, ALL_WEEKS),
+    ctx.services.datasets.schedules.games(season, ALL_WEEK_INDEXES),
   );
+}
+
+/**
+ * The last week of `season` in the loaded schedule (postseason included), or null when the season
+ * is not loaded — the bound every "until the end of the season" loop uses (season-fresh §2.6).
+ */
+export function lastWeekOf(ctx: Pick<ToolContext, "view">, season: number): Week | null {
+  return ctx.view.schedule(season)?.last_week ?? null;
 }
 
 /**
@@ -262,7 +410,11 @@ export function seasonGames(ctx: ToolContext, season: number): DatasetResult<Nfl
 export function weekProvisional(ctx: ToolContext, season: number, week: Week): boolean {
   const first = ctx.services.datasets.schedules.firstKickoff(season, week);
   if (first === null || ctx.nowMs < Date.parse(first)) return false;
-  const next = week < 22 ? ctx.services.datasets.schedules.firstKickoff(season, week + 1) : null;
+  const last = lastWeekOf(ctx, season);
+  const next =
+    last !== null && week < last
+      ? ctx.services.datasets.schedules.firstKickoff(season, week + 1)
+      : null;
   return isProvisionalWeek(next === null ? null : Date.parse(next), ctx.nowMs);
 }
 
@@ -337,7 +489,7 @@ export async function leagueUniverse(
       { status: "A", position: null, search: null, sort: null, sort_type: null, sort_week: null },
       { limit: 100, offset },
     );
-    if (page === 0) inputs.push(platformInput(got.stamp, ctx.nowMs, lc.allowStale));
+    if (page === 0) inputs.push(platformInput(ctx, got.stamp, lc.allowStale));
     players.push(...got.value.items);
     if (!got.value.has_more || got.value.next_offset === null) break;
     offset = got.value.next_offset;
@@ -398,10 +550,84 @@ export async function slotsOf(
   return take(ctx, got, inputs, lc.allowStale);
 }
 
-/** A season year for Yahoo-free tools when no league is configured: the NFL season of `nowMs`. */
-export function seasonOfInstant(nowMs: number): number {
-  const d = new Date(nowMs);
-  return d.getUTCMonth() < 2 ? d.getUTCFullYear() - 1 : d.getUTCFullYear();
+// --- the season and the schedule notes (season-fresh §2.3, §5.2, §5.3) ----------------------------------
+
+/**
+ * The tentative weeks among `weeks` of `season` (placeholder week, TBD time, a flex window still
+ * open) from the loaded schedule — any week the tool asks about, not only the next three.
+ */
+export function tentativeFor(
+  ctx: Pick<ToolContext, "view" | "nowMs">,
+  season: number,
+  weeks: readonly Week[],
+): TentativeWeek[] {
+  if (weeks.length === 0) return [];
+  const from = Math.min(...weeks);
+  const wanted = new Set(weeks);
+  return tentativeWeeks(
+    {
+      games: (s) => ctx.view.games(s),
+      schedule: (s) => ctx.view.schedule(s),
+      // the same rule over the requested season, from the first requested week
+      phase: { ...ctx.view.phase, season, phase: "regular", week: from },
+    },
+    ctx.nowMs,
+    Number.MAX_SAFE_INTEGER,
+  ).filter((t) => wanted.has(t.week));
+}
+
+/**
+ * The schedule notes of a result (season-fresh §5.2): kickoff changes detected in the last 7 days
+ * for the requested season/weeks (and teams, when known), then the tentative weeks among them; at
+ * most 3 lines and a count. Added to `ctx.notes`.
+ */
+export function addScheduleNotes(
+  ctx: ToolContext,
+  season: number,
+  weeks: readonly Week[],
+  teams: ReadonlySet<NflTeam> | null,
+): void {
+  const since = new Date(ctx.nowMs - SCHEDULE_NOTES_LOOKBACK_MS).toISOString();
+  ctx.notes.push(
+    ...scheduleWarnings({
+      changes: ctx.services.scheduleChanges.recent(since, SCHEDULE_NOTES_MAX_ROWS),
+      tentative: tentativeFor(ctx, season, weeks),
+      season,
+      weeks,
+      teams,
+      nowMs: ctx.nowMs,
+    }),
+  );
+}
+
+/** How far back the schedule notes read the change log (the warning window is 7 days). */
+const SCHEDULE_NOTES_LOOKBACK_MS = 7 * 86_400_000;
+/** The most change rows one result reads. */
+const SCHEDULE_NOTES_MAX_ROWS = 200;
+
+/**
+ * The league-season notes of the analytics tools (season-fresh §12 B3): a league file for another
+ * season than the NFL season in progress, or for a finished season. Silent while they agree (and in
+ * the off-season for a league file of the next season — draft preparation).
+ */
+export function leagueSeasonNote(
+  ctx: Pick<ToolContext, "view">,
+  leagueSeason: number,
+): string | null {
+  const p = ctx.view.phase;
+  if (p.phase === "offseason") {
+    return leagueSeason <= p.season
+      ? `league season ${String(leagueSeason)} is finished; recommendations describe a completed season`
+      : null;
+  }
+  return leagueSeason === p.season
+    ? null
+    : `league season ${String(leagueSeason)} is not the NFL season in progress (${String(p.season)}, ${p.phase}): run the onboard Skill's new-season step`;
+}
+
+/** The note when a league week has no NFL games in the loaded schedule. */
+export function noScheduleNote(season: number, week: Week): string {
+  return `no ${String(season)} NFL schedule loaded for week ${String(week)}`;
 }
 
 /**

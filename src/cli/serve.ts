@@ -2,7 +2,9 @@
 // shutdown handlers before anything is half-open, store opened + migrated + datasets attached, the
 // provider, the stdio transport in dual-era mode; stdin EOF / SIGTERM / SIGINT / SIGHUP / stdout EPIPE
 // / reparenting → a single-flight close with the store closed; exit codes 0/1/2/5 — plan 03 §1.3).
-// All I/O lives here (src/mcp may not touch the store or the filesystem — plan 01 §1.1).
+// All I/O lives here (src/mcp may not touch the store or the filesystem — plan 01 §1.1). Startup
+// still touches no network; at answer time the server may start a bounded `ff refresh --on-demand`
+// child (season-fresh §6.3, src/cli/on-demand-refresh.ts) — the server process itself never fetches.
 import { homedir } from "node:os";
 import path from "node:path";
 import type { Readable, Writable } from "node:stream";
@@ -30,6 +32,8 @@ import {
 import { ConfigError, loadConfigFromProcess, secretValues, type Config } from "../config/schema.js";
 import { systemClock, type Clock } from "../domain/clock.js";
 import type { CrosswalkOverride } from "../domain/crosswalk/types.js";
+import { scheduleView } from "../domain/league/calendar.js";
+import type { Sleep } from "../http/sleep.js";
 import { createServer } from "../mcp/server.js";
 import type { McpServerOptions, McpServices, ServerTexts } from "../mcp/services.js";
 import { loadCrosswalkOverrides } from "../providers/crosswalk-overrides.js";
@@ -38,6 +42,12 @@ import { storeFactory } from "../store/index.js";
 import { StoreVersionError, type Store, type StoreFactory } from "../store/types.js";
 import { VERSION } from "../version.js";
 import { createLogger, type Logger } from "./log.js";
+import {
+  createOnDemandRefresher,
+  weatherHorizonHours,
+  type OnDemandRefresher,
+  type Spawner,
+} from "./on-demand-refresh.js";
 import { storeOpenReason } from "./store-access.js";
 
 // --- malformed requests (QA-1-085) ----------------------------------------------------------------------
@@ -139,6 +149,17 @@ export interface ServeInternals {
    * arrive while closing, so the forced-exit path is reachable — QA-1-058).
    */
   readonly closeDelayMs?: number;
+  /** The answer-time refresh child's seams (tests: a source entry, `--import tsx`, a fake spawner). */
+  readonly onDemand?: OnDemandInternals;
+}
+
+/** Test seams of the on-demand refresh child (never set by the CLI). */
+export interface OnDemandInternals {
+  /** The CLI entry the child runs (default `<packageRoot>/dist/cli.js`). */
+  readonly entry?: string;
+  readonly execArgv?: readonly string[];
+  readonly spawn?: Spawner;
+  readonly sleep?: Sleep;
 }
 
 /** Plan 03 §7's message for a store written by a newer binary (exit 1). */
@@ -200,6 +221,8 @@ export function storeWeather(c: Config): "weather:open_meteo" | "weather:nws" | 
 export interface Wiring {
   readonly services: McpServices;
   readonly options: McpServerOptions;
+  /** The answer-time refresh orchestrator (serve's shutdown sends its children SIGTERM). */
+  readonly refresher: OnDemandRefresher;
 }
 
 /**
@@ -213,8 +236,38 @@ export function buildServices(args: {
   readonly logger: Logger;
   readonly texts: ServerTexts;
   readonly overrides: readonly CrosswalkOverride[];
+  /** The server's environment (only CHILD_ENV_KEYS reach an on-demand child). */
+  readonly env?: Readonly<Record<string, string | undefined>>;
+  /** The package root (`dist/cli.js` is the child's entry). */
+  readonly packageRoot?: string;
+  readonly onDemand?: OnDemandInternals;
 }): Wiring {
   const { config, store, clock, logger } = args;
+  // one schedule view per instant over the attached schedules file (memoised per file version)
+  const view = (nowMs: number) => scheduleView(store.datasets.schedules, nowMs);
+  const repos = store.repos;
+  const refresher = createOnDemandRefresher(
+    {
+      mode: config.onDemandRefresh,
+      entry: args.onDemand?.entry ?? path.join(args.packageRoot ?? packageRoot(), "dist", "cli.js"),
+      execPath: process.execPath,
+      ...(args.onDemand?.execArgv === undefined ? {} : { execArgv: args.onDemand.execArgv }),
+      env: args.env ?? {},
+      version: VERSION,
+      weatherSource: config.weatherSource,
+      clock,
+      logger,
+      ...(args.onDemand?.spawn === undefined ? {} : { spawn: args.onDemand.spawn }),
+      ...(args.onDemand?.sleep === undefined ? {} : { sleep: args.onDemand.sleep }),
+    },
+    {
+      refreshLog: repos.refreshLog,
+      providerBackoff: repos.providerBackoff,
+      runLocks: repos.runLocks,
+      storeStats: () => store.stats(),
+      scheduleView: view,
+    },
+  );
   // only the package's own placeholder league skips the 0600 check — never any file under an
   // arbitrary FF_FIXTURE_DIR (QA-1-094); loadConfig decides it once, with the location guard
   const fixtureLeague = config.fixtureLeague;
@@ -238,7 +291,14 @@ export function buildServices(args: {
     writeJournal: store.repos.writeJournal,
     transactionsSeen: store.repos.transactionsSeen,
     crosswalkOverrides: args.overrides,
+    scheduleChanges: repos.scheduleChanges,
+    jobRuns: repos.jobRuns,
+    seasonChecks: repos.seasonChecks,
+    providerBackoff: repos.providerBackoff,
+    runLocks: repos.runLocks,
     storeStats: () => store.stats(),
+    scheduleView: view,
+    ...(refresher.state() === "off" ? {} : { ensureFresh: refresher.ensureFresh }),
     beforeCall: () => {
       try {
         store.reattachIfChanged();
@@ -255,9 +315,11 @@ export function buildServices(args: {
     leagueKeys: config.leagueKeys,
     weatherSource: config.weatherSource,
     writeRequested: config.writeRequested,
+    onDemand: config.onDemandRefresh,
+    weatherHorizonHours: weatherHorizonHours(config.weatherSource),
     texts: args.texts,
   };
-  return { services, options };
+  return { services, options, refresher };
 }
 
 /** Loads the crosswalk overrides; a broken file is logged and serving continues without it. */
@@ -329,6 +391,7 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
   // --- shutdown machinery first (plan 03 §1.1 step 2) --------------------------------------------------
   let store: Store | null = null;
   let handle: StdioServerHandle | null = null;
+  let refresher: OnDemandRefresher | null = null;
   let resolveExit!: (code: number) => void;
   const exited = new Promise<number>((r) => {
     resolveExit = r;
@@ -346,6 +409,9 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
     closing = (async () => {
       if (internals.closeDelayMs !== undefined && internals.closeDelayMs > 0)
         await new Promise((r) => setTimeout(r, internals.closeDelayMs));
+      // answer-time refresh children get SIGTERM; never waited on past the drain (their own 60 s
+      // deadline and a SIGKILL 90 s after spawn are the backstops — season-fresh §6.3)
+      refresher?.shutdown();
       try {
         await handle?.close();
       } catch {
@@ -470,7 +536,11 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
       logger,
       texts: loadTexts(root),
       overrides: loadOverrides(root, logger),
+      env: opts.env,
+      packageRoot: root,
+      ...(internals.onDemand === undefined ? {} : { onDemand: internals.onDemand }),
     });
+    refresher = wiring.refresher;
     const transport = new StdioServerTransport(
       opts.stdin as unknown as Readable,
       opts.stdout as unknown as Writable,
@@ -509,6 +579,7 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
       toolset: config.toolset,
       fixture_mode: config.fixtureDir !== null,
       auth: "manual",
+      on_demand: config.onDemandRefresh,
     });
   } catch (e) {
     logger.error("serve.start_failed", { error: e instanceof Error ? e.name : "unknown" });

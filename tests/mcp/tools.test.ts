@@ -115,6 +115,15 @@ const schemaOf = (name: string): z.ZodType => {
   return outputSchemaOf(def) ?? envelopeSchema(z.record(z.string(), z.unknown()));
 };
 
+/** The `basis` of every Dist (an object with p10 and p90) anywhere under `v`. */
+function distBases(v: unknown): string[] {
+  if (Array.isArray(v)) return v.flatMap(distBases);
+  if (typeof v !== "object" || v === null) return [];
+  const o = v as Record<string, unknown>;
+  const own = "p10" in o && "p90" in o && typeof o.basis === "string" ? [o.basis] : [];
+  return [...own, ...Object.values(o).flatMap(distBases)];
+}
+
 describe("every tool: valid arguments → a schema-valid envelope that passes the A6 walk", () => {
   for (const [name, argsList] of Object.entries(VALID)) {
     for (const args of argsList) {
@@ -132,8 +141,8 @@ describe("every tool: valid arguments → a schema-valid envelope that passes th
         expect(hasStructured).toBe(!c10.includes(name));
         if (hasStructured)
           expect((r as { structuredContent: unknown }).structuredContent).toEqual(b);
-        for (const d of JSON.stringify(env.data).matchAll(/"basis":"([a-z_]+)"/g))
-          expect(d[1]).toBe("position_cv");
+        // every Dist's basis (G1's season block has a `basis` of its own: schedule | bootstrap)
+        for (const d of distBases(env.data)) expect(d).toBe("position_cv");
       }, 30_000);
     }
   }

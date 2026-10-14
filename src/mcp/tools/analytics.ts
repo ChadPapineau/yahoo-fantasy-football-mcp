@@ -5,7 +5,7 @@
 // and data.rec, meta.estimate: true, and the 10 000-char analytics budget (plan 07 C8).
 import { randomInt } from "node:crypto";
 import { z } from "zod/v4";
-import { NFL_TEAMS } from "../../config/schema.js";
+import { NFL_TEAMS, type NflTeam } from "../../config/schema.js";
 import {
   analyzeKdef,
   analyzeLineup,
@@ -52,12 +52,16 @@ import {
   type UntrustedField,
 } from "../envelope.js";
 import { FfError } from "../errors.js";
+import { TOOL_INPUT_WEEK_MAX } from "../../config/weeks.js";
 import {
+  addScheduleNotes,
   bare,
-  inputOf,
+  lastWeekOf,
   leagueContext,
+  leagueSeasonNote,
   lockModeOf,
-  optionalDataset,
+  noScheduleNote,
+  optionalSource,
   platformInput,
   requiredSource,
   rosterRows,
@@ -140,22 +144,44 @@ function readers(ctx: ToolContext): ProjectionReaders {
 export const LINES_OMITTED_WARNING = "betting lines omitted: older than 24 h";
 
 /**
- * The dataset gate every analytics tool passes first: schedules and stats must have been loaded
- * (STALE_ONLY + the refresh hint otherwise) and none may be past its hard limit unless allow_stale;
- * injuries and weather are optional. Returns the envelope inputs.
+ * The dataset gate every analytics tool passes first (season-fresh §3.3): the league season's
+ * schedule must be loaded and published (STALE_ONLY — never-loaded, unreadable, refreshing,
+ * refresh-failed or not-published variants — otherwise); stats, when loaded, may not be past their
+ * hard limit unless allow_stale, and a season upstream has not published yet is a note (the trailing
+ * window reaches the previous season); injuries and weather are optional. Notes: a league week with
+ * no NFL games loaded, and a league file for another season than the one in progress. Returns the
+ * envelope inputs.
  */
 function datasetGate(ctx: ToolContext, lc: LeagueContext, weeks: readonly Week[]): InputStamp[] {
   const d = ctx.services.datasets;
   const season = lc.league.season;
+  const games = d.schedules.games(season, weeks);
   const out: (InputStamp | null)[] = [
-    requiredSource(ctx, "nflverse:schedules", d.schedules.games(season, weeks), lc.allowStale),
+    requiredSource(ctx, "nflverse:schedules", games, lc.allowStale, season),
   ];
+  for (const w of weeks)
+    if (!games.rows.some((g) => g.week === w)) ctx.notes.push(noScheduleNote(season, w));
   const stats = d.playerWeeks.lines([], season, weeks);
-  if (stats.stamp !== null) out.push(inputOf(stats.stamp, ctx.nowMs, lc.allowStale));
+  out.push(optionalSource(ctx, "nflverse:stats_player_week", stats, lc.allowStale, season));
   const first = weeks[0];
   if (first !== undefined)
-    out.push(optionalDataset(d.injuries.reports(season, first, []), ctx.nowMs, lc.allowStale));
+    out.push(
+      optionalSource(
+        ctx,
+        "nflverse:injuries",
+        d.injuries.reports(season, first, []),
+        lc.allowStale,
+        season,
+      ),
+    );
+  const note = leagueSeasonNote(ctx, season);
+  if (note !== null) ctx.notes.push(note);
   return out.filter((x): x is InputStamp => x !== null);
+}
+
+/** The NFL teams of a set of lineup or projection targets (the schedule notes' team filter). */
+function teamsOf(xs: readonly { readonly nfl_team: NflTeam | null }[]): ReadonlySet<NflTeam> {
+  return new Set(xs.flatMap((x) => (x.nfl_team === null ? [] : [x.nfl_team])));
 }
 
 /** Names of path-listed rows, one declaration per distinct provenance tag. */
@@ -224,9 +250,16 @@ const e1Data = z.strictObject({
 /** The ROS/season horizon cap (weeks projected in one call; plan 07 §5.2 compact keeps 3). */
 export const HORIZON_MAX_WEEKS = 6;
 
-function horizonWeeks(lc: LeagueContext, horizon: "week" | "ros" | "season", w: Week): Week[] {
+function horizonWeeks(
+  ctx: ToolContext,
+  lc: LeagueContext,
+  horizon: "week" | "ros" | "season",
+  w: Week,
+): Week[] {
   if (horizon === "week") return [w];
-  const end = Math.min(lc.league.end_week, w + HORIZON_MAX_WEEKS - 1, 22);
+  // the season's own last week from the schedule, never an assumed length (season-fresh §2.6)
+  const last = lastWeekOf(ctx, lc.league.season) ?? lc.league.end_week;
+  const end = Math.min(lc.league.end_week, w + HORIZON_MAX_WEEKS - 1, last);
   const out: Week[] = [];
   for (let x = w; x <= end; x++) out.push(x);
   return out.length === 0 ? [w] : out;
@@ -269,6 +302,13 @@ function projectionRow(p: Projection, full: boolean) {
 
 export const projectPlayersTool = defineTool({
   name: "ff_project_players",
+  datasets: [
+    "nflverse:schedules",
+    "nflverse:injuries",
+    "nflverse:roster_weekly",
+    "nflverse:stats_player_week",
+    "weather",
+  ],
   family: "analytics",
   description:
     "Per player-week point distributions (Dist with basis) scored for this league, with p_active, implied total, drivers. Seedable.",
@@ -290,13 +330,14 @@ export const projectPlayersTool = defineTool({
     const warnings: string[] = [];
     const inputs: InputStamp[] = [lc.input];
     const w = weekOf(lc, args.week);
-    const weeks = horizonWeeks(lc, args.horizon, w);
+    const weeks = horizonWeeks(ctx, lc, args.horizon, w);
     if (args.horizon !== "week")
       warnings.push(`horizon capped at ${String(HORIZON_MAX_WEEKS)} weeks from week ${String(w)}`);
     inputs.push(...datasetGate(ctx, lc, weeks));
     const all = await selectTargets(ctx, lc, args.players, w, inputs, warnings);
     const targets = all.filter(projectable);
     if (targets.length === 0) throw new FfError("NOT_FOUND");
+    addScheduleNotes(ctx, lc.league.season, weeks, teamsOf(targets));
     if (targets.length < all.length)
       warnings.push(
         `${String(all.length - targets.length)} players at non-projectable positions omitted`,
@@ -444,7 +485,7 @@ async function opponentKey(
   inputs: InputStamp[],
 ): Promise<string | null> {
   const got = await ctx.services.platform.getMatchups(lc.ref, w);
-  inputs.push(platformInput(got.stamp, ctx.nowMs, lc.allowStale));
+  inputs.push(platformInput(ctx, got.stamp, lc.allowStale));
   for (const m of got.value) {
     const [a, b] = m.teams;
     if (a.team.team_key === mine) return b.team.team_key;
@@ -886,6 +927,13 @@ export function refuseTooDeep(
 
 export const analyzeLineupTool = defineTool({
   name: "ff_analyze_lineup",
+  datasets: [
+    "nflverse:schedules",
+    "nflverse:injuries",
+    "nflverse:roster_weekly",
+    "nflverse:stats_player_week",
+    "weather",
+  ],
   family: "analytics",
   description:
     "Start/sit as an assignment (objective mean by default): recommended lineup, swaps, coin flips, conditionals, locks, rec.",
@@ -921,6 +969,7 @@ export const analyzeLineupTool = defineTool({
       callSeed("ff_analyze_lineup", { league: lc.ref.league_key, team: myKey, week: w }, inputs),
     );
     const mine = await lineupPlayers(ctx, lc, args.team_key, w, settings, rng, inputs, warnings);
+    addScheduleNotes(ctx, lc.league.season, [w], teamsOf(mine.players));
     checkConstraints(args, mine.players, mine.rosterKeys, slots, ctx.nowMs);
     // a points-only league has no opponent to read (QA-2-043): the engine forces objective mean
     const h2h = isHeadToHead(lc.league.scoring_type);
@@ -1055,6 +1104,13 @@ export const MATCHUP_OPPONENT_NO_PLAYERS_HINT =
 
 export const analyzeMatchupTool = defineTool({
   name: "ff_analyze_matchup",
+  datasets: [
+    "nflverse:schedules",
+    "nflverse:injuries",
+    "nflverse:roster_weekly",
+    "nflverse:stats_player_week",
+    "weather",
+  ],
   family: "analytics",
   description:
     "Pre-game head-to-head win probability with interval, both teams' means and spreads, unlocked actionable slots, rec.",
@@ -1090,6 +1146,12 @@ export const analyzeMatchupTool = defineTool({
     const mine = await lineupPlayers(ctx, lc, args.team_key, w, settings, rng, inputs, warnings);
     const found = await opponentPlayers(ctx, lc, myKey, w, settings, rng, inputs, warnings);
     const opp = found.side;
+    addScheduleNotes(
+      ctx,
+      lc.league.season,
+      [w],
+      teamsOf([...mine.players, ...(opp?.players ?? [])]),
+    );
     if (opp === null || opp.players.length === 0)
       throw new FfError("NOT_FOUND", {
         hint: found.key === null ? MATCHUP_NO_OPPONENT_HINT : MATCHUP_OPPONENT_NO_PLAYERS_HINT,
@@ -1263,7 +1325,7 @@ function kdefUniverse(
   inputs: InputStamp[],
 ): KdefCandidateInput[] {
   const rr = rosterRows(ctx, lc.league.season);
-  const rIn = requiredSource(ctx, "nflverse:roster_weekly", rr, lc.allowStale);
+  const rIn = requiredSource(ctx, "nflverse:roster_weekly", rr, lc.allowStale, lc.league.season);
   if (rIn !== null) inputs.push(rIn);
   const defs: KdefCandidateInput[] = NFL_TEAMS.map((t) => ({
     player_key: manualPlayerKeyFor({ kind: "defense", nfl_team: t }),
@@ -1290,6 +1352,13 @@ function kdefUniverse(
 
 export const analyzeWaiversTool = defineTool({
   name: "ff_analyze_waivers",
+  datasets: [
+    "nflverse:schedules",
+    "nflverse:injuries",
+    "nflverse:roster_weekly",
+    "nflverse:stats_player_week",
+    "weather",
+  ],
   family: "analytics",
   description:
     "K/DEF streaming ranking (positions K and DEF only): implied totals, bracket expectations, look-ahead, hold vs stream, rec.",
@@ -1326,8 +1395,13 @@ export const analyzeWaiversTool = defineTool({
     const inputs: InputStamp[] = [lc.input];
     const w = lc.league.current_week;
     const lookAhead = args.look_ahead ?? BOUNDS.lookAheadKdefDefault;
-    const weeks = Array.from({ length: lookAhead + 1 }, (_, i) => w + i).filter((x) => x <= 22);
+    // up to the season's own last week (the schedule's), never an assumed season length
+    const last = lastWeekOf(ctx, lc.league.season) ?? TOOL_INPUT_WEEK_MAX;
+    const weeks = Array.from({ length: lookAhead + 1 }, (_, i) => w + i).filter(
+      (x) => x === w || x <= last,
+    );
     inputs.push(...datasetGate(ctx, lc, weeks));
+    addScheduleNotes(ctx, lc.league.season, weeks, null);
     const settings = await scoringOf(ctx, lc, inputs);
     let universe = kdefUniverse(ctx, lc, inputs);
     if (args.candidates !== undefined) {

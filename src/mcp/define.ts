@@ -8,6 +8,8 @@ import type {
   ToolAnnotations,
 } from "@modelcontextprotocol/server";
 import { z } from "zod/v4";
+import type { DueSource } from "../config/cadence.js";
+import type { ScheduleView } from "../domain/league/calendar.js";
 import {
   ANALYTICS_BUDGET_CHARS,
   RESULT_BUDGET_CHARS,
@@ -25,7 +27,8 @@ import {
   type UntrustedField,
 } from "./envelope.js";
 import { FfError, describeForLog, wrapHandler, type HandlerContext } from "./errors.js";
-import type { McpLogger, McpServerOptions, McpServices } from "./services.js";
+import { refreshWarnings } from "./refresh.js";
+import type { McpLogger, McpServerOptions, McpServices, RefreshReport } from "./services.js";
 
 /** Tool families (plan 01 §4.1 table; plan 07 §2 "Annotations"). */
 export type ToolFamily = "platform" | "analytics" | "external" | "local_write" | "ops";
@@ -84,6 +87,8 @@ export interface CallRecord {
   readonly tool: string;
   /** The week the result was about, or null when the tool names none. */
   readonly week: number | null;
+  /** The call's instant (epoch ms): E12 compares it with later schedule changes (§5.4). */
+  readonly at_ms: number;
 }
 
 /** How many recent calls one server remembers (a session's worth; oldest forgotten first). */
@@ -116,13 +121,43 @@ export function recentCall(services: McpServices, requestId: string): CallRecord
 
 /** Per-call context a tool implementation receives. */
 export interface ToolContext extends HandlerContext {
-  /** The call's instant, read once from the injected Clock. */
+  /** The call's instant, read once from the injected Clock (after any answer-time refresh wait). */
   readonly nowMs: number;
   readonly services: McpServices;
   readonly options: McpServerOptions;
   readonly log: McpLogger;
   /** Per-call memo (league, universe, …) so one call never reads a port twice. */
   readonly memo: Map<string, unknown>;
+  /** The schedule view at `nowMs` (calendar, seasons, phase) — one per call (season-fresh §2). */
+  readonly view: ScheduleView;
+  /** This call's answer-time refresh report (null when none was attempted). */
+  readonly refresh: RefreshReport | null;
+  /**
+   * Warnings the shared helpers add (a season not published upstream yet, a schedule note), appended
+   * to the tool's own; fixed vocabulary only.
+   */
+  readonly notes: string[];
+}
+
+/** The context of one call (tools and resources): the clock read once, the schedule view at it. */
+export function toolContext(
+  requestId: string,
+  services: McpServices,
+  options: McpServerOptions,
+  refresh: RefreshReport | null = null,
+): ToolContext {
+  const nowMs = services.clock.nowMs();
+  return {
+    requestId,
+    nowMs,
+    services,
+    options,
+    log: services.logger,
+    memo: new Map(),
+    view: services.scheduleView(nowMs),
+    refresh,
+    notes: [],
+  };
 }
 
 /** One tool's definition. */
@@ -142,6 +177,11 @@ export interface ToolDefinition<S extends z.ZodType, D> {
   readonly hint?: string;
   /** Top-level arguments advertised as opaque objects (property → where the value comes from). */
   readonly opaqueInput?: Readonly<Record<string, string>>;
+  /**
+   * The dataset sources the tool reads, revalidated before it runs (season-fresh §6.2); empty for
+   * the diagnostics and the local-write tools (plan 03 L5: they never change state).
+   */
+  readonly datasets: readonly DueSource[];
   readonly run: (args: z.output<S>, ctx: ToolContext) => Promise<ToolOutput<D>>;
 }
 
@@ -156,6 +196,7 @@ export interface AnyToolDefinition {
   readonly pageable?: boolean;
   readonly hint?: string;
   readonly opaqueInput?: Readonly<Record<string, string>>;
+  readonly datasets: readonly DueSource[];
   readonly run: (args: never, ctx: ToolContext) => Promise<ToolOutput<unknown>>;
 }
 
@@ -338,15 +379,24 @@ export async function runTool(
 ): Promise<ToolSuccessResult> {
   const log = services.logger;
   services.beforeCall?.();
-  const ctx: ToolContext = {
-    requestId: base.requestId,
-    nowMs: services.clock.nowMs(),
-    services,
-    options,
-    log,
-    memo: new Map(),
-  };
+  // answer-time revalidation (season-fresh §6.2): wait (bounded) for a fresher release of what this
+  // tool reads, then attach what the child published before the call reads its instant and data
+  let refresh: RefreshReport | null = null;
+  if (def.datasets.length > 0 && services.ensureFresh !== undefined) {
+    try {
+      refresh = await services.ensureFresh(def.datasets, { requestId: base.requestId });
+    } catch (e) {
+      log.warn("refresh.ensure_failed", { request_id: base.requestId, error: describeForLog(e) });
+    }
+    services.beforeCall?.();
+  }
+  const ctx = toolContext(base.requestId, services, options, refresh);
   const out = await def.run(args as never, ctx);
+  const warnings = [
+    ...refreshWarnings(refresh, services, ctx.nowMs),
+    ...(out.warnings ?? []),
+    ...ctx.notes,
+  ];
   const env = buildEnvelope({
     data: def.budget === "analytics" ? roundDeep(out.data) : out.data,
     requestId: ctx.requestId,
@@ -357,7 +407,8 @@ export async function runTool(
     ...(out.estimate === undefined ? {} : { estimate: out.estimate }),
     ...(out.bareFields === undefined ? {} : { bareFields: out.bareFields }),
     ...(out.page === undefined ? {} : { page: out.page }),
-    ...(out.warnings === undefined ? {} : { warnings: out.warnings }),
+    warnings,
+    ...(refresh === null ? {} : { refresh }),
   });
   const budget = def.budget === "analytics" ? ANALYTICS_BUDGET_CHARS : RESULT_BUDGET_CHARS;
   const fit = fitToBudget(env, budget, out.listKey, {
@@ -389,7 +440,11 @@ export async function runTool(
       throw new FfError("INTERNAL");
     }
   }
-  rememberCall(services, ctx.requestId, { tool: def.name, week: out.week ?? null });
+  rememberCall(services, ctx.requestId, {
+    tool: def.name,
+    week: out.week ?? null,
+    at_ms: ctx.nowMs,
+  });
   return toToolResult(emitted, full !== null);
 }
 

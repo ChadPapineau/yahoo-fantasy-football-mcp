@@ -32,6 +32,7 @@ import {
   type UntrustedField,
 } from "../envelope.js";
 import {
+  addScheduleNotes,
   bare,
   leagueContext,
   readOpts,
@@ -96,6 +97,8 @@ const a1Data = z.strictObject({
 
 export const listLeagues = defineTool({
   name: "ff_list_leagues",
+  // diagnostics and the local write never refresh (plan 03 L5; season-fresh §6.2)
+  datasets: [],
   family: "platform",
   description:
     "The operator's leagues and my team in each (league_key, team_key, season, current week).",
@@ -432,6 +435,7 @@ export async function leagueDigest(
 
 export const getLeague = defineTool({
   name: "ff_get_league",
+  datasets: ["nflverse:schedules"],
   family: "platform",
   description:
     "League settings digest: scoring rules and brackets (settings_hash), roster slots, waiver/trade rules, weeks.",
@@ -449,6 +453,9 @@ export const getLeague = defineTool({
   budget: "list",
   run: async (args, ctx) => {
     const { data, inputs } = await leagueDigest(ctx, args);
+    // the current week's kickoff changes and tentative kickoffs (season-fresh §5.2)
+    const lc = await leagueContext(ctx, args);
+    addScheduleNotes(ctx, lc.league.season, [lc.league.current_week], null);
     return { data, inputs };
   },
 });
@@ -494,6 +501,7 @@ const a3Data = z.strictObject({
 
 export const getStandings = defineTool({
   name: "ff_get_standings",
+  datasets: ["nflverse:schedules"],
   family: "platform",
   description:
     "Standings with each team's waiver priority, FAAB balance and moves (empty with a warning without standings).",
@@ -588,6 +596,7 @@ export function manualNoMatchupWarning(week: number): string {
 
 export const getScoreboard = defineTool({
   name: "ff_get_scoreboard",
+  datasets: ["nflverse:schedules"],
   family: "platform",
   description:
     "A week's matchups; *_yahoo fields are the platform's own cross-checks. meta.provisional: scoring not final.",
@@ -661,6 +670,8 @@ const TXN_TYPES = [
 
 export const listTransactions = defineTool({
   name: "ff_list_transactions",
+  // diagnostics and the local write never refresh (plan 03 L5; season-fresh §6.2)
+  datasets: [],
   family: "platform",
   description:
     "League transactions, newest first (count, since; never pages). Shape: ff://docs/tool-outputs.",

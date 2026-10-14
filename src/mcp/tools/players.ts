@@ -38,7 +38,7 @@ import {
   leagueContext,
   leaguePositions,
   nflTeamOf,
-  optionalDataset,
+  optionalSource,
   readOpts,
   rosterRows,
   slotsOf,
@@ -118,7 +118,13 @@ function nameProvenance(
 ): ReturnType<typeof bare>[] {
   const sources = [...new Set(items.map((p) => nameSourceOf(p, lc.ref.platform)))];
   if (sources.includes(DATASET_NAME_SOURCE)) {
-    const rIn = optionalDataset(rosterRows(ctx, lc.league.season), ctx.nowMs, lc.allowStale);
+    const rIn = optionalSource(
+      ctx,
+      "nflverse:roster_weekly",
+      rosterRows(ctx, lc.league.season),
+      lc.allowStale,
+      lc.league.season,
+    );
     if (rIn !== null) inputs.push(rIn);
   }
   return (sources.length === 0 ? [textSource(lc.ref.platform, "player.name")] : sources).map((s) =>
@@ -169,6 +175,7 @@ const c1Data = z.strictObject({
 
 export const searchPlayers = defineTool({
   name: "ff_search_players",
+  datasets: ["nflverse:roster_weekly"],
   family: "platform",
   description:
     "Resolve a player name to a player_key (never guess keys), with ownership and crosswalk method/confidence.",
@@ -237,6 +244,7 @@ export const searchPlayers = defineTool({
 
 export const listPlayers = defineTool({
   name: "ff_list_players",
+  datasets: ["nflverse:schedules", "nflverse:roster_weekly"],
   family: "platform",
   description:
     "Browse a player pool page (status, position, sort) with ownership and next opponent. Shape: ff://docs/tool-outputs.",
@@ -291,7 +299,7 @@ export const listPlayers = defineTool({
     );
     const season = lc.league.season;
     const games = weekGames(ctx, season, lc.league.current_week);
-    const gIn = optionalDataset(games, ctx.nowMs, lc.allowStale);
+    const gIn = optionalSource(ctx, "nflverse:schedules", games, lc.allowStale, season);
     if (gIn !== null) inputs.push(gIn);
     const { byKey } = crosswalkRun(ctx, season, got.items);
     const ownerSrc = textSource(lc.ref.platform, "team.name");

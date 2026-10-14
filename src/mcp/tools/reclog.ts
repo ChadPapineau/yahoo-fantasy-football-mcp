@@ -8,9 +8,11 @@
 // E13 (QA-2-042): per-player metrics score the stored pre-lock projections of every roster it reads.
 import { z } from "zod/v4";
 import type { NflTeam } from "../../config/schema.js";
+import { TOOL_INPUT_WEEK_MAX } from "../../config/weeks.js";
 import type { InputFreshness, RecSubject } from "../../domain/analytics/types.js";
 import { lockAtFor } from "../../domain/league/schedule.js";
 import { manualPlayerKeyFor, type Week } from "../../domain/league/types.js";
+import { lockCheck, type LockStatus } from "../../domain/reclog/lock-check.js";
 import { validateRecordInput } from "../../domain/reclog/record.js";
 import {
   buildRetrospective,
@@ -50,10 +52,12 @@ import {
 import { FfError } from "../errors.js";
 import {
   bare,
+  lastWeekOf,
   leagueContext,
   leagueTypedLine,
   lockModeOf,
   requiredSource,
+  rosterRows,
   scoringOf,
   teamOf,
   weekFinal,
@@ -101,6 +105,54 @@ export function recordView(r: RecommendationRecord) {
   };
 }
 
+// --- lock marks (season-fresh §5.4) ---------------------------------------------------------------------
+
+/** E12's warning when a cited analysis predates a schedule change of the logged week. */
+export function scheduleChangedSinceWarning(season: number, week: Week): string {
+  return `the ${String(season)} week ${String(week)} schedule changed after the analysis you cite; re-run it before relying on its lock time`;
+}
+
+/** E13's warning listing the calls logged under a lock time that has since moved (≤ 5 ids). */
+export function movedLockWarning(logIds: readonly string[]): string {
+  const shown = logIds.slice(0, 5).join(", ");
+  const more = logIds.length > 5 ? ` and ${String(logIds.length - 5)} more` : "";
+  return `${String(logIds.length)} logged call(s) were made under a lock time that has since moved (${shown}${more}); their timing advice used the old kickoff`;
+}
+
+/**
+ * The lock mark of one logged recommendation (season-fresh §5.4), derived at read time from the
+ * week's current games (the call's schedule view) and the recorded schedule changes — log rows stay
+ * immutable. The subjects' NFL teams narrow the games: a team subject's own, a player's from the
+ * weekly roster when `roster` is given (E13 reads it; E14, a log browser, reads no dataset), all the
+ * week's games otherwise and for a weekly-lock league.
+ */
+function lockStatusOf(
+  ctx: ToolContext,
+  lc: LeagueContext,
+  r: RecommendationRecord,
+  roster: ReadonlyMap<string, NflTeam> | null,
+): LockStatus {
+  const teams = new Set<NflTeam>();
+  let unknown = false;
+  for (const sub of r.rec.subjects) {
+    const t = sub.nfl_team ?? (sub.gsis_id === null ? undefined : roster?.get(sub.gsis_id));
+    if (t === undefined) unknown = true;
+    else teams.add(t);
+  }
+  const weekly = lockModeOf(lc.league) === "weekly";
+  return lockCheck(
+    {
+      season: r.season,
+      week: r.week,
+      latest_execution_time: r.rec.latest_execution_time,
+      recorded_at: r.recorded_at,
+      subject_teams: weekly || unknown || teams.size === 0 ? null : teams,
+    },
+    ctx.view.games(r.season).filter((g) => g.week === r.week),
+    ctx.services.scheduleChanges.forWeek(r.season, r.week),
+  ).status;
+}
+
 // --- E12 ff_record_recommendation --------------------------------------------------------------------------
 
 const e12Data = z.strictObject({
@@ -116,6 +168,8 @@ const SAFE_CODE = /^[a-z_]{1,40}$/;
 
 export const recordRecommendation = defineTool({
   name: "ff_record_recommendation",
+  // diagnostics and the local write never refresh (plan 03 L5; season-fresh §6.2)
+  datasets: [],
   family: "local_write",
   description:
     "Log a recommendation (an analytics result's rec, alternatives, source request ids) before presenting it. Local write, idempotent on client_ref within a league, season, week and kind.",
@@ -170,6 +224,17 @@ export const recordRecommendation = defineTool({
       warnings.push(
         `${String(unseen)} source_calls were not answered in this server session: their week was not checked`,
       );
+    // a cited analysis made before the week's schedule changed priced the old lock time (§5.4)
+    const cited = args.source_calls
+      .map((c) => recentCall(ctx.services, c.request_id)?.at_ms ?? null)
+      .filter((x): x is number => x !== null);
+    if (cited.length > 0) {
+      const earliest = Math.min(...cited);
+      const moved = ctx.services.scheduleChanges
+        .forWeek(lc.league.season, args.week)
+        .some((c) => Date.parse(c.detected_at) > earliest);
+      if (moved) warnings.push(scheduleChangedSinceWarning(lc.league.season, args.week));
+    }
     const r = await ctx.services.recommendationLog.record(
       input,
       new Date(ctx.nowMs).toISOString(),
@@ -220,6 +285,8 @@ const e13Data = z.strictObject({
         recommended: bareRecText,
         best_alternative: bareRecText.nullable(),
         realised: z.number().nullable(),
+        /** Whether the lock time the call was made under still holds (season-fresh §5.4). */
+        lock_status: z.enum(["current", "moved", "unknown"]),
       }),
     )
     .max(200),
@@ -298,7 +365,8 @@ function newestAsOf(inputs: readonly InputStamp[], source: string): string | nul
 
 /** The default week of E13: the latest final week at or before the current week, else current − 1. */
 function defaultRetroWeek(ctx: ToolContext, lc: LeagueContext): Week {
-  for (let w = Math.min(lc.league.current_week, 22); w >= 1; w--)
+  const last = lastWeekOf(ctx, lc.league.season) ?? TOOL_INPUT_WEEK_MAX;
+  for (let w = Math.min(lc.league.current_week, last); w >= 1; w--)
     if (weekFinal(ctx, lc.league.season, w)) return w;
   return Math.max(1, lc.league.current_week - 1);
 }
@@ -339,6 +407,8 @@ function presenceOf(t: Target): RosterPresence {
 
 export const analyzeRetrospective = defineTool({
   name: "ff_analyze_retrospective",
+  // roster_weekly: the rosters' crosswalk and the lock marks' subject teams
+  datasets: ["nflverse:schedules", "nflverse:roster_weekly", "nflverse:stats_player_week"],
   family: "analytics",
   description:
     "Score a week's logged calls (default: last final week): followed, regret, projection CRPS and coverage, swap regret, Brier.",
@@ -394,7 +464,7 @@ export const analyzeRetrospective = defineTool({
     const oppRoster = opp?.map(presenceOf) ?? null;
     for (const r of [...roster, ...(oppRoster ?? [])]) addSubject(keys, r);
     const lines = ctx.services.datasets.playerWeeks.lines([...keys.gsis], season, [w]);
-    const lIn = requiredSource(ctx, "nflverse:stats_player_week", lines, lc.allowStale);
+    const lIn = requiredSource(ctx, "nflverse:stats_player_week", lines, lc.allowStale, season);
     if (lIn !== null) inputs.push(lIn);
     const dLines =
       keys.teams.size === 0
@@ -516,12 +586,26 @@ export const analyzeRetrospective = defineTool({
     }
     if (busy) warnings.push("some scored outcomes were not saved (store busy); run again later");
     const r = result.retrospective;
+    const byLog = new Map(records.map((x) => [x.log_id, x]));
+    const teamOfGsis = new Map(rosterRows(ctx, season).rows.map((x) => [x.gsis_id, x.team]));
+    const marks = new Map(
+      r.calls.map((c) => {
+        const rec = byLog.get(c.log_id);
+        return [
+          c.log_id,
+          rec === undefined ? ("unknown" as const) : lockStatusOf(ctx, lc, rec, teamOfGsis),
+        ];
+      }),
+    );
+    const moved = [...marks].filter(([, m]) => m === "moved").map(([id]) => id);
+    if (moved.length > 0) warnings.push(movedLockWarning(moved));
     const data = {
       ...r,
       calls: r.calls.map((c) => ({
         ...c,
         recommended: recText(c.recommended),
         best_alternative: c.best_alternative === null ? null : recText(c.best_alternative),
+        lock_status: marks.get(c.log_id) ?? "unknown",
       })),
       attribution: null,
       rec: { ...r.rec, log_id: null },
@@ -547,6 +631,8 @@ export const analyzeRetrospective = defineTool({
 
 export const listRecommendations = defineTool({
   name: "ff_list_recommendations",
+  // diagnostics and the local write never refresh (plan 03 L5; season-fresh §6.2)
+  datasets: [],
   family: "analytics",
   description:
     "Browse the recommendation log, newest first; action_summary is untrusted. Shape: ff://docs/tool-outputs.",
@@ -570,7 +656,14 @@ export const listRecommendations = defineTool({
       limit: args.limit,
       offset: args.offset,
     });
-    const items = page.items.map((i) => ({ ...i, action_summary: recText(i.action_summary) }));
+    const items = page.items.map((i) => {
+      const rec = ctx.services.recommendationLog.get(i.log_id);
+      return {
+        ...i,
+        action_summary: recText(i.action_summary),
+        lock_status: rec === null ? ("unknown" as const) : lockStatusOf(ctx, lc, rec, null),
+      };
+    });
     return {
       data: { items },
       inputs: [lc.input],

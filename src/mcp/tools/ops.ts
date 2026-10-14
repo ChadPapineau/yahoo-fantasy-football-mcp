@@ -13,7 +13,16 @@ import {
   isDatasetSourceId,
   type DatasetSourceId,
 } from "../../config/freshness.js";
+import { SCHEDULE_CHANGE_KINDS } from "../../domain/analytics/types.js";
 import type { CrosswalkDiagnostic } from "../../domain/crosswalk/matcher.js";
+import type { ScheduleView } from "../../domain/league/calendar.js";
+import { datasetCoverage } from "../../domain/league/coverage.js";
+import {
+  scheduleBlock,
+  seasonBlock,
+  type ScheduleBlock,
+  type SeasonBlock,
+} from "../../domain/league/status-blocks.js";
 import type { UnmatchedPlayer } from "../../domain/crosswalk/types.js";
 import {
   LEAGUE_FILE_INVALID_HINT,
@@ -25,6 +34,7 @@ import {
 import { defineTool, type ToolContext } from "../define.js";
 import { UNTRUSTED_POINTER, bareUntrusted, buildEnvelope, type InputStamp } from "../envelope.js";
 import { FfError, describeForLog, wrapHandler } from "../errors.js";
+import { basisOf, nextTickAt, providerOf, tickDecisionOf } from "../refresh.js";
 import type { McpServerOptions, McpServices } from "../services.js";
 import { bare, leagueContext, leagueUniverse, textSource, type LeagueContext } from "./common.js";
 import { advertisedInputSchema, advertisedOutputSchema, FAMILY_ANNOTATIONS } from "../define.js";
@@ -61,15 +71,21 @@ const sourceRow = z.strictObject({
   /**
    * `unreadable`: the refresh log lists a current file the server cannot serve — missing, damaged,
    * or another source's/version's/layout's (QA-1-038; the tools answer STALE_ONLY "missing or
-   * unreadable" for it, and `ff refresh <source>` repairs it).
+   * unreadable" for it, and `ff refresh <source>` repairs it). `not_published`: the season in
+   * progress is not published upstream yet (a recent season check; season-fresh §3.3) — upstream's
+   * state, not an outage.
    */
-  freshness: z.enum(["fresh", "stale", "expired", "never_loaded", "unreadable"]),
+  freshness: z.enum(["fresh", "stale", "expired", "never_loaded", "unreadable", "not_published"]),
   rows: z.number().int().min(0).nullable(),
   last_error: z
     .string()
     .regex(/^[a-z_]{1,40}$/)
     .nullable(),
   consecutive_failures: z.number().int().min(0),
+  /** When the scheduled tick next checks this source (a UTC quarter-hour), null when it will not. */
+  next_check_at: iso.nullable(),
+  /** The provider's 429 / Retry-After pause, while one is active. */
+  backoff_until: iso.nullable(),
 });
 export type SourceRow = z.infer<typeof sourceRow>;
 
@@ -81,20 +97,56 @@ export type SourceRow = z.infer<typeof sourceRow>;
  * "cannot be served". This holds while every current source fits the attach slots (MAX_ATTACHED −
  * RESERVED_ATTACH_SLOTS = 9; Phase 1a has at most six sources).
  */
-export function sourceRows(ctx: {
-  services: McpServices;
-  options: McpServerOptions;
-  nowMs: number;
-}): SourceRow[] {
+export function sourceRows(ctx: StatusCtx): SourceRow[] {
   const current = new Map(ctx.services.refreshLog.current().map((r) => [r.source, r]));
   const attached = new Map(
     ctx.services.storeStats().attached.map((a) => [a.source, a.file_version]),
   );
+  const cal = ctx.view.calendar;
   return statusSources(ctx.options).map((id) => {
     const ok = current.get(id);
     const latest = ctx.services.refreshLog.latest(id);
     const failures = ctx.services.refreshLog.consecutiveFailures(id);
     const info = SOURCE_REGISTRY[id];
+    const decision = tickDecisionOf(
+      ctx.services,
+      id,
+      cal,
+      ctx.nowMs,
+      ctx.options.weatherHorizonHours ?? DEFAULT_WEATHER_HORIZON_HOURS,
+    );
+    const at = decision === null ? null : decision.due ? ctx.nowMs : decision.next_at_ms;
+    const backoff = ctx.services.providerBackoff.get(providerOf(id));
+    const backoffMs = backoff === null ? Number.NaN : Date.parse(backoff.until_at);
+    const timing = {
+      next_check_at: at === null ? null : new Date(nextTickAt(at)).toISOString(),
+      backoff_until:
+        Number.isFinite(backoffMs) && backoffMs > ctx.nowMs
+          ? new Date(backoffMs).toISOString()
+          : null,
+    };
+    // the season in progress not published upstream yet reads as such, never as an outage (§3.3)
+    const unpublished =
+      !id.startsWith("weather:") &&
+      datasetCoverage({
+        stamp:
+          ok?.file_version == null
+            ? null
+            : {
+                source: id,
+                as_of: ok.release_updated_at ?? ok.finished_at,
+                fetched_at: ok.finished_at,
+                checked_at: ok.checked_at,
+                freshness_class: info.freshness,
+                file_version: ok.file_version,
+                seasons: ok.seasons,
+              },
+        season: ctx.view.phase.season,
+        phase: ctx.view.phase,
+        check: ctx.services.seasonChecks.latest(id, ctx.view.phase.season),
+        hardLimitSeconds: freshnessClass(info.freshness).hardLimitSeconds,
+        nowMs: ctx.nowMs,
+      }).state === "not_published";
     const lastError =
       latest !== null &&
       !latest.ok &&
@@ -110,32 +162,69 @@ export function sourceRows(ctx: {
         license: info.attribution.license,
         last_success_at: null,
         age_s: null,
-        freshness: "never_loaded" as const,
+        freshness: unpublished ? ("not_published" as const) : ("never_loaded" as const),
         rows: null,
         last_error: lastError,
         consecutive_failures: failures,
+        ...timing,
       };
-    const st = stampState(
-      freshnessClass(info.freshness),
-      {
-        as_of: ok.release_updated_at ?? ok.finished_at,
-        fetched_at: ok.finished_at,
-        checked_at: ok.checked_at,
-      },
-      ctx.nowMs,
-    );
+    const st = stampState(freshnessClass(info.freshness), basisOf(ok), ctx.nowMs, cal);
     const servable = ok.file_version !== null && attached.get(id) === ok.file_version;
     return {
       id,
       license: info.attribution.license,
       last_success_at: new Date(Date.parse(ok.finished_at)).toISOString(),
       age_s: st.age_s,
-      freshness: servable ? st.state : ("unreadable" as const),
+      freshness: !servable
+        ? ("unreadable" as const)
+        : unpublished
+          ? ("not_published" as const)
+          : st.state,
       rows: ok.rows,
       last_error: lastError,
       consecutive_failures: failures,
+      ...timing,
     };
   });
+}
+
+/** What the status surfaces read: the services, the options, the instant and its schedule view. */
+export interface StatusCtx {
+  readonly services: McpServices;
+  readonly options: McpServerOptions;
+  readonly nowMs: number;
+  readonly view: ScheduleView;
+}
+
+/** The forecast horizon assumed when the options do not carry the provider's (Open-Meteo's 7 days). */
+export const DEFAULT_WEATHER_HORIZON_HOURS = 7 * 24;
+
+/** How far back G1 (and `ff status`) list kickoff changes: the notification horizon (§5.1). */
+export const STATUS_CHANGES_WINDOW_MS = 14 * 86_400_000;
+/** The most change rows the status surfaces read. */
+export const STATUS_CHANGES_MAX_ROWS = 200;
+
+/**
+ * The `season` and `schedule` blocks G1 and `ff status` print (season-fresh §4.5, §5.2): built by
+ * the B1 builders over the same ports, so the two surfaces agree by construction (src/cli may call
+ * this; tests/mcp/status-blocks-parity.test.ts holds it).
+ */
+export function statusBlocks(i: {
+  readonly view: ScheduleView;
+  readonly leagueSeason: number | null;
+  readonly seasonChecks: Pick<McpServices["seasonChecks"], "all">;
+  readonly scheduleChanges: Pick<McpServices["scheduleChanges"], "recent">;
+  readonly nowMs: number;
+}): { readonly season: SeasonBlock; readonly schedule: ScheduleBlock } {
+  const since = new Date(i.nowMs - STATUS_CHANGES_WINDOW_MS).toISOString();
+  return {
+    season: seasonBlock(i.view, i.leagueSeason, i.seasonChecks.all(), i.nowMs),
+    schedule: scheduleBlock(
+      i.view,
+      i.scheduleChanges.recent(since, STATUS_CHANGES_MAX_ROWS),
+      i.nowMs,
+    ),
+  };
 }
 
 /** The NFL players an unmatched entry might be (QA-1-048): enough to pick the right gsis_id. */
@@ -173,6 +262,72 @@ const diagnosticRow = z.strictObject({
   code: z.enum(SURFACED_DIAGNOSTICS),
   platform_player_id: playerKey.nullable(),
   gsis_ids: z.array(gsisId).max(10),
+});
+
+/** A schedule-change value: an ISO kickoff, an Eastern date, a venue id or a week number (§5.1). */
+const changeValue = z
+  .string()
+  .regex(/^[A-Za-z0-9:._+-]{1,40}$/)
+  .nullable();
+const seasonPhaseName = z.enum(["preseason", "regular", "postseason", "offseason"]);
+const tentativeWeekRow = z.strictObject({
+  season: z.number().int(),
+  week,
+  reason: z.enum(["placeholder_week", "flex_window", "tbd_time"]),
+  until: iso.nullable(),
+});
+
+/** G1 `season` (status-blocks.ts SeasonBlock). */
+const seasonBlockSchema = z.strictObject({
+  nfl_season: z.number().int(),
+  phase: seasonPhaseName,
+  basis: z.enum(["schedule", "bootstrap"]),
+  week: week.nullable(),
+  next_kickoff: iso.nullable(),
+  league_season: z.number().int().nullable(),
+  league_matches: z.boolean().nullable(),
+  not_published: z
+    .array(
+      z.strictObject({
+        source: z.string().regex(/^[a-z_]+:[a-z_]+$/),
+        season: z.number().int(),
+        checked_at: iso,
+      }),
+    )
+    .max(10),
+  reference_past_vintage: z
+    .array(
+      z.strictObject({
+        id: z.enum(["venues", "flex_rules", "analytics_base_rates"]),
+        verified_through_season: z.number().int(),
+      }),
+    )
+    .max(10),
+  week_bound_exceeded: z.boolean(),
+});
+
+/** G1 `schedule` (status-blocks.ts ScheduleBlock + the tick's next schedules check). */
+const scheduleBlockSchema = z.strictObject({
+  calendar: z.enum(["schedule", "fallback"]),
+  fallback_reason: z.enum(["never_loaded", "unreadable", "expired", "no_kickoffs"]).nullable(),
+  in_window: z.boolean(),
+  next_kickoff: iso.nullable(),
+  recent_changes: z
+    .array(
+      z.strictObject({
+        game: z.string().regex(/^[A-Z]{2,3}@[A-Z]{2,3}$/),
+        season: z.number().int(),
+        week,
+        kind: z.enum(SCHEDULE_CHANGE_KINDS),
+        old: changeValue,
+        new: changeValue,
+        detected_at: iso,
+      }),
+    )
+    .max(10),
+  recent_changes_more: z.number().int().min(0),
+  tentative_weeks: z.array(tentativeWeekRow).max(3),
+  next_check_at: iso.nullable(),
 });
 
 const g1Data = z.strictObject({
@@ -214,6 +369,10 @@ const g1Data = z.strictObject({
     .strictObject({ league_key: z.string().max(64), current_week: week, edit_key: week.nullable() })
     .nullable(),
   limiter: z.strictObject({ bucket_level: z.null(), last_999_at: z.null() }),
+  /** Where the NFL season is and whether the league file keeps up (season-fresh §4.5). */
+  season: seasonBlockSchema,
+  /** The game calendar, recent kickoff changes and tentative weeks (season-fresh §5.2). */
+  schedule: scheduleBlockSchema,
   sources: z.array(sourceRow).max(20),
   crosswalk: z
     .strictObject({
@@ -327,8 +486,76 @@ function datasetChecks(sources: readonly SourceRow[]): StatusCheck[] {
       required,
       (x) => x.freshness !== "never_loaded" && x.freshness !== "unreadable",
     ),
-    row("datasets_fresh", required, (x) => x.freshness === "fresh"),
-    row("optional_drivers", optional, (x) => x.freshness === "fresh"),
+    // a season upstream has not published yet is nothing to refresh (season-fresh §3.3, §4.5)
+    row(
+      "datasets_fresh",
+      required,
+      (x) => x.freshness === "fresh" || x.freshness === "not_published",
+    ),
+    row(
+      "optional_drivers",
+      optional,
+      (x) => x.freshness === "fresh" || x.freshness === "not_published",
+    ),
+  ];
+}
+
+/** The tick's job name (src/cli/launchd.ts JOBS) whose heartbeat G1 checks. */
+export const REFRESH_TICK_JOB = "refresh-due";
+/** A tick heartbeat older than this is missing (doctor row 11's rule). */
+export const TICK_HEARTBEAT_MAX_AGE_MS = 3_600_000;
+
+/** G1's season and schedule checks (season-fresh §4.5, §5.2, §6). */
+function seasonStatusChecks(
+  ctx: StatusCtx,
+  season: SeasonBlock,
+  schedule: ScheduleBlock,
+  jobs: StatusData["jobs"],
+): StatusCheck[] {
+  const tick = jobs.find((j) => j.label === REFRESH_TICK_JOB);
+  const tickAt = tick?.last_run_at == null ? Number.NaN : Date.parse(tick.last_run_at);
+  const tickDetail =
+    tick === undefined || !Number.isFinite(tickAt)
+      ? "no_heartbeat"
+      : ctx.nowMs - tickAt > TICK_HEARTBEAT_MAX_AGE_MS
+        ? "stale_heartbeat"
+        : tick.exit !== 0
+          ? "last_run_failed"
+          : "ok";
+  const vintage = season.reference_past_vintage[0];
+  return [
+    {
+      id: "schedule_calendar",
+      ok: schedule.calendar === "schedule",
+      detail: schedule.fallback_reason ?? "schedule",
+    },
+    {
+      id: "kickoff_changes",
+      ok: schedule.recent_changes.length === 0,
+      detail: schedule.recent_changes.length === 0 ? "none" : "recent_changes",
+    },
+    {
+      id: "season_match",
+      ok: season.league_matches !== false,
+      detail:
+        season.league_matches === null
+          ? "no_league"
+          : season.league_matches
+            ? "ok"
+            : "league_season_differs",
+    },
+    {
+      id: "reference_vintage",
+      ok: vintage === undefined,
+      detail: vintage === undefined ? "ok" : vintage.id,
+    },
+    {
+      id: "schedule_week_bound",
+      ok: !season.week_bound_exceeded,
+      detail: season.week_bound_exceeded ? "week_bound_exceeded" : "ok",
+    },
+    { id: "refresh_tick", ok: tickDetail === "ok", detail: tickDetail },
+    { id: "on_demand", ok: true, detail: ctx.options.onDemand },
   ];
 }
 
@@ -380,6 +607,25 @@ export async function statusSnapshot(
   const journal = s.writeJournal.countByStatus();
   const pending = s.writeJournal.oldestPendingAgeSeconds(new Date(ctx.nowMs).toISOString());
   const sources = sourceRows(ctx);
+  const blocks = statusBlocks({
+    view: ctx.view,
+    leagueSeason: lc === null ? null : lc.league.season,
+    seasonChecks: s.seasonChecks,
+    scheduleChanges: s.scheduleChanges,
+    nowMs: ctx.nowMs,
+  });
+  const scheduleRow = sources.find((x) => x.id === "nflverse:schedules");
+  const schedule = { ...blocks.schedule, next_check_at: scheduleRow?.next_check_at ?? null };
+  const jobs: StatusData["jobs"] = s.jobRuns
+    .list()
+    .slice(0, 20)
+    .map((j) => ({
+      label: j.job,
+      last_run_at: Number.isFinite(Date.parse(j.last_run_at))
+        ? new Date(Date.parse(j.last_run_at)).toISOString()
+        : null,
+      exit: j.exit,
+    }));
   const rf = caps.read_features;
   const data: StatusData = {
     server: {
@@ -415,6 +661,16 @@ export async function statusSnapshot(
             edit_key: lc.league.edit_key,
           },
     limiter: { bucket_level: null, last_999_at: null },
+    season: {
+      ...blocks.season,
+      not_published: blocks.season.not_published.map((x) => ({ ...x })),
+      reference_past_vintage: blocks.season.reference_past_vintage.map((x) => ({ ...x })),
+    },
+    schedule: {
+      ...schedule,
+      recent_changes: schedule.recent_changes.map((x) => ({ ...x })),
+      tentative_weeks: schedule.tentative_weeks.map((x) => ({ ...x })),
+    },
     sources,
     crosswalk,
     store: {
@@ -429,7 +685,7 @@ export async function statusSnapshot(
       sent_unknown: journal.sent_unknown ?? 0,
       oldest_pending_age_s: pending === null ? null : Math.max(0, Math.floor(pending)),
     },
-    jobs: [],
+    jobs,
     checks: includeChecks
       ? [
           { id: "league_file", ok: leagueCheck === "ok", detail: leagueCheck },
@@ -449,6 +705,7 @@ export async function statusSnapshot(
                   ? "ok"
                   : "unmatched_rostered",
           },
+          ...seasonStatusChecks(ctx, blocks.season, schedule, jobs),
         ]
       : null,
   };
@@ -457,6 +714,8 @@ export async function statusSnapshot(
 
 export const getStatus = defineTool({
   name: "ff_get_status",
+  // diagnostics and the local write never refresh (plan 03 L5; season-fresh §6.2)
+  datasets: [],
   family: "ops",
   description:
     "Status: version, tool_contract, capabilities (writes off), league and current week, source freshness, crosswalk, store.",
@@ -491,11 +750,7 @@ export const getStatus = defineTool({
 // --- the freshness report (ff://status/freshness) -------------------------------------------------------
 
 /** The plan 01 §5.4 class table rows of the Phase-1a classes, with each source's current state. */
-export function freshnessReport(ctx: {
-  services: McpServices;
-  options: McpServerOptions;
-  nowMs: number;
-}) {
+export function freshnessReport(ctx: StatusCtx) {
   const sources = sourceRows(ctx);
   const classes = [
     "manual_league",

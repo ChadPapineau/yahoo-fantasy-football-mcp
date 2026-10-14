@@ -23,7 +23,7 @@ import {
   crosswalkRun,
   leagueUniverse,
   nflTeamOf,
-  optionalDataset,
+  optionalSource,
   platformInput,
   rosterRows,
   subjectFromKey,
@@ -129,7 +129,7 @@ export async function rosterTargets(
 ): Promise<Target[]> {
   const team = teamOf(lc, teamKey);
   const got = await ctx.services.platform.getRoster(team, week);
-  inputs.push(platformInput(got.stamp, ctx.nowMs, lc.allowStale));
+  inputs.push(platformInput(ctx, got.stamp, lc.allowStale));
   // every rostered key, matched or not (E2 tells "not on this roster" from "not projectable")
   for (const e of got.value.entries) rosterKeys?.add(e.player.ref.id);
   const { byKey } = crosswalkRun(
@@ -171,7 +171,7 @@ export async function selectTargets(
   const season = lc.league.season;
   const nameSrc = textSource(lc.ref.platform, "player.name");
   const rr = rosterRows(ctx, season);
-  const rrIn = optionalDataset(rr, ctx.nowMs, lc.allowStale);
+  const rrIn = optionalSource(ctx, "nflverse:roster_weekly", rr, lc.allowStale, season);
   if (rrIn !== null) inputs.push(rrIn);
   const byGsis = new Map(rr.rows.map((r) => [r.gsis_id, r]));
   const fromRosterRow = (gsis: string, key: string | null): Target | null => {
@@ -265,7 +265,7 @@ export async function selectTargets(
       { status, position, search: null, sort: null, sort_type: null, sort_week: null },
       { limit: top, offset: 0 },
     );
-    inputs.push(platformInput(got.stamp, ctx.nowMs, lc.allowStale));
+    inputs.push(platformInput(ctx, got.stamp, lc.allowStale));
     if (lc.ref.platform === "manual" && position !== "K" && position !== "DEF")
       warnings.push(MANUAL_POOL_WARNING);
     const { byKey } = crosswalkRun(ctx, season, got.value.items);

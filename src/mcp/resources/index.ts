@@ -11,7 +11,7 @@ import {
   type ReadResourceResult,
 } from "@modelcontextprotocol/server";
 import { LOG_ID_RE, RECOMMENDATION_KINDS } from "../../domain/reclog/types.js";
-import type { ToolContext } from "../define.js";
+import { toolContext, type ToolContext } from "../define.js";
 import {
   RESOURCE_TTL_MS,
   RESULT_BUDGET_CHARS,
@@ -63,21 +63,15 @@ async function readAsEnvelope(
   const requestId = newRequestId();
   try {
     services.beforeCall?.();
-    const ctx: ToolContext = {
-      requestId,
-      nowMs: services.clock.nowMs(),
-      services,
-      options,
-      log: services.logger,
-      memo: new Map(),
-    };
+    // resources never refresh (season-fresh §6.6: no refresh from status, resources or prompts)
+    const ctx = toolContext(requestId, services, options);
     const out = await body(ctx);
     const env = buildEnvelope({
       data: out.data,
       requestId,
       nowMs: ctx.nowMs,
       inputs: out.inputs,
-      ...(out.warnings === undefined ? {} : { warnings: out.warnings }),
+      warnings: [...(out.warnings ?? []), ...ctx.notes],
       ...(out.bareFields === undefined ? {} : { bareFields: out.bareFields }),
       ...(out.extraSources === undefined ? {} : { extraSources: out.extraSources }),
     });

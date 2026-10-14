@@ -4,6 +4,7 @@
 // cannot carry prose — critic C-15).
 import { z } from "zod/v4";
 import { GSIS_ID_RE, MANUAL_KEY_RE, NFL_TEAMS, YAHOO_KEY_RE } from "../../config/schema.js";
+import { WEEK_INDEX_MAX } from "../../config/weeks.js";
 import { LOG_ID_RE } from "../../domain/reclog/types.js";
 import {
   PLATFORM_CODE_RE,
@@ -54,7 +55,11 @@ export const platformCode = z.string().regex(PLATFORM_CODE_RE);
 export const code = z.string().regex(/^[a-z][a-z0-9_]{0,23}$/);
 /** A canonical stat name. */
 export const canonical = z.string().regex(/^[a-z][a-z0-9_]{0,39}$/);
-export const week = z.number().int().min(1).max(22);
+/**
+ * A week in OUTPUT: any week the schedule data holds (WEEK_INDEX_MAX, a structural bound — never a
+ * season length; season-fresh §2.6). Inputs keep the tool-contract-1 bound (bounds.ts weekSchema).
+ */
+export const week = z.number().int().min(1).max(WEEK_INDEX_MAX);
 export const season = z.number().int().min(1990).max(2100);
 export const points = z.number().min(-10_000).max(10_000);
 export const prob = z.number().min(0).max(1);

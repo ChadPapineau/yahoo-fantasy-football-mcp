@@ -20,6 +20,7 @@ import {
   type Freshness,
   type FreshnessState,
 } from "../config/freshness.js";
+import type { GameCalendar } from "../config/game-calendar.js";
 import {
   GSIS_ID_RE,
   KEY_MAX_CHARS,
@@ -442,9 +443,14 @@ export interface InputStamp {
 /**
  * The ONE conversion from a dataset or platform stamp to an envelope input (critics C-12, C-08b):
  * the class comes from the stamp, the state and `basis_at` from `stampState` (release → checked_at,
- * age → fetched_at, file → mtime/as_of). Tools never compute freshness themselves.
+ * age → fetched_at, file → mtime/as_of) under the game calendar (a release check inside a game
+ * window gets the short TTL — QA-2-037, season-fresh §3.1). Tools never compute freshness themselves.
  */
-export function stampToInput(stamp: DatasetStamp | PlatformStamp, nowMs: number): InputStamp {
+export function stampToInput(
+  stamp: DatasetStamp | PlatformStamp,
+  nowMs: number,
+  cal: GameCalendar,
+): InputStamp {
   const isDataset = "freshness_class" in stamp;
   const cls = freshnessClass(isDataset ? stamp.freshness_class : stamp.freshness);
   const st = stampState(
@@ -455,6 +461,7 @@ export function stampToInput(stamp: DatasetStamp | PlatformStamp, nowMs: number)
       checked_at: isDataset ? stamp.checked_at : null,
     },
     nowMs,
+    cal,
   );
   return {
     source: stamp.source,

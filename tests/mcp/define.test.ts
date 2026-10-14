@@ -22,6 +22,7 @@ import {
 import { UNTRUSTED_POINTER, distSchema } from "../../src/mcp/envelope.js";
 import { FfError } from "../../src/mcp/errors.js";
 import type { McpServerOptions, McpServices } from "../../src/mcp/services.js";
+import { fallbackCalendar } from "../../src/config/game-calendar.js";
 import { fixedClock } from "../../src/domain/clock.js";
 
 const noop = (): undefined => undefined;
@@ -34,6 +35,8 @@ function fakeServices(lines: string[]): McpServices {
     clock: fixedClock("2026-09-30T00:00:00Z"),
     logger: { error: log("error"), warn: log("warn"), info: log("info"), debug: log("debug") },
     beforeCall: noop,
+    scheduleView: () => ({ calendar: fallbackCalendar("never_loaded") }),
+    refreshLog: { current: () => [] },
   } as unknown as McpServices;
 }
 const OPTIONS = {} as McpServerOptions;
@@ -46,6 +49,7 @@ describe("names, descriptions, annotations", () => {
       input: z.strictObject({}),
       data: null,
       budget: "list" as const,
+      datasets: [],
       run: () => Promise.resolve({ data: {}, inputs: [] }),
     };
     expect(() => defineTool({ ...base, name: "get_status" })).toThrow(RangeError);
@@ -166,6 +170,7 @@ describe("runTool: budget and self-validation (a bug is INTERNAL + a log line, n
     input: z.strictObject({}),
     data: null,
     budget: "list",
+    datasets: [],
     run: () => Promise.resolve({ data: { items: [] }, inputs: [] }),
     ...over,
   });
@@ -260,9 +265,11 @@ describe("the call ledger (E12's source_calls week check)", () => {
     input: z.strictObject({}),
     data: null,
     budget: "list",
+    datasets: [],
     run: () =>
       Promise.resolve({ data: { items: [] }, inputs: [], ...(week === undefined ? {} : { week }) }),
   });
+  const AT = Date.parse("2026-09-30T00:00:00Z");
   const rid = (i: number): string => `r-${i.toString(16).padStart(12, "0")}`;
 
   it("remembers successful calls per server, with their week, and forgets the oldest past the cap", async () => {
@@ -270,15 +277,15 @@ describe("the call ledger (E12's source_calls week check)", () => {
     const b = fakeServices([]);
     await runTool(def(3), {}, { requestId: rid(1) }, a, OPTIONS, null);
     await runTool(def(), {}, { requestId: rid(2) }, a, OPTIONS, null);
-    expect(recentCall(a, rid(1))).toEqual({ tool: "ff_test_tool", week: 3 });
-    expect(recentCall(a, rid(2))).toEqual({ tool: "ff_test_tool", week: null });
+    expect(recentCall(a, rid(1))).toEqual({ tool: "ff_test_tool", week: 3, at_ms: AT });
+    expect(recentCall(a, rid(2))).toEqual({ tool: "ff_test_tool", week: null, at_ms: AT });
     expect(recentCall(b, rid(1))).toBeNull(); // another server's services: another ledger
     expect(recentCall(a, rid(999_999))).toBeNull();
     for (let i = 3; i <= CALL_LEDGER_MAX + 2; i++)
       await runTool(def(4), {}, { requestId: rid(i) }, a, OPTIONS, null);
     expect(recentCall(a, rid(1))).toBeNull();
     expect(recentCall(a, rid(2))).toBeNull();
-    expect(recentCall(a, rid(3))).toEqual({ tool: "ff_test_tool", week: 4 });
+    expect(recentCall(a, rid(3))).toEqual({ tool: "ff_test_tool", week: 4, at_ms: AT });
     expect(recentCall(a, rid(CALL_LEDGER_MAX + 2))).not.toBeNull();
   });
 

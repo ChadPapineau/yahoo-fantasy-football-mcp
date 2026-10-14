@@ -8,6 +8,11 @@ import fc from "fast-check";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod/v4";
 import { ATTRIBUTIONS } from "../../src/config/freshness.js";
+import {
+  easternWallTimeMs,
+  fallbackCalendar,
+  scheduleCalendar,
+} from "../../src/config/game-calendar.js";
 import type {
   DatasetStamp,
   InputFreshness,
@@ -66,6 +71,8 @@ import {
 } from "../../src/mcp/envelope.js";
 
 const NOW = Date.parse("2026-09-30T18:00:00Z");
+/** A calendar with no game near NOW (the judgments below do not depend on game windows). */
+const CAL = fallbackCalendar("never_loaded");
 const RID = "r-0123456789ab";
 const clean = (s: string, cap = 400) => sanitizeText(s, cap).value;
 
@@ -912,7 +919,7 @@ describe("stampToInput: the class basis decides state and the warning's age (C-1
   });
 
   it("an unchanged nflverse release checked an hour ago is fresh (not STALE_ONLY after 3 days)", () => {
-    const i = stampToInput(ds(), NOW);
+    const i = stampToInput(ds(), NOW, CAL);
     expect(i.state).toBe("fresh");
     expect(i.basis_at).toBe(iso(H));
     expect(i.source).toBe("nflverse:stats_player_week");
@@ -922,11 +929,42 @@ describe("stampToInput: the class basis decides state and the warning's age (C-1
     // age_s still measures the fetch (plan 01 §4.2): nine days
     expect(env.meta.age_s).toBe(9 * 86_400);
   });
+  it("game days come from the schedule's kickoffs (QA-2-037): a Saturday check in a game window is short-lived", () => {
+    // lines checked Sat 2026-12-19 12:00 ET, judged 16:59 ET; that night's 20:20 ET kickoff puts the
+    // check inside its 24 h game window (30-min TTL) — the old weekday rule called Saturday an off day
+    for (const [year, date] of [
+      [2026, "2026-12-19"],
+      [2027, "2027-12-18"],
+      [2028, "2028-12-16"],
+      [2029, "2029-12-22"],
+      [2030, "2030-12-21"],
+    ] as const) {
+      const checked = easternWallTimeMs(date, 12, 0);
+      const judged = easternWallTimeMs(date, 16, 59);
+      const kickoff = easternWallTimeMs(date, 20, 20);
+      const cal = scheduleCalendar({
+        kickoffs: [kickoff],
+        outdoorKickoffs: [kickoff],
+        fileVersion: `s${String(year)}`,
+      });
+      const lines: DatasetStamp = {
+        source: "nflverse:schedules",
+        as_of: new Date(checked - D).toISOString(),
+        fetched_at: new Date(checked - D).toISOString(),
+        checked_at: new Date(checked).toISOString(),
+        freshness_class: "lines",
+        file_version: "v",
+      };
+      expect(stampToInput(lines, judged, cal).state, String(year)).toBe("stale");
+      // 20 min after the check it is still fresh
+      expect(stampToInput(lines, checked + 20 * 60_000, cal).state).toBe("fresh");
+    }
+  });
   it("a missed release check expires by checked_at", () => {
-    expect(stampToInput(ds({ checked_at: iso(4 * D) }), NOW).state).toBe("expired");
+    expect(stampToInput(ds({ checked_at: iso(4 * D) }), NOW, CAL).state).toBe("expired");
   });
   it("the manual league is judged from the file's mtime; the warning quotes that age, not 0s", () => {
-    const i = stampToInput(ps(), NOW);
+    const i = stampToInput(ps(), NOW, CAL);
     expect(i.state).toBe("stale");
     const env = buildEnvelope({ requestId: RID, data: {}, nowMs: NOW, inputs: [i] });
     expect(env.warnings).toEqual(["source manual is 8d old (stale)"]);
@@ -943,7 +981,7 @@ describe("stampToInput: the class basis decides state and the warning's age (C-1
   });
   it("DataInput is the domain's InputFreshness (one row type feeds every analytics result)", () => {
     expectTypeOf<DataInput>().toEqualTypeOf<InputFreshness>();
-    const rows = toDataInputs([stampToInput(ds(), NOW)], NOW);
+    const rows = toDataInputs([stampToInput(ds(), NOW, CAL)], NOW);
     expect(rows[0]).toEqual({
       source: "nflverse:stats_player_week",
       as_of: iso(9 * D),

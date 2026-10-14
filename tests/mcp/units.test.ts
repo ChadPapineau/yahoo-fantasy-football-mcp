@@ -1,19 +1,23 @@
 // units.test.ts — the pure helpers under the tools (plan 07 D2/D3 codes, plan 01 §5.4 inputs):
-// practice lines → fixed codes (plan 02 §6.4), ET/venue rendering, the season of an instant, the
-// provenance-tag guard, the `omit` class, the manual key rule, and league positions.
+// practice lines → fixed codes (plan 02 §6.4), ET/venue rendering, the provenance-tag guard, the
+// `omit` class and the refresh-aware STALE_ONLY variants, the manual key rule, and league positions.
+// (The season of an instant is the schedule's phase now: tests/mcp/season-coverage.test.ts.)
 import { describe, expect, it } from "vitest";
+import { fallbackCalendar } from "../../src/config/game-calendar.js";
 import type { DatasetStamp, InjuryReport } from "../../src/domain/analytics/types.js";
+import type { ScheduleView } from "../../src/domain/league/calendar.js";
 import type { PlatformStamp } from "../../src/domain/league/types.js";
-import { FfError } from "../../src/mcp/errors.js";
+import { FfError, toToolError } from "../../src/mcp/errors.js";
+import type { RefreshReport } from "../../src/mcp/services.js";
 import {
   inputOf,
   leaguePositions,
   platformInput,
   present,
   readOpts,
-  seasonOfInstant,
   subjectFromKey,
   textSource,
+  type CallView,
 } from "../../src/mcp/tools/common.js";
 import { dayCode, isoInZone, practiceCode, practiceTrend } from "../../src/mcp/tools/datasets.js";
 
@@ -63,16 +67,17 @@ describe("D3 time rendering", () => {
 });
 
 describe("common helpers", () => {
-  it("seasonOfInstant: Jan–Feb belong to the previous season", () => {
-    expect(seasonOfInstant(Date.parse("2026-02-10T00:00:00Z"))).toBe(2025);
-    expect(seasonOfInstant(Date.parse("2026-03-01T00:00:00Z"))).toBe(2026);
-  });
   it("textSource refuses an unregistered provenance tag (INTERNAL, never an invented tag)", () => {
     expect(textSource("manual", "team.name")).toBe("manual.team.name");
     expect(() => textSource("sleeper", "team.name")).toThrow(FfError);
   });
   it("inputOf: an expired `omit` class is dropped, an expired STALE_ONLY class throws", () => {
     const now = Date.parse("2026-10-30T00:00:00Z");
+    const call = (refresh: RefreshReport | null = null): CallView => ({
+      nowMs: now,
+      view: { calendar: fallbackCalendar("never_loaded") } as unknown as ScheduleView,
+      refresh,
+    });
     const wx: DatasetStamp = {
       source: "weather:nws",
       as_of: "2026-09-01T00:00:00Z",
@@ -81,14 +86,39 @@ describe("common helpers", () => {
       freshness_class: "weather",
       file_version: "v",
     };
-    expect(inputOf(wx, now, false)).toBeNull();
-    expect(inputOf(wx, now, true)?.state).toBe("expired");
+    expect(inputOf(call(), wx, false)).toBeNull();
+    expect(inputOf(call(), wx, true)?.state).toBe("expired");
     const sched: DatasetStamp = {
       ...wx,
       source: "nflverse:schedules",
       freshness_class: "nflverse_schedules",
     };
-    expect(() => inputOf(sched, now, false)).toThrow(FfError);
+    expect(() => inputOf(call(), sched, false)).toThrow(FfError);
+    // the call's answer-time refresh picks the variant (season-fresh §6.4)
+    const variantOf = (refresh: RefreshReport): string => {
+      try {
+        inputOf(call(refresh), sched, false);
+      } catch (e) {
+        const parsed = JSON.parse(toToolError(e, "r-0123456789ab").content[0].text) as {
+          error: { message: string };
+        };
+        return parsed.error.message;
+      }
+      return "no error";
+    };
+    const row = {
+      source: "nflverse:schedules" as const,
+      code: null,
+      started_at: "2026-10-29T23:59:54.000Z",
+      at: "2026-10-30T00:00:00.000Z",
+      next_retry_at: null,
+    };
+    expect(variantOf({ mode: "wait", sources: [{ ...row, outcome: "in_progress" }] })).toMatch(
+      /being refreshed now/,
+    );
+    expect(
+      variantOf({ mode: "wait", sources: [{ ...row, outcome: "failed", code: "network" }] }),
+    ).toMatch(/could not be refreshed/);
     const plat: PlatformStamp = {
       source: "yahoo",
       as_of: "2026-09-01T00:00:00Z",
@@ -96,8 +126,8 @@ describe("common helpers", () => {
       freshness: "platform_roster",
       provisional: false,
     };
-    expect(() => platformInput(plat, now, false)).toThrow(FfError);
-    expect(platformInput(plat, now, true).state).toBe("expired");
+    expect(() => platformInput(call(), plat, false)).toThrow(FfError);
+    expect(platformInput(call(), plat, true).state).toBe("expired");
   });
   it("subjectFromKey follows the manual key rule only", () => {
     expect(subjectFromKey("manual.p.00-0034857")).toEqual({

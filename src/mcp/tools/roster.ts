@@ -44,8 +44,9 @@ import {
   type UntrustedField,
 } from "../envelope.js";
 import { FfError } from "../errors.js";
+import { ALL_WEEK_INDEXES } from "../../config/weeks.js";
 import {
-  ALL_WEEKS,
+  addScheduleNotes,
   bare,
   crosswalkRun,
   leagueContext,
@@ -53,7 +54,8 @@ import {
   leagueTypedLine,
   lockModeOf,
   nflTeamOf,
-  optionalDataset,
+  noScheduleNote,
+  optionalSource,
   present,
   readOpts,
   requiredSource,
@@ -144,6 +146,7 @@ export function unmatchedRosterWarning(keys: readonly string[]): string {
 
 export const getRoster = defineTool({
   name: "ff_get_roster",
+  datasets: ["nflverse:schedules", "nflverse:roster_weekly"],
   family: "platform",
   description:
     "A roster for a week (default: mine, current): slots, eligibility, status, byes, kickoffs, lock_schedule, latest_execution_time.",
@@ -171,7 +174,7 @@ export const getRoster = defineTool({
     const slots = await slotsOf(ctx, lc, inputs);
     const games = weekGames(ctx, season, w);
     const all = seasonGames(ctx, season);
-    const schedIn = optionalDataset(games, ctx.nowMs, lc.allowStale);
+    const schedIn = optionalSource(ctx, "nflverse:schedules", games, lc.allowStale, season);
     if (schedIn !== null) inputs.push(schedIn);
     const byes = byeWeeks(all.rows, season, NFL_TEAMS);
     const { byKey } = crosswalkRun(
@@ -179,7 +182,13 @@ export const getRoster = defineTool({
       season,
       roster.entries.map((e) => e.player),
     );
-    const rosterIn = optionalDataset(rosterRows(ctx, season), ctx.nowMs, lc.allowStale);
+    const rosterIn = optionalSource(
+      ctx,
+      "nflverse:roster_weekly",
+      rosterRows(ctx, season),
+      lc.allowStale,
+      season,
+    );
     if (rosterIn !== null) inputs.push(rosterIn);
     const mode = lockModeOf(lc.league);
     const full = args.detail === "full";
@@ -228,6 +237,13 @@ export const getRoster = defineTool({
       .map((e) => e.player.ref.id)
       .filter((key) => (byKey.get(key)?.subject ?? null) === null);
     if (unmatched.length > 0) warnings.push(unmatchedRosterWarning(unmatched));
+    if (games.stamp !== null && games.rows.length === 0) warnings.push(noScheduleNote(season, w));
+    addScheduleNotes(
+      ctx,
+      season,
+      [w],
+      new Set(present(roster.entries.map((e) => nflTeamOf(e.player)))),
+    );
     const subjects = roster.entries.map((e) => ({
       player_key: e.player.ref.id,
       nfl_team: nflTeamOf(e.player),
@@ -309,6 +325,8 @@ function sumValues(lines: readonly StatLine[]): Record<string, number> {
 
 export const getPlayerStats = defineTool({
   name: "ff_get_player_stats",
+  // schedules: a week's provisional flag reads its kickoffs
+  datasets: ["nflverse:schedules", "nflverse:roster_weekly", "nflverse:stats_player_week"],
   family: "platform",
   description:
     "Stat lines (week or season) for up to 25 player keys, with this league's engine points and the golden match flag.",
@@ -362,7 +380,7 @@ export const getPlayerStats = defineTool({
       warnings.push(
         `${String(args.player_keys.length - resolved.length)} player keys were not found and are omitted`,
       );
-    const weeks = args.type === "week" && args.week !== undefined ? [args.week] : ALL_WEEKS;
+    const weeks = args.type === "week" && args.week !== undefined ? [args.week] : ALL_WEEK_INDEXES;
     const gsis = present(
       resolved.map((r) => (r.subject?.kind === "player" ? r.subject.gsis_id : null)),
     );
@@ -370,7 +388,7 @@ export const getPlayerStats = defineTool({
       resolved.map((r) => (r.subject?.kind === "defense" ? r.subject.nfl_team : null)),
     );
     const lines = ctx.services.datasets.playerWeeks.lines(gsis, season, weeks);
-    const dIn = requiredSource(ctx, "nflverse:stats_player_week", lines, lc.allowStale);
+    const dIn = requiredSource(ctx, "nflverse:stats_player_week", lines, lc.allowStale, season);
     if (dIn !== null) inputs.push(dIn);
     const dLines =
       teams.length === 0

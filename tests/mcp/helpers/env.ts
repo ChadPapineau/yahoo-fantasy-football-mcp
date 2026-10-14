@@ -10,7 +10,13 @@ import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { datasetDir, backupDir, storePath } from "../../../src/config/paths.js";
 import { loadConfig, type Config } from "../../../src/config/schema.js";
-import { buildServices, loadOverrides, loadTexts } from "../../../src/cli/serve.js";
+import {
+  buildServices,
+  loadOverrides,
+  loadTexts,
+  type OnDemandInternals,
+} from "../../../src/cli/serve.js";
+import type { OnDemandRefresher } from "../../../src/cli/on-demand-refresh.js";
 import { createLogger, type Logger } from "../../../src/cli/log.js";
 import { fixedClock, seededRng, type FixedClock } from "../../../src/domain/clock.js";
 import { createServer } from "../../../src/mcp/server.js";
@@ -43,6 +49,10 @@ export interface World {
   readonly options: McpServerOptions;
   readonly logLines: string[];
   readonly logger: Logger;
+  /** The answer-time refresh orchestrator (`off` in fixture mode unless FF_ON_DEMAND_REFRESH is set). */
+  readonly refresher: OnDemandRefresher;
+  /** The environment the world's config (and any on-demand child) was built from. */
+  readonly env: Readonly<Record<string, string>>;
   cleanup(): void;
 }
 
@@ -56,6 +66,8 @@ export interface WorldOptions {
   /** Fixture mode (FF_FIXTURE_DIR set; default true — the fixture league lives in the repo). */
   readonly fixtureMode?: boolean;
   readonly clock?: string;
+  /** The on-demand refresh child's seams (a fake spawner, a source entry). */
+  readonly onDemand?: OnDemandInternals;
 }
 
 /** The sources and seasons published for the fixture world. */
@@ -127,13 +139,16 @@ export async function makeWorld(o: WorldOptions = {}): Promise<World> {
     sink: (l) => logLines.push(l),
     now: () => clock.nowIso(),
   });
-  const { services, options } = buildServices({
+  const { services, options, refresher } = buildServices({
     config,
     store,
     clock,
     logger,
     texts: loadTexts(ROOT),
     overrides: loadOverrides(ROOT, logger),
+    env: { ...env, HOME: home },
+    packageRoot: ROOT,
+    ...(o.onDemand === undefined ? {} : { onDemand: o.onDemand }),
   });
   return {
     root,
@@ -145,7 +160,10 @@ export async function makeWorld(o: WorldOptions = {}): Promise<World> {
     options,
     logLines,
     logger,
+    refresher,
+    env: { ...env, HOME: home },
     cleanup: () => {
+      refresher.shutdown();
       store.close();
       rmSync(root, { recursive: true, force: true });
     },
