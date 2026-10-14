@@ -18,7 +18,7 @@ import type { SeasonPhase } from "../../src/domain/league/season.js";
 import type { ToolContext } from "../../src/mcp/define.js";
 import { STALE_ONLY_VARIANTS, toToolError } from "../../src/mcp/errors.js";
 import type { McpServices } from "../../src/mcp/services.js";
-import { optionalSource, requiredSource } from "../../src/mcp/tools/common.js";
+import { leagueSeasonNote, optionalSource, requiredSource } from "../../src/mcp/tools/common.js";
 import { scheduleReaderOf } from "../helpers/season/reader.js";
 import { syntheticSeasons } from "../helpers/season/synthetic.js";
 import { body, connect, makeWorld, type World } from "./helpers/env.js";
@@ -169,6 +169,34 @@ describe("coverage at the tool layer, any season 2026–2040 and any phase", () 
         ).toBe("Only data older than its hard limit is available.");
       }),
       { numRuns: 100 },
+    );
+  });
+});
+
+describe("the league-season note of the analytics tools (rollover)", () => {
+  it("silent while the league file is the season in progress (or next season's, off-season); otherwise names both", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 2026, max: 2040 }),
+        fc.integer({ min: -2, max: 2 }),
+        fc.constantFrom<SeasonPhase["phase"]>("preseason", "regular", "postseason", "offseason"),
+        (season, delta, phase) => {
+          const league = season + delta;
+          const note = leagueSeasonNote(ctxAt(0, { season, phase }), league);
+          if (phase === "offseason") {
+            if (league > season) expect(note).toBeNull();
+            else
+              expect(note).toBe(
+                `league season ${String(league)} is finished; recommendations describe a completed season`,
+              );
+          } else if (league === season) expect(note).toBeNull();
+          else
+            expect(note).toBe(
+              `league season ${String(league)} is not the NFL season in progress (${String(season)}, ${phase}): run the onboard Skill's new-season step`,
+            );
+        },
+      ),
+      { numRuns: 300 },
     );
   });
 });
