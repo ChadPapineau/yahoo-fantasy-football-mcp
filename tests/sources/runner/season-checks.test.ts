@@ -115,6 +115,59 @@ describe("season_check follows upstream, season by season", () => {
     });
   }
 
+  it("every instant a run records is its START, however long the run takes (the floor counts from it)", async () => {
+    // a run recorded when it ended (a slow download, a retry) left the next quarter-hour tick less
+    // than 14 min after the "attempt": `min_gap`, and the pregame 15-minute cadence became 30
+    for (const S of [2027, 2028, 2029, 2030])
+      for (const slowS of [61, 90, 120]) {
+        const start = `${String(S)}-09-01T12:00:00.000Z`;
+        const clock = fixedClock(start);
+        const slow = seasonal(new Set([S]));
+        const fetch = slow.fetch.bind(slow);
+        slow.fetch = async (v, ctx) => {
+          clock.advance(slowS * 1000);
+          return fetch(v, ctx);
+        };
+        const pub = fakePublisher();
+        const r = await runRefresh(
+          { source: slow, seasons: [S - 1, S], week: null },
+          deps(start, { clock, publisher: pub }),
+        );
+        expect(r.status).toBe("published");
+        // the refresh_log row's started_at, and both seasons' checks, are the run's start
+        expect(pub.published.map((p) => p.startedAt)).toEqual([start]);
+        expect(
+          store.repos.seasonChecks
+            .all()
+            .filter((c) => c.season >= S - 1)
+            .map((c) => c.checked_at),
+        ).toEqual([start, start]);
+        // an unchanged release whose version check is slow is checked at the run's start too
+        const again = `${String(S)}-09-01T13:00:00.000Z`;
+        const clock2 = fixedClock(again);
+        const pub2 = fakePublisher();
+        const src = fakeSource({
+          version: () => {
+            clock2.advance(slowS * 1000);
+            return Promise.resolve({ version: "v-same", released_at: null });
+          },
+        });
+        const r2 = await runRefresh(
+          { source: src, seasons: [S], week: null },
+          deps(again, {
+            clock: clock2,
+            publisher: pub2,
+            refreshLog: fakeRefreshLog([okRow("nflverse:injuries", "v-same")]),
+            checkDataset: () => "ok",
+          }),
+        );
+        expect(r2.status).toBe("unchanged");
+        expect(pub2.unchanged).toEqual([
+          { source: "nflverse:injuries", version: "v-same", at: again },
+        ]);
+      }
+  });
+
   it("a mixed run records each season's own state", async () => {
     const r = await runRefresh(
       { source: seasonal(new Set([2028])), seasons: [2027, 2028], week: null },

@@ -286,6 +286,12 @@ function rowFromMeta(
   return row;
 }
 
+/** The run's start when it is a valid instant no later than `now`, else `now`. */
+function runStart(given: string | undefined, now: string): string {
+  const ms = given === undefined ? Number.NaN : Date.parse(given);
+  return Number.isFinite(ms) && ms <= Date.parse(now) ? new Date(ms).toISOString() : now;
+}
+
 export function openPublisher(
   opts: PublisherOpenOptions,
   internals: PublisherInternals = {},
@@ -412,7 +418,7 @@ export function openPublisher(
       heldInProcess.delete(lockKey);
       return { ok: false, error: "job_locked" };
     }
-    const startedAt = clock.nowIso();
+    const startedAt = runStart(options?.startedAt, clock.nowIso());
     const finalPath = path.join(opts.datasetDir, `${datasetFileStem(sourceId)}.sqlite`);
     let staging: string | null = null;
     let wdb: DatabaseSync | null = null;

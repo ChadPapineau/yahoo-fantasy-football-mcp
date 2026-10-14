@@ -79,7 +79,8 @@ const maxOf = (xs: readonly (number | null)[]): number | null => {
  * A source's refresh state (src/config/cadence.ts `SourceState`) from refresh_log, season_check, the
  * attachment and the provider backoff — the one reading the answer-time orchestrator, G1 and the tick
  * share: a current file the server has not attached at its version is `unreadable` (QA-1-038); the
- * last attempt counts every process's runs (the 14-minute floor holds across processes), including a
+ * last attempt counts every process's runs from their start (the 14-minute floor holds across
+ * processes, and a slow run never costs the next tick its quarter-hour), including a
  * run that found every season unpublished upstream, which writes season_check rows and no refresh_log
  * row. When that run is the newest attempt and found `phaseSeason` (the season in progress, from the
  * schedule) unpublished while the current file does not hold it, `notPublishedAtMs` is its instant.
@@ -99,7 +100,15 @@ export function sourceStateOf(
       : current.file_version === null || attached?.file_version !== current.file_version
         ? "unreadable"
         : "ok";
-  const logAttempt = maxOf([msOrNull(latest?.started_at), msOrNull(current?.checked_at)]);
+  // every attempt counts from its START (a run recorded when it ended would cost the next tick its
+  // slot): a run's refresh_log started_at, and an "unchanged" check of the current file — its
+  // checked_at past the publish's own finish (checked_at = finished_at is that publish ending)
+  const checkedMs = msOrNull(current?.checked_at);
+  const recheck =
+    checkedMs !== null && checkedMs > (msOrNull(current?.finished_at) ?? Number.NEGATIVE_INFINITY)
+      ? checkedMs
+      : null;
+  const logAttempt = maxOf([msOrNull(latest?.started_at), recheck]);
   const checks = ports.seasonChecks.all().filter((c) => c.source === id);
   const checkAttempt = maxOf(checks.map((c) => msOrNull(c.checked_at)));
   const phaseCheck = checks.find((c) => c.season === phaseSeason) ?? null;

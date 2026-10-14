@@ -19,30 +19,22 @@ import type { SourceStatePorts } from "../../../src/mcp/refresh.js";
 
 const iso = (ms: number): string => new Date(ms).toISOString();
 
-/** One simulated store shared by every simulated process. */
+/** One simulated store shared by every simulated process (indexed: replays write thousands of rows). */
 export class RefreshSim {
   readonly rows: RefreshLogRow[] = [];
   readonly checks = new Map<string, SeasonCheckRow>();
   private readonly attached = new Map<DatasetSourceId, string>();
+  private readonly cur = new Map<DatasetSourceId, RefreshLogRow>();
+  private readonly last = new Map<DatasetSourceId, RefreshLogRow>();
+  private readonly fails = new Map<DatasetSourceId, number>();
   private versions = 0;
 
   /** The ports `sourceStateOf` reads (no provider backoff). */
   readonly ports: SourceStatePorts = {
     refreshLog: {
-      current: () => {
-        const out = new Map<DatasetSourceId, RefreshLogRow>();
-        for (const r of this.rows) if (r.ok) out.set(r.source, r);
-        return [...out.values()];
-      },
-      latest: (s) => this.rows.filter((r) => r.source === s).at(-1) ?? null,
-      consecutiveFailures: (s) => {
-        let n = 0;
-        for (const r of this.rows.filter((x) => x.source === s).reverse()) {
-          if (r.ok) break;
-          n += 1;
-        }
-        return n;
-      },
+      current: () => [...this.cur.values()],
+      latest: (s) => this.last.get(s) ?? null,
+      consecutiveFailures: (s) => this.fails.get(s) ?? 0,
     },
     providerBackoff: { get: () => null },
     seasonChecks: { all: () => [...this.checks.values()] },
@@ -65,11 +57,16 @@ export class RefreshSim {
   };
 
   current(source: DatasetSourceId): RefreshLogRow | null {
-    return this.rows.filter((r) => r.source === source && r.ok).at(-1) ?? null;
+    return this.cur.get(source) ?? null;
   }
 
-  private failedSinceCurrent(source: DatasetSourceId): boolean {
-    return this.ports.refreshLog.consecutiveFailures(source) > 0;
+  private push(row: RefreshLogRow): void {
+    this.rows.push(row);
+    this.last.set(row.source, row);
+    if (row.ok) {
+      this.cur.set(row.source, row);
+      this.fails.set(row.source, 0);
+    } else this.fails.set(row.source, (this.fails.get(row.source) ?? 0) + 1);
   }
 
   private note(
@@ -95,7 +92,7 @@ export class RefreshSim {
     seasons: readonly number[],
     version = `v${String(++this.versions)}`,
   ): string {
-    this.rows.push({
+    this.push({
       source,
       file: `ds/${source}.sqlite`,
       file_version: version,
@@ -122,13 +119,17 @@ export class RefreshSim {
       return;
     }
     const moved = { ...cur, checked_at: iso(start) };
-    if (this.failedSinceCurrent(source)) this.rows.push(moved);
-    else this.rows[this.rows.lastIndexOf(cur)] = moved;
+    if ((this.fails.get(source) ?? 0) > 0) this.push(moved);
+    else {
+      this.rows[this.rows.lastIndexOf(cur)] = moved;
+      this.cur.set(source, moved);
+      if (this.last.get(source) === cur) this.last.set(source, moved);
+    }
   }
 
   /** A failed run. */
   failed(source: DatasetSourceId, start: number, end: number): void {
-    this.rows.push({
+    this.push({
       source,
       file: null,
       file_version: null,
@@ -148,6 +149,6 @@ export class RefreshSim {
   notPublished(source: DatasetSourceId, start: number, seasons: readonly number[]): void {
     this.note(source, seasons, start, "not_published");
     const cur = this.current(source);
-    if (cur !== null && this.failedSinceCurrent(source)) this.rows.push({ ...cur });
+    if (cur !== null && (this.fails.get(source) ?? 0) > 0) this.push({ ...cur });
   }
 }

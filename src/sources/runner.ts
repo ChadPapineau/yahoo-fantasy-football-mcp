@@ -419,13 +419,17 @@ async function runUnderLock(req: RefreshRequest, deps: RefreshDeps): Promise<Ref
       deps.log?.warn("refresh.provider_backoff_not_cleared", { source: id, provider });
     }
   };
-  /** Records each season's upstream state (season_check); best-effort. */
+  /**
+   * Records each season's upstream state (season_check) at the run's START — an attempt's instant, so
+   * the 14-minute floor counts a run that wrote nothing else, and the refresh_log row of a run that
+   * also published (or re-checked) other seasons carries the same instant; best-effort.
+   */
   const noteSeasons = async (
     seasons: readonly number[],
     status: "not_published" | "published",
   ): Promise<void> => {
     if (deps.seasonChecks === undefined) return;
-    const at = deps.clock.nowIso();
+    const at = started;
     for (const season of seasons) {
       try {
         await deps.seasonChecks.record({ source: id, season, checked_at: at, status });
@@ -559,7 +563,8 @@ async function runUnderLock(req: RefreshRequest, deps: RefreshDeps): Promise<Ref
         return null;
       }
       try {
-        await deps.publisher.recordUnchanged(id, ver.version, deps.clock.nowIso());
+        // checked at the run's start: the attempt's instant (the floor counts from it)
+        await deps.publisher.recordUnchanged(id, ver.version, started);
       } catch {
         // the check could not be recorded (the file vanished since, or the store is busy):
         // publishing is always a correct answer — the publisher re-checks under its lock
@@ -666,8 +671,12 @@ async function runUnderLock(req: RefreshRequest, deps: RefreshDeps): Promise<Ref
           v.version,
           v.released_at,
           (w) => source.publish(files, w),
-          // the "unchanged" check above ran without the job lock: re-made under it (single-flight)
-          { skipIfCurrent: source.versioning === "release" && req.force !== true && !repair },
+          // the "unchanged" check above ran without the job lock: re-made under it (single-flight);
+          // the row's started_at is the run's start, before the download (the floor counts from it)
+          {
+            skipIfCurrent: source.versioning === "release" && req.force !== true && !repair,
+            startedAt: started,
+          },
         );
       } catch {
         return await fail("publish", "the publisher failed");

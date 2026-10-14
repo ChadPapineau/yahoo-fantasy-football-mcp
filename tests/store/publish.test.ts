@@ -127,6 +127,23 @@ describe("publish: the happy path", () => {
     });
   });
 
+  it("started_at is the run's start the runner passes (the floor counts from it); never later than now", async () => {
+    const now = t.clock.nowMs();
+    const before = new Date(now - 95_000).toISOString();
+    await pub.publish("nflverse:injuries", "v1", null, fillWith("v1"), { startedAt: before });
+    expect(log().latest).toMatchObject({ started_at: before, checked_at: t.clock.nowIso() });
+    // a later-than-now or unreadable instant is ignored: the publish's own start
+    for (const bad of [new Date(now + 60_000).toISOString(), "soon"]) {
+      await pub.publish("nflverse:injuries", `v-${bad}`, null, fillWith("v2"), { startedAt: bad });
+      expect(log().latest?.started_at, bad).toBe(t.clock.nowIso());
+    }
+    // a failed publish's row carries the run's start too
+    await pub.publish("nflverse:injuries", "v3", null, () => Promise.reject(new Error("x")), {
+      startedAt: before,
+    });
+    expect(log().latest).toMatchObject({ ok: false, started_at: before });
+  });
+
   it("a republish replaces the file (new inode) and the next refresh_log row is current", async () => {
     await pub.publish("nflverse:injuries", "v1", null, fillWith("v1"));
     const ino1 = statSync(INJ()).ino;

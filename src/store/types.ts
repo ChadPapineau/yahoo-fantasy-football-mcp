@@ -298,6 +298,12 @@ export interface PublishOptions {
    * PUBLISH_ALREADY_CURRENT }`. Set for release-versioned sources unless `--force`.
    */
   readonly skipIfCurrent?: boolean;
+  /**
+   * The run's start (the attempt's instant: the refresh_log row's started_at, before the download),
+   * so the 14-minute floor counts from it; default (or an instant later than now): the publish's own
+   * start.
+   */
+  readonly startedAt?: IsoInstant;
 }
 
 /** The `PublishOutcome` error when `skipIfCurrent` found the version already published. */

@@ -131,7 +131,13 @@ export function recordingWriter(): DatasetWriter & {
 }
 
 export interface FakePublisher extends DatasetPublisher {
-  readonly published: { source: DatasetSourceId; version: string; released: string | null }[];
+  readonly published: {
+    source: DatasetSourceId;
+    version: string;
+    released: string | null;
+    /** The run's start the runner passed (the refresh_log row's started_at). */
+    startedAt?: string;
+  }[];
   readonly unchanged: { source: DatasetSourceId; version: string; at: string }[];
   readonly writer: ReturnType<typeof recordingWriter>;
 }
@@ -148,9 +154,14 @@ export function fakePublisher(
     published,
     unchanged,
     writer,
-    async publish(source, version, released, fill) {
+    async publish(source, version, released, fill, options) {
       if (opts.throwOnPublish === true) throw new Error("disk full");
-      published.push({ source, version, released });
+      published.push({
+        source,
+        version,
+        released,
+        ...(options?.startedAt === undefined ? {} : { startedAt: options.startedAt }),
+      });
       const stats = await fill(writer);
       return outcome
         ? outcome(stats)

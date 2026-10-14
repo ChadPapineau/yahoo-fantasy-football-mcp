@@ -6,7 +6,8 @@
 // 2026-09-27 …). The tick's decision (src/config/cadence.ts `dueDecision`) is then replayed at every
 // quarter-hour over the 2025/2026 fixture calendars and synthetic 2026–2030 seasons (Saturday,
 // Wednesday, Thanksgiving Friday, Christmas on any weekday, international 09:30 ET games, a Week 18
-// placeholder then set, a flexed kickoff):
+// placeholder then set, a flexed kickoff). Every run lasts 0–120 s and is written as `ff refresh`
+// writes it, then read back through the production `sourceStateOf`:
 //   * healthy: every judged class is fresh at every tick;
 //   * one failed or one missed (asleep) tick: never expired;
 //   * schedules/lines are at most 15 + 2 min old at every tick in [k − 2 h 45 m, k] of every kickoff;
@@ -21,10 +22,11 @@ import {
   TICK_SLACK_MS,
   type DueSource,
 } from "../../src/config/cadence.js";
-import { freshnessClass, stampState } from "../../src/config/freshness.js";
-import type { GameCalendar } from "../../src/config/game-calendar.js";
+import { freshnessClass, stampState, type StampInstants } from "../../src/config/freshness.js";
+import { easternClockOf, type GameCalendar } from "../../src/config/game-calendar.js";
 import type { NflGame } from "../../src/domain/analytics/types.js";
 import { gameCalendarFromGames } from "../../src/domain/league/calendar.js";
+import { sourceStateOf } from "../../src/mcp/refresh.js";
 import { loadFixtureGames } from "../helpers/season/fixture.js";
 import {
   flexMove,
@@ -32,11 +34,18 @@ import {
   syntheticSeason,
   SYNTHETIC_SEASONS,
 } from "../helpers/season/synthetic.js";
+import { RefreshSim } from "../helpers/season/refresh-sim.js";
 import { ALL_UTC_OFFSET_ZONES, withTz } from "../helpers/season/zones.js";
 
 const MIN = 60_000;
 const H = 60 * MIN;
 const DAY = 24 * H;
+/**
+ * The longest run a tick makes (seconds): a slow download, a retry, a Background/LowPriorityIO
+ * process on a loaded machine. The 14-minute floor is measured from a run's start, so a run that
+ * ends more than a minute after its quarter-hour never costs the next tick (QA: min_gap from the end).
+ */
+const MAX_RUN_S = 120;
 /** A replay of a whole season is CPU-bound: its own hang detector, above the unit project's 30 s. */
 const REPLAY_TIMEOUT_MS = 120_000;
 
@@ -115,15 +124,12 @@ describe("the tick fires at the UTC quarter-hours in every zone (local minutes 0
 
 /** What one source's refresh_log says, as the replay evolves it. */
 interface Sim {
+  /** The release basis of the current file: the later of its checked_at and fetched_at. */
   checked: number;
-  lastAttempt: number;
-  fails: number;
-  /** Every successful check instant. */
+  /** Every successful check's basis instant. */
   readonly checks: number[];
 }
 
-/** An old release: the release basis is the later of fetched_at and checked_at. */
-const RELEASE = Date.parse("2020-01-01T00:00:00Z");
 const NFLVERSE: readonly Exclude<DueSource, "weather">[] = [
   "nflverse:schedules",
   "nflverse:injuries",
@@ -131,19 +137,29 @@ const NFLVERSE: readonly Exclude<DueSource, "weather">[] = [
   "nflverse:stats_player_week",
 ];
 
-const stampOf = (checked: number) => ({
-  as_of: new Date(RELEASE).toISOString(),
-  fetched_at: new Date(RELEASE).toISOString(),
-  checked_at: new Date(checked).toISOString(),
-});
+const basisMsOf = (b: StampInstants): number =>
+  Math.max(Date.parse(b.fetched_at), Date.parse(b.checked_at ?? b.fetched_at));
+
+/** A deterministic run duration in [0, max] seconds for the attempt at `t` (no Math.random). */
+function runSecondsAt(t: number, max: number): number {
+  let x = Math.floor(t / TICK_MS) >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x45d9f3b) >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x45d9f3b) >>> 0;
+  return (x ^ (x >>> 16)) % (max + 1);
+}
 
 /**
- * Replays the tick at every UTC quarter-hour in [from, to) for one source. `calAt(t)` is the
- * calendar the tick reads at t (a schedules release may move kickoffs); `failAt` ticks fail (an
- * attempt, no check); `asleep` ticks never run. `onTick(t, sim, cal, at)` sees the state BEFORE the
- * decision; `peak` says whether this tick is a point where a check's age peaks — the source is due
- * now, the calendar just changed, or it is the window's last tick (between those points the age only
- * grows and the TTL is fixed, so judging there judges every tick).
+ * Replays the tick at every UTC quarter-hour in [from, to) for one source. Each run is written to an
+ * in-memory store exactly as `ff refresh` writes it (tests/helpers/season/refresh-sim.ts) and the
+ * next decision reads it back through the production `sourceStateOf`, so a run's DURATION counts:
+ * a run started at t that publishes finishes `runS(t)` seconds later (refresh_log started_at = t,
+ * checked_at = finished_at = the end); an unchanged check's checked_at is its start. `calAt(t)` is the
+ * calendar the tick reads at t (a schedules release may move kickoffs) — a run that reads a new
+ * calendar publishes, the others publish a new release every `publishEvery` runs; `failAt` ticks
+ * fail (an attempt, no check); `asleep` ticks never run. `onTick(t, sim, cal, at)` sees the state
+ * BEFORE the decision; `peak` says whether this tick is a point where a check's age peaks — the
+ * source is due now, the calendar just changed, or it is the window's last tick (between those points
+ * the age only grows and the TTL is fixed, so judging there judges every tick).
  */
 function replay(
   source: Exclude<DueSource, "weather">,
@@ -156,40 +172,48 @@ function replay(
     readonly onTick?: (t: number, sim: Sim, cal: GameCalendar, peak: boolean) => void;
     /** The last successful check before `from` (default: `from` itself). */
     readonly checkedAt?: number;
+    /** The longest run, in seconds (default 0: instantaneous runs). */
+    readonly maxRunS?: number;
+    /** Every n-th successful run publishes a new release (default 4); the rest are unchanged. */
+    readonly publishEvery?: number;
   } = {},
 ): Sim {
   const c0 = o.checkedAt ?? from;
-  const sim: Sim = { checked: c0, lastAttempt: c0, fails: 0, checks: [c0] };
+  const store = new RefreshSim();
+  store.published(source, c0, c0, [0]);
+  const sim: Sim = { checked: c0, checks: [c0] };
   const ticks = quarterHours(from + 1, to);
   let prevCal: GameCalendar | null = null;
+  let runs = 0;
   for (const [i, t] of ticks.entries()) {
     if (o.asleep?.has(t) === true) continue;
     const cal = calAt(t);
-    const d = dueDecision({
-      source,
-      nowMs: t,
-      cal,
-      state: {
-        file: "ok",
-        basis: stampOf(sim.checked),
-        lastAttemptMs: sim.lastAttempt,
-        consecutiveFailures: sim.fails,
-        backoffUntilMs: null,
-      },
-    });
+    const { state } = sourceStateOf(store.ports, source, t, 0);
+    const d = dueDecision({ source, nowMs: t, cal, state });
     o.onTick?.(t, sim, cal, d.due || cal !== prevCal || i === ticks.length - 1);
+    const fresh = cal !== prevCal;
     prevCal = cal;
     if (!d.due) continue;
-    sim.lastAttempt = t;
-    if (o.failAt?.has(t) === true) sim.fails++;
+    const end = t + runSecondsAt(t, o.maxRunS ?? 0) * 1000;
+    if (o.failAt?.has(t) === true) store.failed(source, t, end);
     else {
-      sim.checked = t;
-      sim.fails = 0;
-      sim.checks.push(t);
+      runs++;
+      if (fresh || runs % (o.publishEvery ?? 4) === 0) store.published(source, t, end, [0]);
+      else store.unchanged(source, t, end, [0]);
+      const basis = sourceStateOf(store.ports, source, end, 0).state.basis;
+      sim.checked = basis === null ? end : basisMsOf(basis);
+      sim.checks.push(sim.checked);
     }
   }
   return sim;
 }
+
+/** A stamp whose release basis is `checked` (an old release, last confirmed then). */
+const stampOf = (checked: number): StampInstants => ({
+  as_of: "2020-01-01T00:00:00.000Z",
+  fetched_at: "2020-01-01T00:00:00.000Z",
+  checked_at: new Date(checked).toISOString(),
+});
 
 /** The judged state of every class `source` feeds, at `t`, from a check at `checked`. */
 function states(
@@ -329,6 +353,7 @@ describe("the tick over real and synthetic calendars (zone-independent)", () => 
         const bad: string[] = [];
         for (const source of NFLVERSE)
           replay(source, s.calAt, s.from, s.to, {
+            maxRunS: MAX_RUN_S,
             onTick: (t, sim, cal, peak) => {
               if (peak && states(source, sim.checked, t, cal).some((x) => x !== "fresh"))
                 bad.push(`${source} at ${new Date(t).toISOString()}`);
@@ -363,6 +388,7 @@ describe("the tick over real and synthetic calendars (zone-independent)", () => 
               const set = new Set([t]);
               replay(source, s.calAt, prev, Math.min(s.to, t + 2 * DAY), {
                 checkedAt: prev,
+                maxRunS: MAX_RUN_S,
                 ...(mode === "fail" ? { failAt: set } : { asleep: set }),
                 onTick: (now, sim, cal, peak) => {
                   if (peak && states(source, sim.checked, now, cal).includes("expired"))
@@ -384,6 +410,7 @@ describe("the tick over real and synthetic calendars (zone-independent)", () => 
         const ks = [...new Set(s.kickoffs)].sort((a, b) => a - b);
         let seen = 0;
         replay("nflverse:schedules", s.calAt, s.from, s.to, {
+          maxRunS: MAX_RUN_S,
           onTick: (t, sim) => {
             // a kickoff k with t in [k − 2 h 45 m, k] ⇔ k in [t, t + 2 h 45 m]
             const k = ks.find((x) => x >= t && x <= t + 2 * H + 45 * MIN);
@@ -399,6 +426,44 @@ describe("the tick over real and synthetic calendars (zone-independent)", () => 
       REPLAY_TIMEOUT_MS,
     );
   }
+
+  it("a run ending 30–120 s after its quarter-hour never makes the next pregame tick min_gap", () => {
+    // the floor counts from the attempt's START: a check recorded d seconds after the tick at k − 2 h
+    // left the tick at k − 1 h 45 m `min_gap` for every d > 60 s (the 15-minute cadence became 30)
+    let seen = 0;
+    for (const season of SYNTHETIC_SEASONS) {
+      const games = syntheticSeason({ season, seed: season });
+      const cal = gameCalendarFromGames(games, `pregame-${String(season)}`);
+      const pick = (f: (c: ReturnType<typeof easternClockOf>, k: number) => boolean): number[] =>
+        cal.kickoffs.filter((k) => f(easternClockOf(k), k)).slice(0, 1);
+      const special = [
+        ...pick((c) => c.weekday === "Sat"),
+        ...pick((c) => c.hour === 9 && c.minute === 30),
+        ...pick((c) => c.date.endsWith("-12-25")),
+      ];
+      expect(special.length, String(season)).toBeGreaterThanOrEqual(2);
+      for (const k of special)
+        for (const d of [0, 30, 59, 61, 90, 120]) {
+          for (const kind of ["published", "unchanged"] as const) {
+            const store = new RefreshSim();
+            store.published("nflverse:schedules", k - 3 * H, k - 3 * H, [season]);
+            const t0 = k - 2 * H;
+            if (kind === "published")
+              store.published("nflverse:schedules", t0, t0 + d * 1000, [season]);
+            else store.unchanged("nflverse:schedules", t0, t0 + d * 1000, [season]);
+            const t1 = k - H - 45 * MIN;
+            const { state } = sourceStateOf(store.ports, "nflverse:schedules", t1, season);
+            const got = dueDecision({ source: "nflverse:schedules", nowMs: t1, cal, state });
+            expect(
+              got.due,
+              `${String(season)} ${new Date(k).toISOString()} ${kind} d=${String(d)}`,
+            ).toBe(true);
+            seen++;
+          }
+        }
+    }
+    expect(seen).toBeGreaterThan(50);
+  });
 
   it("an off-season date checks schedules every 6 h (the spring release is seen within 6 h)", () => {
     for (const season of SYNTHETIC_SEASONS) {

@@ -185,11 +185,9 @@ describe("the runner asks for the under-lock check exactly when 'unchanged' appl
       },
       deps(p),
     );
-    expect(seen).toEqual([
-      { skipIfCurrent: true },
-      { skipIfCurrent: false },
-      { skipIfCurrent: false },
-    ]);
+    expect(seen.map((o) => o?.skipIfCurrent)).toEqual([true, false, false]);
+    // every publish carries the run's start (the refresh_log row's started_at)
+    for (const o of seen) expect(Number.isFinite(Date.parse(o?.startedAt ?? ""))).toBe(true);
   });
 
   it("a publisher answering already_current is an 'unchanged' result, a success, with temp cleaned", async () => {

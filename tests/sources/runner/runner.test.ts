@@ -109,6 +109,8 @@ describe("happy path", () => {
         source: "nflverse:injuries",
         version: "2026-09-30T13:36:27Z",
         released: "2026-09-30T13:36:27.000Z",
+        // the run's start: the refresh_log row's started_at (the 14-minute floor counts from it)
+        startedAt: d.clock.nowIso(),
       },
     ]);
     expect(src.calls).toEqual({ version: 1, fetch: 1, assert: 1, publish: 1 });
@@ -376,7 +378,7 @@ describe("unchanged release (plan 01 §5.5 'skips if unchanged')", () => {
         expectStatus(r, "published");
         expect(src.calls.fetch).toBe(1);
         expect(inner.unchanged).toEqual([]);
-        expect(options).toEqual([{ skipIfCurrent: false }]);
+        expect(options.map((o) => o?.skipIfCurrent)).toEqual([false]);
         expect(cap.lines.map((e) => e.event)).toContain("refresh.dataset_repair");
       });
     }

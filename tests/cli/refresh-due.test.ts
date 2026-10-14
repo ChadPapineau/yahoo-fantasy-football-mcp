@@ -43,6 +43,7 @@ const SCHEDULES_TS = `${REL}/schedules/timestamp.txt`;
 function spy(
   over: ReadonlyMap<string, Uint8Array | string> = new Map(),
   root: string = FIXTURES,
+  onFetch: (url: string) => void = () => undefined,
 ): {
   fetch: FetchLike;
   calls: string[];
@@ -53,6 +54,7 @@ function spy(
     calls,
     fetch: (url, init) => {
       calls.push(url);
+      onFetch(url);
       const o = over.get(url);
       return o === undefined ? base(url, init) : Promise.resolve(new Response(o));
     },
@@ -79,6 +81,8 @@ async function tick(
      * (no FF_FIXTURE_DIR: the league file is a private copy of the placeholder league).
      */
     upstream?: string;
+    /** Called on every request (e.g. a slow download advancing the clock). */
+    onFetch?: (url: string) => void;
   } = {},
 ): Promise<Tick> {
   const base = o.upstream === undefined ? fixtureEnv() : { FF_LEAGUE_FILE: privateLeague(s) };
@@ -89,7 +93,7 @@ async function tick(
     ...(o.exec === undefined ? {} : { exec: o.exec }),
   });
   const { config, log } = await loadRuntime(io);
-  const t = spy(o.over, o.upstream);
+  const t = spy(o.over, o.upstream, o.onFetch);
   const code = await refresh(
     io,
     config,
@@ -337,6 +341,39 @@ describe("a schedules release that moves kickoffs", () => {
     expect(moved).toHaveLength(8);
     expect(fx.calls.filter((c) => c.file === OSASCRIPT)).toEqual([]);
   }, 90_000);
+});
+
+describe("the 14-minute floor counts from a run's start (a slow download never costs the next tick)", () => {
+  it("a schedules download of 61–120 s at k − 2 h: started_at is the tick's instant; the tick at k − 1 h 45 m runs", async () => {
+    // CHI@BUF, Saturday 2026-12-19 20:20 ET (the fixture's Saturday game): the 15-minute pregame cadence
+    const k = Date.parse("2026-12-20T01:20:00.000Z");
+    for (const d of [61, 120]) {
+      sb?.cleanup();
+      sb = sandbox();
+      const clock = fixedClock(k - 2 * 60 * MIN);
+      const slow = (url: string): void => {
+        if (url === GAMES) clock.advance(d * 1000);
+      };
+      const t1 = await tick(sb, clock, { onFetch: slow });
+      expect(t1.out).toMatch(/nflverse:schedules\s+published/);
+      const [first] = rows<{ started_at: string; checked_at: string }>(
+        sb,
+        "SELECT started_at, checked_at FROM refresh_log WHERE source = 'nflverse:schedules' ORDER BY id",
+      );
+      expect(first?.started_at).toBe(new Date(k - 2 * 60 * MIN).toISOString());
+      expect(Date.parse(first?.checked_at ?? "")).toBe(k - 2 * 60 * MIN + d * 1000);
+      clock.set(k - 105 * MIN);
+      const t2 = await tick(sb, clock, { onFetch: slow });
+      expect(t2.out, String(d)).toMatch(/nflverse:schedules\s+due /);
+      expect(t2.calls, String(d)).toContain(SCHEDULES_TS);
+      // the re-check of the unchanged release is recorded at its start too
+      const checked = rows<{ checked_at: string }>(
+        sb,
+        "SELECT checked_at FROM refresh_log WHERE source = 'nflverse:schedules' ORDER BY id DESC LIMIT 1",
+      );
+      expect(checked[0]?.checked_at).toBe(new Date(k - 105 * MIN).toISOString());
+    }
+  }, 120_000);
 });
 
 describe("a season upstream has not published yet (injuries [S] from the May release to its first report)", () => {
