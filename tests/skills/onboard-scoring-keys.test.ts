@@ -29,7 +29,10 @@ const TEXTS = [
 const EXAMPLE = (() => {
   const yaml = /^```yaml\n([\s\S]*?)^```/m.exec(GUIDE)?.[1];
   if (yaml === undefined) throw new Error("the guide has no YAML example");
-  return parseLeagueYaml(yaml) as { scoring: { overrides?: Record<string, number> } };
+  // the example names no year (`season: <season>`); any season loads (onboard-yaml.test.ts)
+  return parseLeagueYaml(yaml.replace("<season>", "2030")) as {
+    scoring: { overrides?: Record<string, number> };
+  };
 })();
 
 /** Whether a league file with these overrides (on top of the example's) loads: schema + model. */

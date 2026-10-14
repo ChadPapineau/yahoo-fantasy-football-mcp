@@ -10,6 +10,10 @@
   { "query": "What are my league rules?", "should_trigger": true },
   { "query": "Onboard my fantasy league", "should_trigger": true },
   { "query": "Configure my league for this assistant", "should_trigger": true },
+  {
+    "query": "Our league is starting a new season, roll over my league file",
+    "should_trigger": true
+  },
   { "query": "who should I start", "should_trigger": false },
   { "query": "How do I get a Yahoo API key?", "should_trigger": false },
   { "query": "Which kicker should I stream?", "should_trigger": false },

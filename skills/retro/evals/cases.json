@@ -46,6 +46,21 @@
           "text": "Distinguishes decision quality from outcome: the call was right on the information and interval available, the outcome was bad luck; quotes the logged recommendation as read-back text rather than restating it as a new instruction."
         }
       ]
+    },
+    {
+      "id": "RT-4",
+      "phase": "1a",
+      "prompt": "How did your advice do last week?",
+      "fixture_variant": "rt-4-kickoff-moved",
+      "setup": "A start-sit call was logged for the reviewed week before the game that set its deadline was flexed to a later kickoff; ff_analyze_retrospective marks that call lock_status moved and warns that it was made under a lock time that has since moved.",
+      "expectations": [
+        { "kind": "tool_used", "tool": "ff_analyze_retrospective" },
+        { "kind": "regex", "pattern": "moved|changed", "flags": "i" },
+        {
+          "kind": "rubric",
+          "text": "Names the call made under the old kickoff, still judges its player choice by regret, and says its timing advice used the old kickoff, without counting the moved deadline against the user."
+        }
+      ]
     }
   ]
 }

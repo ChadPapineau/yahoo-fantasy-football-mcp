@@ -91,12 +91,21 @@ export function runScript(
 export const SKILLS = ["onboard", "retro", "start-sit", "stream-kdef"] as const;
 
 /** The onboard guide's save commands (its ```sh blocks; there is exactly one). */
-export const saveBlocks = [
+const shBlocks = [
   ...readFileSync(
     path.join(ROOT, "skills/onboard/references/onboard-league-yaml.md"),
     "utf8",
   ).matchAll(/^```sh\n([\s\S]*?)^```/gm),
 ].map((m) => m[1] ?? "");
+
+/** The guide's save commands: the shell block that starts private (`umask 077`). */
+export const saveBlocks = shBlocks.filter((b) => /^umask 077$/m.test(b));
+
+/**
+ * The guide's new-season step: the shell block that keeps last season's file as
+ * `league-<season>.yaml`, run in the same terminal after the save commands (it reads their `D`).
+ */
+export const keepBlocks = shBlocks.filter((b) => b.includes("league-$O.yaml"));
 
 /**
  * The shells a user may paste the save commands into, as installed here: `sh` (dash on Linux, bash
@@ -117,13 +126,14 @@ export const SHELLS: readonly string[] = [
  * by a copy of the fixture league to the very path the `chmod 600` line names (so the test follows
  * the guide's path, whatever it is) unless the commands left no folder to save in (a `STOP:` on
  * FF_CONFIG_DIR), and `ff` is a stub that logs its arguments. zsh runs with `-f` (no startup files).
+ * `opts.after` is pasted into the same shell after the save commands (a later step that reads `D`).
  */
 export function runSaveSteps(
   env: Record<string, string>,
   home: string,
-  opts: { using?: string; cwd?: string } = {},
+  opts: { using?: string; cwd?: string; after?: string } = {},
 ): { status: number | null; stdout: string; stderr: string; ffLog: string } {
-  const block = saveBlocks[0] ?? "";
+  const block = `${saveBlocks[0] ?? ""}${opts.after === undefined ? "" : `\n${opts.after}`}`;
   const target = /^chmod 600 (.+)$/m.exec(block)?.[1];
   if (target === undefined) throw new Error("the save commands have no `chmod 600 <file>` line");
   const script = block

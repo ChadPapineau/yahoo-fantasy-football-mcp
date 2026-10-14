@@ -54,6 +54,22 @@
         { "kind": "skill_invoked", "value": false },
         { "kind": "tool_not_used", "tool": "ff_analyze_waivers" }
       ]
+    },
+    {
+      "id": "KD-4",
+      "phase": "1a",
+      "prompt": "Which defense should I stream?",
+      "fixture_variant": "kd-4-week18-placeholder",
+      "setup": "Clock in week 17 of the 2026 fixture season. The fixture release still holds the Week-18 placeholder (all 16 games at one Sunday 13:00 ET slot), so ff_get_status lists week 18 under schedule.tentative_weeks (placeholder_week), ff_get_schedule marks every week-18 game kickoff_tentative, and the look-ahead week carries the placeholder warning.",
+      "expectations": [
+        { "kind": "tool_args", "tool": "ff_get_schedule", "args": { "weeks": [17, 18] } },
+        { "kind": "regex", "pattern": "placeholder|not (yet )?set|may move", "flags": "i" },
+        { "kind": "regex", "pattern": "re-?check|ask (me )?again", "flags": "i" },
+        {
+          "kind": "rubric",
+          "text": "Gives the week-17 verdict with its deadline, and for the week-18 look-ahead says the kickoff times are NFL placeholders so the lock times may move, quoting the warning, and tells the user to re-check once the NFL sets them."
+        }
+      ]
     }
   ]
 }

@@ -59,13 +59,15 @@ If the user named players, resolve each name with `fantasy-football-mcp-server:f
 - The Thursday or Monday option-value verdict whenever a swap involves an earlier or later game.
 - Conditionals ("if X is inactive by 11:30 ET, start Y").
 - A starter who will not play (excluded, or `status: O`) and whom no rostered player who can score replaces is left out of `rec.lineup`, and an assumption names his seat: say that seat scores 0 this week and, for a kicker or defense, offer to stream one ("ask which defense to stream").
-- The lock schedule.
+- The lock schedule. When a kickoff of one of the user's games moved (a schedule line in `warnings[]`), the new lock time comes first in the answer, before the lineup; when the week is tentative (Week-18 placeholder times, a flex window, a game with no time yet), each affected lock time carries "may move; re-check after <the time the warning gives>".
+- **Deadline:** the earliest `lock_at` among the players the advice moves. Tell the user to ask again in the final 90 minutes before it: inactives come out about then, and every call re-checks the schedule and the injury report first, so the re-run sees a late flex or a new designation. For a tentative week, also after the re-check time the warning gives.
 
 ### 6. Guardrails specific to start-sit
 - A swap with `coin_flip: true` is reported as a coin flip, not dramatised. A change whose own Δ interval includes 0 is held: it never rides along with a change that is made, and never holds one back.
 - Never bench a Thursday player for a Sunday one without the option-value line (once the Thursday game starts, the Sunday alternative cannot come back).
 - Never count an injury twice: the projection already includes `p_active`.
 - In the game-day branch, never a move on a locked player.
+- Never quote a lock time from an earlier answer after a kickoff change: the roster's `lock_at` and `lock_schedule[]` already use the new kickoff.
 
 <!-- BEGIN GENERATED FROM _shared/references/guardrails.md (edit the source, then run npm run build:skills) -->
 ## Guardrails (every Skill, every answer)
@@ -80,6 +82,7 @@ If the user named players, resolve each name with `fantasy-football-mcp-server:f
 5. **Numbers discipline.** `percent_owned_delta` is a *competition* signal, never evidence that a player is good. Last week's points are one draw, not a trend. A Questionable player plays about 71 % of the time (2017–2023), not 50/50 — use `p_active`. Kickers, defenses and schedules are never planned more than two weeks out. A Δ whose interval includes 0 is **"no move"**, said plainly.
 6. **Every action shows its `as_of` and its deadline** (`latest_execution_time` or the relevant `lock_at`).
 7. **Say what the data cannot see.** Under the manual league the league settings and roster are as current as the user's last edit of their league file — say so. Repeat every `warnings[]` entry in plain words. Never imply a live free-agent pool, an opponent roster, a game-day inactive list or the platform's own points when the result says they are unavailable.
+8. **A moved kickoff comes first.** When a result's `warnings[]` (or the status's `schedule.recent_changes[]`) shows a kickoff change for a game of a player in the answer, open with it: the game, the new kickoff in ET, and the new lock time ("CHI@BUF moved to Sun 13:00 ET — your lock for Josh Allen is now Sun 13:00 ET"). Every lock time in a result already uses the new kickoff; never repeat an old one. A tentative kickoff — a week whose times are NFL placeholders, a game that may still be flexed, a game with no time yet — carries "may move; re-check after <the time the warning gives>", quoted as given. A logged call marked `lock_status: "moved"` was made under a kickoff that has since changed: say so when it is read back.
 <!-- END GENERATED FROM _shared/references/guardrails.md -->
 
 <!-- BEGIN GENERATED FROM _shared/references/output-template.md (edit the source, then run npm run build:skills) -->

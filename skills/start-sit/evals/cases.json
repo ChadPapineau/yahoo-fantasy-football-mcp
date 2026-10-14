@@ -121,6 +121,66 @@
           "text": "Says live odds are not available in this version and, when it gives a number, labels it the pre-game win probability; treats in-game scores as provisional. (Phase 2: expects final/live/pending from ff_analyze_matchup mode live instead.)"
         }
       ]
+    },
+    {
+      "id": "SS-8",
+      "phase": "1a",
+      "prompt": "Should I start Jaxon Smith-Njigba or Keenan Allen at flex?",
+      "fixture_variant": "ss-8-kickoff-moved",
+      "setup": "Week 4, no slot locked, Team B entered as the opponent. The variant republishes the schedule with SEA's week-4 game flexed from Sunday 16:05 ET to Sunday 20:20 ET two days ago, so ff_get_status lists it under schedule.recent_changes and ff_get_roster, ff_project_players and ff_analyze_lineup each carry the kickoff-change warning; every lock_at already uses the new kickoff.",
+      "expectations": [
+        {
+          "kind": "tool_order",
+          "tools": [
+            "ff_get_status",
+            "ff_get_roster",
+            "ff_analyze_lineup",
+            "ff_record_recommendation"
+          ]
+        },
+        { "kind": "regex", "pattern": "20:20", "flags": "" },
+        {
+          "kind": "regex",
+          "pattern": "kickoff (changed|moved)|moved to|new (lock|kickoff)",
+          "flags": "i"
+        },
+        { "kind": "regex", "pattern": "90 min|ask (me )?again", "flags": "i" },
+        {
+          "kind": "rubric",
+          "text": "Opens with the moved kickoff and Jaxon Smith-Njigba's new lock time in ET before the lineup, never quotes the old 16:05 ET lock, gives the deadline as the earliest lock among the players moved, and says to ask again in the final 90 minutes before it."
+        }
+      ]
+    },
+    {
+      "id": "SS-9",
+      "phase": "1a",
+      "prompt": "Who should I start this week?",
+      "fixture_variant": "ss-9-injuries-not-published",
+      "setup": "Clock in week 1 of a new NFL season, before the first injury report: ff_get_status shows nflverse:injuries as not_published (checked an hour ago) and season.not_published lists it; ff_project_players and ff_analyze_lineup answer with the named assumption that no injury report for the season is published upstream yet.",
+      "expectations": [
+        { "kind": "tool_used", "tool": "ff_analyze_lineup" },
+        { "kind": "regex", "pattern": "not (been )?published|no injury report", "flags": "i" },
+        { "kind": "regex_absent", "pattern": "ff refresh", "flags": "i" },
+        {
+          "kind": "rubric",
+          "text": "Says the season's injury report is not published upstream yet and that this is the data provider's state, not a fault; gives the lineup with that assumption named under Confidence & freshness; never asks the user to run ff refresh (all or any source) and never retries in a loop."
+        }
+      ]
+    },
+    {
+      "id": "SS-10",
+      "phase": "1a",
+      "prompt": "Who should I start?",
+      "fixture_variant": "league-file-last-season",
+      "setup": "The league file names the previous season; the clock is in the next NFL season's preseason, so ff_get_status shows season.league_matches false with league_season one behind nfl_season, and the analytics tools add the league-season warning.",
+      "expectations": [
+        { "kind": "tool_used", "tool": "ff_get_status" },
+        { "kind": "regex", "pattern": "new season|next season", "flags": "i" },
+        {
+          "kind": "rubric",
+          "text": "Before any lineup advice, names both seasons (the league file's and the NFL's), says the advice would describe the old season until the file is updated, and offers the onboard Skill's new-season step; changes nothing and writes no file."
+        }
+      ]
     }
   ]
 }

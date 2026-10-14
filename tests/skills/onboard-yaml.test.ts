@@ -23,7 +23,7 @@ import {
 } from "../../src/config/paths.js";
 import { leagueFileSchema, parseLeagueYaml } from "../../src/providers/manual/index.js";
 import { FIXTURE_LEAGUE } from "../mcp/helpers/env.js";
-import { ROOT, SHELLS, runSaveSteps, saveBlocks } from "./helpers.js";
+import { ROOT, SHELLS, keepBlocks, runSaveSteps, saveBlocks } from "./helpers.js";
 
 const guide = readFileSync(
   path.join(ROOT, "skills/onboard/references/onboard-league-yaml.md"),
@@ -36,9 +36,22 @@ describe("the onboard guide's league.yaml", () => {
     expect(blocks).toHaveLength(1);
   });
 
-  it("parses with the provider's parser and passes the provider's schema", () => {
-    const parsed = leagueFileSchema.safeParse(parseLeagueYaml(blocks[0] ?? ""));
-    expect(parsed.success ? [] : parsed.error.issues).toEqual([]);
+  // season-agnostic (season-fresh §11): the example names no year; the Skill fills `<season>` from
+  // the status's season block, and the file must load for whatever season that is
+  it("names no fixed season: `season: <season>`, and every season parses and passes the provider's schema", () => {
+    const yaml = blocks[0] ?? "";
+    expect(yaml).toMatch(/^ {2}season: <season>(?: |$)/m);
+    expect(yaml).not.toMatch(/\b(?:19|20)\d\d\b/);
+    fc.assert(
+      fc.property(fc.integer({ min: 2000, max: 2100 }), (season) => {
+        const parsed = leagueFileSchema.safeParse(
+          parseLeagueYaml(yaml.replace("<season>", String(season))),
+        );
+        expect(parsed.success ? [] : parsed.error.issues).toEqual([]);
+        expect(parsed.success ? parsed.data.league.season : null).toBe(season);
+      }),
+      { numRuns: 60 },
+    );
   });
 
   it("uses placeholder identifiers only", () => {
@@ -88,6 +101,40 @@ describe("QA-1-072: the guide's save commands put league.yaml where the server r
         expect(statSync(path.dirname(want)).mode & 0o777).toBe(0o700);
         expect(readFileSync(want, "utf8")).toBe(readFileSync(FIXTURE_LEAGUE, "utf8"));
         expect(ffLog).toContain("ff doctor");
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+describe("the new-season step keeps last season's file beside the new one", () => {
+  it("has exactly one block for it, separate from the save commands", () => {
+    expect(keepBlocks).toHaveLength(1);
+    expect(keepBlocks[0]).toMatch(/^O=<old season>$/m);
+  });
+
+  for (const shell of SHELLS) {
+    it(`${shell}: after the save commands, league-<season>.yaml is a byte-identical 0600 copy, for any season`, () => {
+      const base = realpathSync(mkdtempSync(path.join(tmpdir(), "ff-keep-")));
+      try {
+        let n = 0;
+        fc.assert(
+          fc.property(fc.integer({ min: 2000, max: 2100 }), (season) => {
+            const home = path.join(base, `home${String(n++)}`);
+            mkdirSync(home, { mode: 0o700 });
+            const keep = (keepBlocks[0] ?? "").replace("<old season>", String(season));
+            const out = runSaveSteps({}, home, { using: shell, after: keep });
+            expect(out.status, out.stderr).toBe(0);
+            const file = defaultLeagueFilePath(resolveConfigDir({}, home));
+            const kept = path.join(path.dirname(file), `league-${String(season)}.yaml`);
+            expect(existsSync(kept), `expected ${kept}`).toBe(true);
+            expect(readFileSync(kept, "utf8")).toBe(readFileSync(file, "utf8"));
+            expect(statSync(kept).mode & 0o777).toBe(0o600);
+            expect(out.stdout).toContain(`Kept last season's file: ${kept}`);
+          }),
+          { numRuns: 4 },
+        );
       } finally {
         rmSync(base, { recursive: true, force: true });
       }

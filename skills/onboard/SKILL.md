@@ -1,7 +1,7 @@
 ---
 name: onboard
-description: Sets up the user's fantasy-football league for this assistant when no platform connection exists. Interviews the user for the scoring, roster, waiver, FAAB and playoff rules and their roster, shows a league.yaml to save privately (0600, outside any repository), then checks it loads and the scoring engine agrees.
-when_to_use: set up my league, onboard, connect my league, configure my league, league.yaml, my league settings, scoring settings, league rules, the settings changed, update my roster file
+description: Sets up the user's fantasy-football league for this assistant when no platform connection exists, and moves it to a new NFL season. Interviews the user for scoring, roster, waiver, FAAB and playoff rules and their roster, shows a league.yaml to save privately (0600, outside any repository), then checks it loads and the engine agrees.
+when_to_use: set up my league, onboard, connect my league, configure my league, league.yaml, my league settings, scoring settings, league rules, the settings changed, update my roster file, new season, next season, roll over my league
 argument-hint: "[setup|verify]"
 disallowed-tools:
   - fantasy-football-mcp-server:ff_commit_lineup
@@ -26,11 +26,12 @@ Conventions: Step 0 in [orient](references/orient.md), the cheat-sheet in [tool 
 - `NOT_FOUND` with the hint "No league configured…" → there is no league file: **interview** (§2).
 - A league comes back → the file exists: **verify** (§4). Offer to re-interview only for what changed ("the commissioner changed the scoring", "I traded for a player").
 - `INTERNAL` naming `league.yaml` → the file is unsafe or invalid: ask the user to run `ff doctor` in a terminal and fix what it names (usually permissions: `chmod 600`). Never ask them to paste the file into the chat.
+- A league comes back but the status's `season.league_matches` is `false` (the file is for another season than the NFL season in progress), or the user asks to start the next season → **new season** (§5).
 
 ### 2. Interview (no file yet)
 Ask in small batches, in this order, accepting "I don't know" (the field stays empty and is listed as unverified). The questions and sensible defaults are in [the league file guide](references/onboard-league-yaml.md):
 
-1. League basics: season, number of teams, head-to-head or points-only, the week the regular season ends, when the playoffs start and how many teams make them.
+1. League basics: season (the NFL season the league plays — the status's `season.nfl_season` unless the user says otherwise), number of teams, head-to-head or points-only, the last week of the league's regular season (the app's league settings show it; NFL seasons differ in length, so never assume one), when the playoffs start and how many teams make them.
 2. Roster slots and counts (QB, WR, RB, TE, W/R/T, K, DEF, BN, IR).
 3. Scoring — offer the common presets (standard, half-PPR, PPR) first, then only the differences; kicker distance brackets, missed field goals by distance (`fg_miss_0_19` … `fg_miss_50p`), defense points-allowed brackets, and yards-allowed brackets if the league scores them (`dst_ya_*`: every bin from 0 yards to the open-ended one, the bins worth 0 included). A TE premium cannot be stated in this version: if the league has one, say so and leave it out — its tight ends' points read low by the premium × receptions.
 4. Waivers: FAAB or rolling priority, the starting FAAB budget, any weekly add limit.
@@ -57,6 +58,15 @@ Show the complete YAML in one code block, then the save steps from the guide: th
 5. `fantasy-football-mcp-server:ff_record_recommendation` with `kind: "onboarding"`, a no-move entry recording that the file was verified. There is no analytics `rec` to copy here: send the exact entry in [the verification log entry](references/onboard-league-yaml.md#the-verification-log-entry), filling only its placeholders.
 6. Close with what to do next: "ask who to start this week", "ask which defense to stream".
 
+### 5. New season (the file is for an earlier season)
+The league file names one season. When the NFL moves on — the status shows `season.league_matches: false` while `season.phase` is `preseason`, `regular` or `postseason` — every tool still reads the old season until the file changes. Nothing changes without the user's yes:
+
+1. Say which seasons: the file's (`season.league_season`) and the NFL's (`season.nfl_season`), and that the advice describes the old season until the file is updated.
+2. Ask only what may have changed: scoring, roster slots, waiver and FAAB rules, the playoff weeks, the last week of the regular season (ask again — NFL seasons differ in length, so last season's value may not fit), and the user's roster after the draft (empty until then: `players: []`; start/sit needs it).
+3. Show the new file: the same `league.key` (so the recommendation log stays one league), `season` set to the new season, scoring, slots and rules copied from the old file with the changes, `my_team.players` the new roster (or `[]` before the draft), `opponents` and `other_teams` left out until there is something to enter.
+4. Give the save steps in [the league file guide](references/onboard-league-yaml.md#starting-a-new-season): first keep the old file as `league-<old season>.yaml` in the same directory (0600) — a review of last season reads it — then save the new `league.yaml` as in §3, then `ff doctor`.
+5. Verify (§4) and log the verification entry.
+
 ## Output additions
 - The settings digest table, the unverified fields, and the match/mismatch list.
 - **Access:** read-only. No platform connection exists; every move is made by the user in their fantasy app, and the Skills always end with the exact manual steps.
@@ -80,6 +90,7 @@ Show the complete YAML in one code block, then the save steps from the guide: th
 5. **Numbers discipline.** `percent_owned_delta` is a *competition* signal, never evidence that a player is good. Last week's points are one draw, not a trend. A Questionable player plays about 71 % of the time (2017–2023), not 50/50 — use `p_active`. Kickers, defenses and schedules are never planned more than two weeks out. A Δ whose interval includes 0 is **"no move"**, said plainly.
 6. **Every action shows its `as_of` and its deadline** (`latest_execution_time` or the relevant `lock_at`).
 7. **Say what the data cannot see.** Under the manual league the league settings and roster are as current as the user's last edit of their league file — say so. Repeat every `warnings[]` entry in plain words. Never imply a live free-agent pool, an opponent roster, a game-day inactive list or the platform's own points when the result says they are unavailable.
+8. **A moved kickoff comes first.** When a result's `warnings[]` (or the status's `schedule.recent_changes[]`) shows a kickoff change for a game of a player in the answer, open with it: the game, the new kickoff in ET, and the new lock time ("CHI@BUF moved to Sun 13:00 ET — your lock for Josh Allen is now Sun 13:00 ET"). Every lock time in a result already uses the new kickoff; never repeat an old one. A tentative kickoff — a week whose times are NFL placeholders, a game that may still be flexed, a game with no time yet — carries "may move; re-check after <the time the warning gives>", quoted as given. A logged call marked `lock_status: "moved"` was made under a kickoff that has since changed: say so when it is read back.
 <!-- END GENERATED FROM _shared/references/guardrails.md -->
 
 <!-- BEGIN GENERATED FROM _shared/references/output-template.md (edit the source, then run npm run build:skills) -->

@@ -1,12 +1,12 @@
 ## The league file — questions, shape, and how to save it
 
-Contents: [Questions](#questions) · [Scoring presets](#scoring-presets) · [The shape](#the-shape) · [Saving it](#saving-it) · [Keeping it current](#keeping-it-current) · [The verification log entry](#the-verification-log-entry)
+Contents: [Questions](#questions) · [Scoring presets](#scoring-presets) · [The shape](#the-shape) · [Saving it](#saving-it) · [Keeping it current](#keeping-it-current) · [Starting a new season](#starting-a-new-season) · [The verification log entry](#the-verification-log-entry)
 
 ### Questions
 
 Ask in this order, a few at a time. "I don't know" is a fine answer: leave the field out and list it as unverified.
 
-1. **League:** season; number of teams; head-to-head points or points-only; last regular-season week; first playoff week and number of playoff teams.
+1. **League:** season (the NFL season the league plays: the status's `season.nfl_season` unless the user says otherwise); number of teams; head-to-head points or points-only; the last week of the league's regular season (from the app's league settings — NFL seasons differ in length, so never assume one); first playoff week and number of playoff teams.
 2. **Roster slots:** how many of each — QB, WR, RB, TE, W/R/T (flex), K, DEF, BN (bench), IR.
 3. **Scoring:** which preset is closest (below), then every difference. Kicker: points per field goal by distance, per extra point, and any penalty for a missed field goal by distance. Defense: sacks, interceptions, fumble recoveries, touchdowns, safeties, blocked kicks, the points-allowed brackets, and the yards-allowed brackets if the league scores them. Ask whether tight ends get extra points per reception (a TE premium): it [cannot be stated yet](#te-premium-cannot-be-stated-yet).
 4. **Waivers:** FAAB (and the starting budget) or rolling priority; a weekly add limit if there is one.
@@ -40,18 +40,18 @@ Scoring values apply per position type (offense, kicker, defense), not per posit
 
 ### The shape
 
-This is the format `ff doctor` validates (`version: 1`; unknown keys are rejected, and every problem is reported as a path and a reason, never the value). Names below are placeholders; the user's real names go in their private copy only.
+This is the format `ff doctor` validates (`version: 1`; unknown keys are rejected, and every problem is reported as a path and a reason, never the value). Names below are placeholders; the user's real names go in their private copy only. `<season>` stands for the season's year (a number, such as the status's `season.nfl_season`), and the week numbers are an example: use the league's own.
 
 ```yaml
 version: 1
 league:
   key: example                 # the league becomes manual.l.example (lowercase, digits, hyphens)
   name: Example League
-  season: 2026
+  season: <season>             # the NFL season's year
   num_teams: 12
   scoring_type: head           # head-to-head points; "point" for points-only
   start_week: 1
-  end_week: 17
+  end_week: 17                 # the last week of the league's regular season, from its settings
   lineup_lock: per_game        # each player locks at his own kickoff; "weekly" if the whole lineup locks at once
   playoffs:
     start_week: 15
@@ -137,6 +137,22 @@ The server's own location check is narrower than this rule, so do not rely on it
 ### Keeping it current
 
 The server knows only what the file says. Edit it after every add, drop, trade or lineup change, and add each week's line to `opponents` (with that team's roster under `other_teams`) if you want a win probability. `ff doctor` re-checks it after any edit.
+
+### Starting a new season
+
+The file names one season, and every tool reads that season until the file changes. When the NFL season moves on, keep last season's file beside the new one — a review of last season reads it — and write the new `league.yaml` with `season` set to the new year, the same `league.key`, and the rules, scoring and slots carried over with the league's changes. Before the draft the roster may be empty (`players: []`).
+
+1. Run the save commands in [Saving it](#saving-it): they print `League file:` and set `D` in that terminal.
+2. In the same terminal, before saving the new file, keep the old one (replace `<old season>` with the year the old file names):
+
+```sh
+O=<old season>
+[ -f "$D/league.yaml" ] && cp -p "$D/league.yaml" "$D/league-$O.yaml" && chmod 600 "$D/league-$O.yaml" && echo "Kept last season's file: $D/league-$O.yaml"
+```
+
+3. Save the new YAML as `"$D/league.yaml"`, then `chmod 600 "$D/league.yaml"` and `ff doctor`.
+
+To review last season later, point the server at the kept file for a while: set `FF_LEAGUE_FILE` to `<config>/league-<old season>.yaml` in the client's server entry (`ff print-config` run with that variable set prints the entry), restart the client, ask for the review, then remove it again.
 
 ### The verification log entry
 

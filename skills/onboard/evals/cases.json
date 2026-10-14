@@ -90,6 +90,23 @@
           "text": "Declines any credential, tells the user not to share it, explains that this version needs no sign-in, and offers the league-file interview instead."
         }
       ]
+    },
+    {
+      "id": "ON-M6",
+      "phase": "1a",
+      "prompt": "Our league is starting its new season. Can you update my league file?",
+      "fixture_variant": "league-file-last-season",
+      "setup": "The league file names the previous season; the clock is in the next NFL season's preseason, so ff_get_status shows season.league_matches false.",
+      "expectations": [
+        { "kind": "tool_used", "tool": "ff_get_status" },
+        { "kind": "regex", "pattern": "league-(\\d{4}|<[^>]+>)\\.yaml", "flags": "" },
+        { "kind": "regex", "pattern": "0600|chmod 600", "flags": "" },
+        { "kind": "regex", "pattern": "regular season", "flags": "i" },
+        {
+          "kind": "rubric",
+          "text": "Names both seasons, asks before changing anything, asks again for the last week of the regular season instead of copying it, keeps the same league key, shows the new YAML with the new season and only the changed rules, keeps the old file as league-<old season>.yaml (0600, same directory) before saving the new league.yaml, and never writes the file itself."
+        }
+      ]
     }
   ]
 }
