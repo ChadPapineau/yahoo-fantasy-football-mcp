@@ -8,8 +8,18 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { DatasetSourceId } from "../config/freshness.js";
 import { ensureSecureDir } from "../config/paths.js";
-import type { RefreshLogRepository, ScheduleReader } from "../domain/analytics/types.js";
+import { rateLimitBackoffMs } from "../config/cadence.js";
+import { phasesAt } from "../config/game-calendar.js";
+import { ALL_WEEK_INDEXES, WEEK_INDEX_MAX } from "../config/weeks.js";
+import type {
+  BackoffProvider,
+  ProviderBackoffRepository,
+  RefreshLogRepository,
+  ScheduleReader,
+  SeasonCheckRepository,
+} from "../domain/analytics/types.js";
 import type { Clock, Rng } from "../domain/clock.js";
+import { scheduleView } from "../domain/league/calendar.js";
 import type { IsoInstant, Week } from "../domain/league/types.js";
 import { HttpError, isNetworkFailure, isTransientNetworkError } from "../http/errors.js";
 import { createRateLimiter, limitDownload, limitGet } from "../http/limiter.js";
@@ -39,10 +49,11 @@ export const DEFAULT_BASE_DELAY_MS = 1_000;
 export const DEFAULT_MAX_DELAY_MS = 30_000;
 /** "Outside the season" = no game kicking off within ± this many days (plan 06 §2). */
 export const SEASON_WINDOW_DAYS = 7;
-/** Every week a season can have (REG 1–18 + POST). */
-export const ALL_SEASON_WEEKS: readonly Week[] = Object.freeze(
-  Array.from({ length: 22 }, (_, i) => i + 1),
-);
+/**
+ * Every week index a season's data can hold (1..WEEK_INDEX_MAX — a structural bound, never a season
+ * length: the schedule says how many weeks a season has).
+ */
+export const ALL_SEASON_WEEKS: readonly Week[] = ALL_WEEK_INDEXES;
 /**
  * The error a DatasetPublisher returns when the source's job_lock is held by another live refresh
  * (plan 06 §2 "exits 0 if another instance is running"). The store's publisher
@@ -62,6 +73,8 @@ export type RefreshErrorCode =
   | "store"
   | "aborted"
   | "invalid_request"
+  /** Upstream refused for rate (HTTP 429, or a 403 carrying Retry-After); a provider backoff is set. */
+  | "rate_limited"
   | "internal";
 
 /**
@@ -69,7 +82,41 @@ export type RefreshErrorCode =
  * upstream yet (a new season before its first data — plan 06 §2; QA-1-033); it ends a failure
  * streak but leaves the current file's checked_at alone (QA-1-037).
  */
-export type SkipReason = "off_season" | "schedules_never_loaded" | "locked" | "not_published";
+export type SkipReason =
+  | "off_season"
+  | "schedules_never_loaded"
+  /** Another run of the source holds its run-start lock (`refresh:<source>`): zero requests made. */
+  | "locked"
+  | "not_published"
+  /** The gate's reasons (src/config/cadence.ts `dueDecision` / `onDemandDecision`). */
+  | "min_gap"
+  | "provider_backoff"
+  | "failure_backoff"
+  | "same_bucket"
+  | "no_games"
+  | "not_due";
+
+/**
+ * Decides, after the run lock is taken and before the first request, whether the run goes ahead
+ * (the tick's and the on-demand child's due decision, re-made under the lock). `until` is the
+ * earliest instant the source may be due again, when known.
+ */
+export type RunGate = (
+  source: DatasetSourceId,
+) =>
+  | { readonly run: true }
+  | { readonly run: false; readonly reason: SkipReason; readonly until: IsoInstant | null };
+
+/** The provider whose politeness a source's requests count against (provider_backoff key). */
+export function providerOf(source: DatasetSourceId): BackoffProvider {
+  if (source === "weather:open_meteo" || source === "weather:nws") return source;
+  return "nflverse";
+}
+
+/** Retry-After above this many seconds is never waited out inside a run (a backoff is set instead). */
+export function retryAfterCapS(maxDelayMs: number): number {
+  return Math.max(0, maxDelayMs) / 1000;
+}
 
 /** The message of a `published_unrecorded` result (never "the previous file is intact"). */
 export const PUBLISHED_UNRECORDED_MESSAGE =
@@ -93,7 +140,13 @@ export type RefreshResult =
       readonly version: ReleaseVersion;
       readonly attempts: number;
     }
-  | { readonly status: "skipped"; readonly source: DatasetSourceId; readonly reason: SkipReason }
+  | {
+      readonly status: "skipped";
+      readonly source: DatasetSourceId;
+      readonly reason: SkipReason;
+      /** The earliest instant the source may run again, when known (a backoff's end). */
+      readonly until: IsoInstant | null;
+    }
   | {
       readonly status: "failed";
       readonly source: DatasetSourceId;
@@ -153,7 +206,8 @@ export interface RefreshDeps {
   readonly rng: Rng;
   readonly publisher: DatasetPublisher;
   /** Failures before publish are recorded here; the publisher records its own publish rows. */
-  readonly refreshLog: Pick<RefreshLogRepository, "record" | "current">;
+  readonly refreshLog: Pick<RefreshLogRepository, "record" | "current"> &
+    Partial<Pick<RefreshLogRepository, "consecutiveFailures">>;
   readonly schedules: ScheduleReader;
   readonly temp: TempArea;
   readonly sleep?: Sleep;
@@ -165,6 +219,21 @@ export interface RefreshDeps {
    * republished (QA-1-097, QA-1-038).
    */
   readonly checkDataset?: DatasetCheck;
+  /**
+   * The run-start lock (`refresh:<source>`), taken before the first request and released on every
+   * path; held elsewhere → `skipped: locked` with zero requests. Absent = no run lock (the
+   * publisher's commit lock still applies).
+   */
+  readonly runLock?: {
+    acquire(source: DatasetSourceId): Promise<boolean>;
+    release(source: DatasetSourceId): Promise<void>;
+  };
+  /** Evaluated after the run lock, before the first request. Absent = always run. */
+  readonly gate?: RunGate;
+  /** Records each season found not published upstream yet, and each season published. */
+  readonly seasonChecks?: Pick<SeasonCheckRepository, "record">;
+  /** The per-provider 429 / Retry-After pause: set on a rate limit, cleared by a success. */
+  readonly providerBackoff?: Pick<ProviderBackoffRepository, "get" | "set" | "clear">;
 }
 
 /** One run's request. */
@@ -182,20 +251,18 @@ export interface RefreshRequest {
 export type SeasonState = "in_season" | "off_season" | "never_loaded";
 
 /**
- * Whether any game of `season` kicks off within ±SEASON_WINDOW_DAYS of `nowMs` (plan 06 §2). A
- * schedules dataset that was never loaded reads `never_loaded` (the job skips; nflverse:schedules
- * itself is `always`-gated so it loads first).
+ * Whether a game kicks off within ±SEASON_WINDOW_DAYS of `nowMs` (plan 06 §2), judged on the
+ * loaded schedule's calendar (every season the file holds, so a season's last games and the next
+ * season's opener both count). A schedules dataset that was never loaded reads `never_loaded` (the
+ * job skips; nflverse:schedules itself is `always`-gated so it loads first); a schedule that cannot
+ * be judged (unreadable, expired, no kickoffs) reads `in_season` — never under-refresh.
  */
-export function seasonState(schedules: ScheduleReader, season: number, nowMs: number): SeasonState {
-  const res = schedules.games(season, ALL_SEASON_WEEKS);
-  if (res.stamp === null) return "never_loaded";
-  const window = SEASON_WINDOW_DAYS * 86_400_000;
-  for (const g of res.rows) {
-    if (g.kickoff === null) continue;
-    const k = Date.parse(g.kickoff);
-    if (Number.isFinite(k) && Math.abs(k - nowMs) <= window) return "in_season";
-  }
-  return "off_season";
+export function seasonState(schedules: ScheduleReader, nowMs: number): SeasonState {
+  const view = scheduleView(schedules, nowMs);
+  if (view.stamp === null) return "never_loaded";
+  const cal = view.calendar;
+  if (cal.basis === "fallback") return "in_season";
+  return phasesAt(cal, nowMs).has("off_season") ? "off_season" : "in_season";
 }
 
 const SAFE_NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
@@ -222,12 +289,14 @@ function validRequest(req: RefreshRequest): boolean {
   return (
     req.seasons.length > 0 &&
     req.seasons.every((s) => Number.isInteger(s) && s >= 1999 && s <= 2100) &&
-    (req.week === null || (Number.isInteger(req.week) && req.week >= 1 && req.week <= 22))
+    (req.week === null ||
+      (Number.isInteger(req.week) && req.week >= 1 && req.week <= WEEK_INDEX_MAX))
   );
 }
 
 function errorCodeFor(e: unknown, signal: AbortSignal): RefreshErrorCode {
   if (signal.aborted || (e instanceof HttpError && e.kind === "aborted")) return "aborted";
+  if (e instanceof HttpError && e.kind === "rate_limited") return "rate_limited";
   // a 404 is upstream saying "no such file", not an outage (QA-1-033)
   if (e instanceof HttpError && e.kind === "http_4xx" && e.status === 404) return "not_found";
   return isNetworkFailure(e) ? "network" : "internal";
@@ -245,11 +314,44 @@ function messageFor(e: unknown): string {
 }
 
 /**
- * Runs one refresh. Retries a TRANSIENT network failure of `version()` or `fetch()` up to
- * `maxAttempts` with seeded full-jitter backoff; a schema or publish failure is never retried.
- * Every attempt's temp directory is removed on every path, as are TempFiles outside it.
+ * Runs one refresh. With `deps.runLock`, the source's run-start lock is taken first — held by
+ * another run → `skipped: locked` with zero requests — and released on every path. Then `deps.gate`
+ * may skip the run (still before any request). Retries a TRANSIENT network failure of `version()` or
+ * `fetch()` up to `maxAttempts` with seeded full-jitter backoff (never past a Retry-After longer
+ * than the retry cap: a provider backoff is persisted instead); a schema or publish failure is never
+ * retried. Every attempt's temp directory is removed on every path, as are TempFiles outside it.
  */
 export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promise<RefreshResult> {
+  const id = req.source.id;
+  const lock = deps.runLock;
+  if (lock === undefined) return runUnderLock(req, deps);
+  let held: boolean;
+  try {
+    held = await lock.acquire(id);
+  } catch {
+    deps.log?.warn("refresh.run_lock_failed", { source: id });
+    return {
+      status: "failed",
+      source: id,
+      error: "store",
+      message: "the run lock could not be taken",
+      version: null,
+      attempts: 0,
+      schema: null,
+    };
+  }
+  if (!held) {
+    deps.log?.info("refresh.skipped", { source: id, reason: "locked" });
+    return { status: "skipped", source: id, reason: "locked", until: null };
+  }
+  try {
+    return await runUnderLock(req, deps);
+  } finally {
+    await lock.release(id).catch(() => undefined);
+  }
+}
+
+async function runUnderLock(req: RefreshRequest, deps: RefreshDeps): Promise<RefreshResult> {
   const { source } = req;
   const id = source.id;
   const signal = req.signal ?? new AbortController().signal;
@@ -277,11 +379,68 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
     }
   };
 
+  const provider = providerOf(id);
+  /** A 429 (or a Retry-After the run would not wait out): pause the provider across processes. */
+  const noteBackoff = async (e: unknown): Promise<void> => {
+    if (deps.providerBackoff === undefined || !(e instanceof HttpError)) return;
+    const reason =
+      e.kind === "rate_limited"
+        ? "rate_limited"
+        : e.kind === "http_5xx" && e.retryAfterS !== null
+          ? "server_error"
+          : null;
+    if (reason === null) return;
+    try {
+      let n = 1;
+      try {
+        n = Math.max(1, deps.refreshLog.consecutiveFailures?.(id) ?? 1);
+      } catch {
+        n = 1;
+      }
+      const now = deps.clock.nowMs();
+      const until = now + rateLimitBackoffMs(e.retryAfterS, n);
+      await deps.providerBackoff.set({
+        provider,
+        until_at: new Date(until).toISOString(),
+        reason,
+        set_at: new Date(now).toISOString(),
+      });
+      deps.log?.warn("refresh.provider_backoff", { source: id, provider, reason, until_ms: until });
+    } catch {
+      deps.log?.warn("refresh.provider_backoff_not_recorded", { source: id, provider });
+    }
+  };
+  /** A run that reached upstream successfully ends the provider's pause. */
+  const clearBackoff = async (): Promise<void> => {
+    if (deps.providerBackoff === undefined) return;
+    try {
+      if (deps.providerBackoff.get(provider) !== null) await deps.providerBackoff.clear(provider);
+    } catch {
+      deps.log?.warn("refresh.provider_backoff_not_cleared", { source: id, provider });
+    }
+  };
+  /** Records each season's upstream state (season_check); best-effort. */
+  const noteSeasons = async (
+    seasons: readonly number[],
+    status: "not_published" | "published",
+  ): Promise<void> => {
+    if (deps.seasonChecks === undefined) return;
+    const at = deps.clock.nowIso();
+    for (const season of seasons) {
+      try {
+        await deps.seasonChecks.record({ source: id, season, checked_at: at, status });
+      } catch {
+        deps.log?.warn("refresh.season_check_not_recorded", { source: id, season });
+      }
+    }
+  };
+
   const fail = async (
     error: RefreshErrorCode,
     message: string,
     schema: SchemaReport | null = null,
     record = true,
+    cause: unknown = null,
   ): Promise<RefreshResult> => {
     deps.log?.warn("refresh.failed", { source: id, error, attempts, version: version?.version });
     if (record) {
@@ -305,6 +464,7 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
         deps.log?.warn("refresh.log_write_failed", { source: id, error: e });
       }
     }
+    await noteBackoff(cause);
     return { status: "failed", source: id, error, message, version, attempts, schema };
   };
 
@@ -315,8 +475,19 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
       try {
         return await step();
       } catch (e) {
-        if (attempt >= maxAttempts || signal.aborted || !isTransientNetworkError(e)) throw e;
-        const delay = Math.floor(jitter.next() * Math.min(cap, base * 2 ** (attempt - 1)));
+        // a Retry-After longer than the run would ever wait is a pause, not a retry
+        const retryAfterS = e instanceof HttpError ? e.retryAfterS : null;
+        if (
+          attempt >= maxAttempts ||
+          signal.aborted ||
+          !isTransientNetworkError(e) ||
+          (retryAfterS !== null && retryAfterS > retryAfterCapS(cap))
+        )
+          throw e;
+        const delay = Math.max(
+          Math.floor(jitter.next() * Math.min(cap, base * 2 ** (attempt - 1))),
+          (retryAfterS ?? 0) * 1000,
+        );
         deps.log?.info("refresh.retry", { source: id, attempt, delay_ms: delay });
         await sleep(delay, signal);
       }
@@ -327,13 +498,20 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
     if (!validRequest(req))
       return await fail("invalid_request", "seasons/week out of range", null, false);
 
+    if (deps.gate !== undefined) {
+      const g = deps.gate(id);
+      if (!g.run) {
+        deps.log?.info("refresh.skipped", { source: id, reason: g.reason, until: g.until });
+        return { status: "skipped", source: id, reason: g.reason, until: g.until };
+      }
+    }
+
     if (source.seasonGate === "in_season") {
-      const season = Math.max(...req.seasons);
-      const state = seasonState(deps.schedules, season, deps.clock.nowMs());
+      const state = seasonState(deps.schedules, deps.clock.nowMs());
       if (state !== "in_season") {
         const reason: SkipReason = state === "off_season" ? "off_season" : "schedules_never_loaded";
         deps.log?.info("refresh.skipped", { source: id, reason });
-        return { status: "skipped", source: id, reason };
+        return { status: "skipped", source: id, reason, until: null };
       }
     }
 
@@ -354,7 +532,7 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
     try {
       version = await withRetry(() => source.version(baseCtx));
     } catch (e) {
-      return await fail(errorCodeFor(e, signal), messageFor(e));
+      return await fail(errorCodeFor(e, signal), messageFor(e), null, true, e);
     }
     if (version === null) return await fail("network", "the upstream version is unavailable");
 
@@ -389,6 +567,7 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
         return null;
       }
       deps.log?.info("refresh.unchanged", { source: id, version: ver.version });
+      await clearBackoff();
       return { status: "unchanged", source: id, version: ver, attempts };
     };
     const early = await unchanged(version);
@@ -442,7 +621,7 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
           });
         });
       } catch (e) {
-        return await fail(errorCodeFor(e, signal), messageFor(e));
+        return await fail(errorCodeFor(e, signal), messageFor(e), null, true, e);
       }
 
       // A new season before its first data (QA-1-033; plan 06 §2): publish the seasons that
@@ -450,14 +629,18 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
       const seasonWarnings: string[] = [];
       if (notPublished.size > 0) {
         const published = [...new Set(req.seasons)].filter((s) => !notPublished.has(s));
-        for (const s of [...notPublished].sort((a, b) => a - b)) {
+        const unpublished = [...notPublished].sort((a, b) => a - b);
+        for (const s of unpublished) {
           seasonWarnings.push(notPublishedWarning(id, s));
           deps.log?.warn("refresh.season_not_published", { source: id, season: s });
         }
+        // upstream's state, recorded per season so the tools can say so (never an outage)
+        await noteSeasons(unpublished, "not_published");
         if (published.length === 0) {
           await endFailureStreak();
+          await clearBackoff();
           deps.log?.info("refresh.skipped", { source: id, reason: "not_published" });
-          return { status: "skipped", source: id, reason: "not_published" };
+          return { status: "skipped", source: id, reason: "not_published", until: null };
         }
         if (source.versionForSeasons !== undefined) {
           v = source.versionForSeasons(v, published);
@@ -497,7 +680,7 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
         }
         if (outcome.error.startsWith(JOB_LOCKED_ERROR)) {
           deps.log?.info("refresh.skipped", { source: id, reason: "locked" });
-          return { status: "skipped", source: id, reason: "locked" };
+          return { status: "skipped", source: id, reason: "locked", until: null };
         }
         // after the commit point: the new file IS live, only its log row is missing (QA-1-032) —
         // the previous file is not intact, and the next refresh records the live one first
@@ -517,6 +700,8 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
         rows: outcome.stats.rows,
         attempts,
       });
+      await noteSeasons(outcome.stats.seasons, "published");
+      await clearBackoff();
       return {
         status: "published",
         source: id,

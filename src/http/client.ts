@@ -151,15 +151,12 @@ function retryAfterSeconds(res: Response): number | null {
 
 function statusError(res: Response, host: string): HttpError {
   const status = res.status;
-  if (status === 429)
-    return new HttpError({
-      kind: "rate_limited",
-      host,
-      status,
-      retryAfterS: retryAfterSeconds(res),
-    });
+  const retryAfterS = retryAfterSeconds(res);
+  // GitHub answers a secondary rate limit with 403 + Retry-After: the same pause as a 429
+  if (status === 429 || (status === 403 && retryAfterS !== null))
+    return new HttpError({ kind: "rate_limited", host, status, retryAfterS });
   if (status >= 500 && status <= 599)
-    return new HttpError({ kind: "http_5xx", host, status, retryAfterS: retryAfterSeconds(res) });
+    return new HttpError({ kind: "http_5xx", host, status, retryAfterS });
   if (status >= 400 && status <= 499) return new HttpError({ kind: "http_4xx", host, status });
   return new HttpError({ kind: "http_status", host, status });
 }

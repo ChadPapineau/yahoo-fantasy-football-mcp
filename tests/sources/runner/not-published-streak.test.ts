@@ -190,7 +190,7 @@ describe("[QA-1-037] a not_published run ends the failure streak and leaves the 
 
       clock.set("2026-10-05T10:30:00.000Z");
       const r = await notPublishedRun();
-      expect(r).toEqual({ status: "skipped", source: SRC, reason: "not_published" });
+      expect(r).toEqual({ status: "skipped", source: SRC, reason: "not_published", until: null });
       const after = view();
       expect(after.failures).toBe(0);
       expect(after.latestOk).toBe(true);
@@ -264,7 +264,7 @@ describe("[QA-1-037] a not_published run ends the failure streak and leaves the 
       },
       { ...deps(), publisher: busy, refreshLog: fakeRefreshLog([prev]), log: cap.log },
     );
-    expect(r2).toEqual({ status: "skipped", source: SRC, reason: "not_published" });
+    expect(r2).toEqual({ status: "skipped", source: SRC, reason: "not_published", until: null });
     expect(cap.lines.map((l) => l.event)).toContain("refresh.streak_not_ended");
   });
 });

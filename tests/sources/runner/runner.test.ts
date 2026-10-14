@@ -6,6 +6,7 @@ import { chmod, mkdir, mkdtemp, readdir, rm, stat, symlink, writeFile } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { WEEK_INDEX_MAX } from "../../../src/config/weeks.js";
 import { fixedClock, seededRng } from "../../../src/domain/clock.js";
 import { HttpError } from "../../../src/http/errors.js";
 import {
@@ -216,7 +217,12 @@ describe("[QA-1-033] seasons a source reports as not published yet", () => {
       { source: withSeasons(seasonal([2027])), seasons: [2027], week: null },
       d,
     );
-    expect(r).toEqual({ status: "skipped", source: "nflverse:injuries", reason: "not_published" });
+    expect(r).toEqual({
+      status: "skipped",
+      source: "nflverse:injuries",
+      reason: "not_published",
+      until: null,
+    });
     expect(isRefreshSuccess(r)).toBe(true);
     expect(d.publisher.published).toEqual([]);
     expect(d.refreshLog.rows).toEqual([]);
@@ -529,7 +535,8 @@ describe("failures before publish are recorded; nothing is written", () => {
       { seasons: [1990], week: null },
       { seasons: [2026.5], week: null },
       { seasons: [2026], week: 0 },
-      { seasons: [2026], week: 23 },
+      // the structural week bound (a 20-week regular season reaches week 24; WEEK_INDEX_MAX = 30)
+      { seasons: [2026], week: WEEK_INDEX_MAX + 1 },
     ]) {
       const d = deps();
       const r = await runRefresh({ source: fakeSource(), ...req }, d);
@@ -811,18 +818,28 @@ describe("season awareness (plan 06 §2)", () => {
     expect(sch.queries).toEqual([]);
   });
 
-  it("seasonState: ±7 days inclusive, null/garbage kickoffs ignored, newest season", () => {
+  it("seasonState: a kickoff of ANY loaded season within ±7 days (inclusive), from the calendar", () => {
     const now = Date.parse(NOW);
     const at = (d: number): string => new Date(now + d * 86_400_000).toISOString();
-    expect(seasonState(fakeSchedules([game("a", at(7))]), 2026, now)).toBe("in_season");
-    expect(seasonState(fakeSchedules([game("a", at(-7))]), 2026, now)).toBe("in_season");
-    expect(seasonState(fakeSchedules([game("a", at(7.01))]), 2026, now)).toBe("off_season");
-    expect(seasonState(fakeSchedules([game("a", null), game("b", "garbage")]), 2026, now)).toBe(
-      "off_season",
+    for (const season of [2025, 2026, 2027]) {
+      const g = (d: number) => game(`${String(season)}_05_DAL_CLE`, at(d), { season });
+      expect(seasonState(fakeSchedules([g(7)]), now), `${String(season)} +7`).toBe("in_season");
+      expect(seasonState(fakeSchedules([g(-7)]), now), `${String(season)} -7`).toBe("in_season");
+      expect(seasonState(fakeSchedules([g(7.01)]), now), `${String(season)} +7.01`).toBe(
+        "off_season",
+      );
+      expect(seasonState(fakeSchedules([g(-7.01)]), now), `${String(season)} -7.01`).toBe(
+        "off_season",
+      );
+    }
+    // games without any usable instant cannot be judged: the fallback calendar is hot (never skip)
+    expect(seasonState(fakeSchedules([game("a", null), game("b", "garbage")]), now)).toBe(
+      "in_season",
     );
-    const sch = fakeSchedules([]);
-    seasonState(sch, 2026, now);
-    expect(sch.queries[0]?.weeks).toEqual(ALL_SEASON_WEEKS);
+    expect(seasonState(fakeSchedules([], false), now)).toBe("never_loaded");
+    const sch = fakeSchedules([game("a", at(30))]);
+    seasonState(sch, now);
+    expect(sch.queries.some((q) => q.weeks.length === ALL_SEASON_WEEKS.length)).toBe(true);
   });
 });
 

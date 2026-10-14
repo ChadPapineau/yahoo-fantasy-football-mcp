@@ -12,13 +12,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fixedClock, seededRng } from "../../../src/domain/clock.js";
+import { scheduleView } from "../../../src/domain/league/calendar.js";
 import { createHttpClient } from "../../../src/http/client.js";
 import { injuriesSource, statsPlayerWeekSource } from "../../../src/sources/nflverse/index.js";
-import { fsTempArea, runRefresh, type RefreshResult } from "../../../src/sources/runner.js";
+import {
+  fsTempArea,
+  isRefreshSuccess,
+  runRefresh,
+  type RefreshResult,
+} from "../../../src/sources/runner.js";
 import type { DataSource } from "../../../src/sources/source.js";
-import type { ScheduleReader } from "../../../src/domain/analytics/types.js";
+import type { ScheduleReader, SeasonCheckRow } from "../../../src/domain/analytics/types.js";
 import { fakeFetch } from "../../http/helpers.js";
-import { fixtureRoutes } from "../../sources/nflverse/helpers/harness.js";
+import { fixtureRoutes, REL } from "../../sources/nflverse/helpers/harness.js";
+import { rewrite } from "../../sources/nflverse/helpers/rewrite.js";
+import { scheduleReaderOf } from "../../helpers/season/reader.js";
+import { syntheticSeasons } from "../../helpers/season/synthetic.js";
 import { fakePublisher, fakeRefreshLog, fakeSchedules } from "../../sources/runner/helpers.js";
 
 let root = "";
@@ -38,13 +47,34 @@ function schedulesWith(kickoffs: Record<number, string>): ScheduleReader {
   };
 }
 
+/** An in-memory season_check repository (record only, as the runner gets it). */
+function seasonChecks(): {
+  rows: SeasonCheckRow[];
+  record(row: SeasonCheckRow): Promise<void>;
+} {
+  const rows: SeasonCheckRow[] = [];
+  return {
+    rows,
+    record(row) {
+      rows.push(row);
+      return Promise.resolve();
+    },
+  };
+}
+
 async function refresh(
   source: DataSource,
   seasons: number[],
   now: string,
   schedules: ScheduleReader = fakeSchedules([]),
+  extraRoutes: ReadonlyMap<string, Uint8Array | null> = new Map(),
 ) {
   const routes = fixtureRoutes();
+  for (const [u, b] of extraRoutes) {
+    if (b === null) routes.delete(u);
+    else routes.set(u, b);
+  }
+  const checks = seasonChecks();
   const f = fakeFetch((url) => {
     const body = routes.get(url);
     return body === undefined ? new Response("Not Found", { status: 404 }) : new Response(body);
@@ -64,9 +94,16 @@ async function refresh(
       schedules,
       temp: fsTempArea(join(root, "tmp")),
       sleep: () => Promise.resolve(),
+      seasonChecks: checks,
     },
   );
-  return { result, publisher, refreshLog, calls: f.calls.map((c) => c.url) };
+  return {
+    result,
+    publisher,
+    refreshLog,
+    checks: checks.rows,
+    calls: f.calls.map((c) => c.url),
+  };
 }
 
 describe("[QA-1-033] a season whose files are not published yet", () => {
@@ -99,6 +136,14 @@ describe("[QA-1-033] a season whose files are not published yet", () => {
     expect(r.result).toMatchObject({ status: "skipped", reason: "not_published" });
     expect(r.publisher.published).toEqual([]);
     expect(r.refreshLog.rows).toEqual([]);
+    expect(r.checks).toEqual([
+      {
+        source: "nflverse:injuries",
+        season: 2027,
+        checked_at: "2027-09-01T12:00:00.000Z",
+        status: "not_published",
+      },
+    ]);
   });
 });
 
@@ -120,4 +165,88 @@ describe("[QA-1-033] a 404 that IS a failure is labelled not_found, never networ
     expect(r.result).toMatchObject({ status: "failed", error: "not_found" });
     expect(r.publisher.published).toEqual([]);
   });
+});
+
+describe("a new season's file that exists upstream with zero rows is not published yet, never `schema`", () => {
+  const url = (season: number): string => `${REL}/injuries/injuries_${String(season)}.parquet`;
+  const empty = async (): Promise<Uint8Array> =>
+    rewrite("injuries/injuries_2026.parquet", { rows: () => [] });
+
+  for (const season of [2027, 2028, 2030]) {
+    it(`injuries ${String(season)} in early September: skipped not_published (exit 0), season_check recorded, no failure row`, async () => {
+      const now = `${String(season)}-09-03T12:00:00.000Z`;
+      const r = await refresh(
+        injuriesSource,
+        [season],
+        now,
+        fakeSchedules([]),
+        new Map([[url(season), await empty()]]),
+      );
+      expect(r.result).toMatchObject({ status: "skipped", reason: "not_published", until: null });
+      expect(isRefreshSuccess(r.result)).toBe(true);
+      expect(r.calls).toContain(url(season)); // it was fetched: upstream answered
+      expect(r.publisher.published).toEqual([]);
+      expect(r.refreshLog.rows).toEqual([]);
+      expect(r.checks).toEqual([
+        { source: "nflverse:injuries", season, checked_at: now, status: "not_published" },
+      ]);
+    });
+  }
+
+  it("published seasons beside it are published and flipped to `published` in season_check", async () => {
+    const r = await refresh(
+      statsPlayerWeekSource,
+      [2026, 2027],
+      "2027-09-01T12:00:00.000Z",
+      fakeSchedules([]),
+    );
+    expect(r.result.status).toBe("published");
+    expect(r.checks.map((c) => [c.season, c.status])).toEqual([
+      [2027, "not_published"],
+      [2026, "published"],
+    ]);
+  });
+
+  it("a past season's empty file is still a schema failure (no data must never replace data)", async () => {
+    const r = await refresh(
+      injuriesSource,
+      [2025],
+      "2026-10-01T12:00:00.000Z",
+      fakeSchedules([]),
+      new Map([[url(2025), await empty()]]),
+    );
+    expect(r.result).toMatchObject({ status: "failed", error: "schema" });
+    expect(r.checks).toEqual([]);
+  });
+});
+
+describe("the season in progress comes from the loaded schedule's phase, never the calendar month", () => {
+  for (const S of [2027, 2028, 2029, 2030]) {
+    it(`${String(S)}: in August with ${String(S)}'s schedule loaded (preseason ${String(S)}), a 404 for ${String(S - 1)} is a real failure`, async () => {
+      const schedule = scheduleReaderOf(syntheticSeasons([S]));
+      const now = `${String(S)}-08-20T12:00:00.000Z`;
+      expect(scheduleView(schedule, Date.parse(now)).phase).toMatchObject({
+        season: S,
+        phase: "preseason",
+      });
+      const gone = new Map([[`${REL}/injuries/injuries_${String(S - 1)}.parquet`, null]]);
+      const r = await refresh(injuriesSource, [S - 1], now, schedule, gone);
+      expect(r.result).toMatchObject({ status: "failed", error: "not_found" });
+      // and S itself, not out yet, is "not published" (a skip, exit 0)
+      const r2 = await refresh(injuriesSource, [S], now, schedule);
+      expect(r2.result).toMatchObject({ status: "skipped", reason: "not_published" });
+    });
+
+    it(`${String(S)}: with no schedule loaded the bootstrap rule applies (August belongs to ${String(S - 1)})`, async () => {
+      const gone = new Map([[`${REL}/injuries/injuries_${String(S - 1)}.parquet`, null]]);
+      const r = await refresh(
+        injuriesSource,
+        [S - 1],
+        `${String(S)}-08-20T12:00:00.000Z`,
+        fakeSchedules([]),
+        gone,
+      );
+      expect(r.result).toMatchObject({ status: "skipped", reason: "not_published" });
+    });
+  }
 });

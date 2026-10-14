@@ -8,8 +8,6 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { EXIT } from "../../src/cli/exit.js";
 import { main } from "../../src/cli/main.js";
 import {
-  currentSeason,
-  defaultSeasons,
   describeResult,
   describeWarnings,
   MAX_WARNING_LINES,
@@ -246,24 +244,9 @@ describe("ff refresh <source>", () => {
 });
 
 describe("refresh helpers", () => {
-  it("currentSeason: September opens a season; January–August belong to the previous one", () => {
-    expect(currentSeason(Date.parse("2026-08-31T23:59:59Z"))).toBe(2025);
-    expect(currentSeason(Date.parse("2026-09-01T00:00:00Z"))).toBe(2026);
-    expect(currentSeason(Date.parse("2027-02-08T00:00:00Z"))).toBe(2026);
-    expect(currentSeason(Date.parse("2026-12-31T23:59:59Z"))).toBe(2026);
-  });
-
   it("parseSeasons sorts and de-duplicates", () => {
     expect(parseSeasons(" 2026, 2025,2026 ")).toEqual([2025, 2026]);
     expect(() => parseSeasons("2101")).toThrow(UsageError);
-  });
-
-  it("default seasons: stats and schedules carry the previous season", () => {
-    expect(defaultSeasons(NFLVERSE_SOURCES["nflverse:stats_player_week"], 2026)).toEqual([
-      2025, 2026,
-    ]);
-    expect(defaultSeasons(NFLVERSE_SOURCES["nflverse:schedules"], 2026)).toEqual([2025, 2026]);
-    expect(defaultSeasons(NFLVERSE_SOURCES["nflverse:injuries"], 2026)).toEqual([2026]);
   });
 
   it("every target maps to sources in refresh order; weather follows FF_WEATHER_SOURCE", () => {
@@ -275,7 +258,7 @@ describe("refresh helpers", () => {
         home: sb?.home ?? "/",
         repoRoot: ROOT,
       });
-    const ids = (t: (typeof REFRESH_TARGETS)[number], ws = "open-meteo") =>
+    const ids = (t: Exclude<(typeof REFRESH_TARGETS)[number], "due">, ws = "open-meteo") =>
       sourcesFor(t, cfg(ws)).map((s) => s?.id ?? null);
     expect(ids("all")).toEqual([
       "nflverse:schedules",
@@ -358,7 +341,7 @@ describe("refresh helpers", () => {
         version: { version: "v", released_at: null },
         attempts: 1,
       },
-      { status: "skipped", source: "weather:nws", reason: "off_season" },
+      { status: "skipped", source: "weather:nws", reason: "off_season", until: null },
     ] as RefreshResult[])
       expect(describeWarnings(r)).toEqual([]);
   });
@@ -377,7 +360,7 @@ describe("refresh helpers", () => {
         warnings: [],
       },
       { status: "unchanged", source: "nflverse:injuries", version: v, attempts: 1 },
-      { status: "skipped", source: "weather:nws", reason: "off_season" },
+      { status: "skipped", source: "weather:nws", reason: "off_season", until: null },
       {
         status: "failed",
         source: "nflverse:injuries",

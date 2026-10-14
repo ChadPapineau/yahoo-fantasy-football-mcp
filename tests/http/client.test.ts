@@ -376,7 +376,8 @@ describe("size caps (mid-stream) and gzip bombs", () => {
 describe("status and network error mapping (plan 05 §4.1)", () => {
   it.each([
     [404, "http_4xx", false],
-    [403, "http_4xx", false],
+    // GitHub's secondary rate limit: a 403 carrying Retry-After is a rate limit, never "forbidden"
+    [403, "rate_limited", true],
     [408, "http_4xx", true],
     [429, "rate_limited", true],
     [500, "http_5xx", true],
@@ -403,6 +404,21 @@ describe("status and network error mapping (plan 05 §4.1)", () => {
     expect(e.message).not.toMatch(/secret|html|k=v/);
     if (kind === "rate_limited" || kind === "http_5xx") expect(e.retryAfterS).toBe(7);
     expect(classifyError(e).code).not.toBe("INTERNAL");
+  });
+
+  it("a 403 without a numeric Retry-After stays a client error (not retried, no backoff)", async () => {
+    for (const headers of [{}, { "retry-after": "soon" }]) {
+      const f = fakeFetch(() => new Response("", { status: 403, headers }));
+      const e = await failure(
+        createHttpClient({ fetch: f.fetch }).get("https://github.com/", {
+          signal: sig(),
+          maxBytes: 1,
+        }),
+      );
+      expect(e.kind).toBe("http_4xx");
+      expect(e.transient).toBe(false);
+      expect(e.retryAfterS).toBeNull();
+    }
   });
 
   it("a non-numeric Retry-After is ignored", async () => {

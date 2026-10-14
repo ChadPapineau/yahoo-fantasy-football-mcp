@@ -1,6 +1,9 @@
-// limiter.ts — per-source politeness limits (plan 01 §6 "per-source limiters": GitHub ≤ 1 poll per
-// 15 min per release, Open-Meteo / NWS ≤ 1 per venue per hour — the hourly job cadence — with a
-// spacing floor and a daily cap here). Requests of one source are serialised and spaced at least
+// limiter.ts — per-source politeness limits inside one process (plan 01 §6 "per-source limiters"):
+// a spacing floor and a daily cap. The slower floors of plan 01 §6 — GitHub ≤ 1 poll per 15 min per
+// release, Open-Meteo / NWS ≤ 1 per venue per hour — are NOT enforced here: they hold across
+// processes through the refresh decision (src/config/cadence.ts MIN_RELEASE_GAP_MS and the weather
+// hour bucket, judged from refresh_log) and the persisted provider_backoff after a 429 / Retry-After
+// (src/sources/runner.ts). Requests of one source are serialised and spaced at least
 // `minIntervalMs` apart (start to start); past `maxPerDay` in the current UTC day this process
 // refuses with `quota_exhausted`. The cap is per process (each `ff refresh` is one process);
 // a cross-process cap would need the store's limiter_state (plan 01 A-11) — not needed at these rates.

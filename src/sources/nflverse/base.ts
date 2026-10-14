@@ -70,6 +70,15 @@ export interface NflverseSourceDef {
   readonly publish: PublishFn;
 }
 
+/** The row count a parquet file's footer declares; null when it is not a readable parquet file. */
+export async function parquetRows(path: string): Promise<number | null> {
+  try {
+    return Number((await openParquet(path)).metadata.num_rows);
+  } catch {
+    return null;
+  }
+}
+
 /** sha256 of the sorted `table.column TYPE` list (PublishStats.columns_hash). */
 export function columnsHash(tables: readonly DatasetTableSpec[]): string {
   const cols = tables.flatMap((t) => t.columns.map((c) => `${t.name}.${c.name} ${c.type}`)).sort();
@@ -216,14 +225,28 @@ export function makeNflverseSource(def: NflverseSourceDef): DataSource {
         if (typeof def.file === "function") {
           for (const s of seasons) {
             const url = releaseUrl(def.tag, def.file(s));
+            let file: TempFile;
             try {
-              out.push(await downloadAsset(ctx, url, join(dir, `${String(s)}.parquet`), s));
+              file = await downloadAsset(ctx, url, join(dir, `${String(s)}.parquet`), s);
             } catch (err) {
               // a new season's file does not exist until the season has data (QA-1-033): the
               // runner publishes the other seasons; any other 404 fails the run as not_found
               if (!isNotFound(err) || !mayBeUnpublished(s, ctx) || !ctx.notPublished) throw err;
               ctx.notPublished(s);
+              continue;
             }
+            // nflverse may open a new season's file before it holds a row: that is "not published
+            // yet" too, never a schema failure (a past season's empty file still fails the schema)
+            if (
+              ctx.notPublished &&
+              mayBeUnpublished(s, ctx) &&
+              (await parquetRows(file.path)) === 0
+            ) {
+              await rm(file.path, { force: true });
+              ctx.notPublished(s);
+              continue;
+            }
+            out.push(file);
           }
         } else {
           // One upstream file holds every season: one download, one copy per season so each

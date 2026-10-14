@@ -5,6 +5,8 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { scheduleView } from "../../domain/league/calendar.js";
+import { bootstrapSeason } from "../../domain/league/season.js";
 import type { IsoInstant } from "../../domain/league/types.js";
 import { HttpError, isTransientNetworkError } from "../../http/errors.js";
 import type { HttpGet, ReleaseVersion, SourceContext, TempFile } from "../source.js";
@@ -31,13 +33,11 @@ export const MAX_SEASON = 2100;
 export const SEASON_PUBLISH_GRACE_DAYS = 14;
 
 /**
- * The NFL season in progress at `nowMs`: the calendar year from September (UTC), the previous year
- * through August — the same rule `ff refresh` picks its default seasons by.
+ * The bootstrap season at `nowMs` (src/domain/league/season.ts `bootstrapSeason`): used only while
+ * no schedule is loaded. Once one is, the season comes from the schedule's phase.
  */
 export function nflSeasonAt(nowMs: number): number {
-  const d = new Date(nowMs);
-  const y = d.getUTCFullYear();
-  return d.getUTCMonth() >= 8 ? y : y - 1;
+  return bootstrapSeason(nowMs);
 }
 
 /** Whether `err` is upstream answering 404 for the URL (thrown by src/http, or a returned status). */
@@ -47,13 +47,21 @@ export function isNotFound(err: unknown): boolean {
 }
 
 /**
- * Whether a 404 for `season`'s file can mean "not published yet" rather than a real failure: the
- * season is the current one (or later) and has not been under way for SEASON_PUBLISH_GRACE_DAYS
- * (its week-1 first kickoff, when schedules know it). A past season's file always exists.
+ * Whether a 404 (or an empty file) for `season` can mean "not published yet" rather than a real
+ * failure: the season is the one in progress per the loaded schedule's phase (or later) and has not
+ * been under way for SEASON_PUBLISH_GRACE_DAYS (its week-1 first kickoff, when schedules know it).
+ * A past season's file always exists.
  */
 export function mayBeUnpublished(season: number, ctx: SourceContext): boolean {
   const now = ctx.clock.nowMs();
-  if (season < nflSeasonAt(now)) return false;
+  // the season in progress per the loaded schedule (its phase; the bootstrap rule without one)
+  let current: number;
+  try {
+    current = scheduleView(ctx.datasets.schedules, now).phase.season;
+  } catch {
+    current = bootstrapSeason(now);
+  }
+  if (season < current) return false;
   let kickoff: string | null = null;
   try {
     kickoff = ctx.datasets.schedules.firstKickoff(season, 1);

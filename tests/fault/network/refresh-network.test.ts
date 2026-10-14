@@ -134,7 +134,6 @@ describe("network failures on refresh (plan 05 §4.1, OBJ-22)", () => {
       3,
     ],
     ["500 on the version poll", onTimestamp(() => new Response("", { status: 500 })), 3],
-    ["429 on the download", onDownload(() => new Response("", { status: 429 })), 3],
     ["a TLS failure (not transient)", onTimestamp(throwing("CERT_HAS_EXPIRED")), 1],
     ["a 410 (not transient)", onDownload(() => new Response("", { status: 410 })), 1],
     ["a redirect off the allow-list", onDownload(() => redirect("https://evil.example/x")), 1],
@@ -163,6 +162,16 @@ describe("network failures on refresh (plan 05 §4.1, OBJ-22)", () => {
       expect(JSON.stringify(r.result)).not.toContain("<html>");
     },
   );
+
+  it("a 429 on the download (no Retry-After) → retried, then failed rate_limited — never network", async () => {
+    const r = await run(onDownload(() => new Response("", { status: 429 })));
+    expect(r.escaped).toBeNull();
+    expect(r.result).toMatchObject({ status: "failed", error: "rate_limited" });
+    expect(r.refreshLog.rows[0]).toMatchObject({ ok: false, error: "rate_limited" });
+    expect(r.publisher.published).toEqual([]);
+    expect(r.errors).toHaveLength(3);
+    expect(r.left).toEqual([]);
+  });
 
   it("[QA-1-033] a 404 (not transient) → failed not_found — upstream has no such file, not an outage", async () => {
     const r = await run(onDownload(() => new Response("", { status: 404 })));
