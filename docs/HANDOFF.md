@@ -486,7 +486,7 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
 
 ## Open items
 
-- [x] research waves 1–3 complete and verified (docs 00–06)
+- [x] research waves 1–3 complete and verified (docs 01–06)
 - [x] plan (01–10), three adversarial rounds, changelog
 - [x] docs-only CI (Mermaid/links, gitleaks + self-test, Dependabot, PR template)
 - [x] README, LICENSE, SECURITY.md, docs indexes
