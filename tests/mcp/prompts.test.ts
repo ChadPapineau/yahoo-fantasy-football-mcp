@@ -49,6 +49,19 @@ describe("prompts/get", () => {
     ).rejects.toThrow();
     await c.close();
   });
+  it("a prompts/get with no `arguments` at all reads as {}: optional-week prompts answer, ff.stream still refuses", async () => {
+    // SDK 2.3.0 (#2107) validates a missing `arguments` as {}, as tools/call does; before, a client
+    // that omitted it got "Invalid arguments" even though every argument is optional.
+    const c = await connect(world);
+    for (const name of ["ff.start_sit", "ff.retro"]) {
+      const r = await c.client.getPrompt({ name });
+      const t = textOf(r.messages[0] as { content: unknown });
+      expect(t.split(UNTRUSTED_TEXT_RULE).length - 1).toBe(1);
+      expect(t).not.toContain("Arguments:");
+    }
+    await expect(c.client.getPrompt({ name: "ff.stream" })).rejects.toThrow();
+    await c.close();
+  });
   it("without a league file the settings resource is simply not embedded", async () => {
     const w = await makeWorld({ publish: false, noLeague: true });
     const c = await connect(w);

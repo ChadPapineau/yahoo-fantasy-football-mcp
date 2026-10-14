@@ -133,21 +133,20 @@ describe("check-runtime-tree CLI", () => {
   });
 
   it("exits 1 and names the package when the allow-list lacks one (a transitive addition)", () => {
+    // The committed allow-list minus the SDK's transitive `core`, so the fixture follows every
+    // reviewed pin bump instead of restating the versions of the day.
+    const committed = parseAllowlist(
+      JSON.parse(readFileSync(path.join(ROOT, "scripts/ci/runtime-allowlist.json"), "utf8")),
+    );
+    const core = committed.packages.filter((p) => p.startsWith("@modelcontextprotocol/core@"));
+    expect(core).toHaveLength(1);
+    const packages = committed.packages.filter((p) => !core.includes(p));
     tmp = tempDir();
-    writeTree(tmp.dir, {
-      "allow.json": {
-        count: 4,
-        packages: [
-          "@modelcontextprotocol/server@2.2.0",
-          "hyparquet@1.31.2",
-          "yaml@2.9.1",
-          "zod@4.6.5",
-        ],
-      },
-    });
+    writeTree(tmp.dir, { "allow.json": { count: packages.length, packages } });
     const r = runCheck("check-runtime-tree.mjs", ["--allowlist", path.join(tmp.dir, "allow.json")]);
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("not on the allow-list: @modelcontextprotocol/core@2.2.0");
+    expect(r.stderr).toContain(`not on the allow-list: ${String(core[0])}`);
+    expect(r.stderr).not.toContain("on the allow-list but not installed");
   });
 
   it("exits 2 on a malformed allow-list", () => {
