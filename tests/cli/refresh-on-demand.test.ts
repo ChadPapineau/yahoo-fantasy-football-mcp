@@ -21,7 +21,10 @@ import type { FetchLike } from "../../src/http/client.js";
 import { MIGRATIONS } from "../../src/store/migrations/index.js";
 import { createStoreFactory } from "../../src/store/index.js";
 import { VERSION } from "../../src/version.js";
+import { easternClockOf } from "../../src/config/game-calendar.js";
+import { loadFixtureGames } from "../helpers/season/fixture.js";
 import { REL } from "../sources/nflverse/helpers/harness.js";
+import { rewrite } from "../sources/nflverse/helpers/rewrite.js";
 import {
   fakeExec,
   fixtureEnv,
@@ -272,6 +275,87 @@ describe("--on-demand", () => {
     const r2 = await run(sb, clock, ["nflverse:injuries"], { onDemand: true });
     expect(r2.calls).toContain(INJ_TS);
   }, 60_000);
+});
+
+describe("a flex published by the answer-time child is recorded and shown once (as the tick's is)", () => {
+  // The child often publishes a flex first (an answer revalidates schedules before the next tick):
+  // its schedules publish must diff the kickoffs, store them and notify like the tick's.
+  const GAMES = `${REL}/schedules/games.parquet`;
+  const SCHED_TS = `${REL}/schedules/timestamp.txt`;
+  async function inZone<T>(tz: string, fn: () => Promise<T>): Promise<T> {
+    const prev = process.env.TZ;
+    process.env.TZ = tz;
+    try {
+      return await fn();
+    } finally {
+      if (prev === undefined) delete process.env.TZ;
+      else process.env.TZ = prev;
+    }
+  }
+  for (const tz of ["America/Los_Angeles", "Asia/Kolkata", "Pacific/Chatham"])
+    it(`a Sunday-night game flexed 12 days out (${tz}): one schedule_change row, one notification`, async () => {
+      await inZone(tz, async () => {
+        const games = await loadFixtureGames();
+        const snf = games.find((g) => {
+          if (g.season !== 2026 || g.week !== 14 || g.kickoff === null) return false;
+          const c = easternClockOf(Date.parse(g.kickoff));
+          return c.weekday === "Sun" && c.hour === 20;
+        });
+        if (snf?.kickoff == null) throw new Error("no week-14 Sunday-night game in the fixture");
+        const k = Date.parse(snf.kickoff);
+        sb = sandbox();
+        const clock = fixedClock(k - 12 * 86_400_000 - 2 * 3_600_000);
+        expect((await run(sb, clock, ["nflverse:schedules"], { json: false })).code).toBe(EXIT.OK);
+        clock.advance(61 * MIN);
+        const bytes = await rewrite("schedules/games.excerpt.parquet", {
+          rows: (rs) =>
+            rs.map((r) => (r.game_id === snf.game_id ? { ...r, gametime: "16:25" } : r)),
+        });
+        const release: Handler = (url) =>
+          url === GAMES
+            ? Promise.resolve(new Response(bytes))
+            : url === SCHED_TS
+              ? Promise.resolve(new Response("2026-12-01 08:46:39 EST"))
+              : undefined;
+        const child = async (): Promise<string[]> => {
+          const fx = fakeExec();
+          const r = await run(sb!, clock, ["nflverse:schedules"], {
+            onDemand: true,
+            notify: true,
+            noMigrate: true,
+            handler: release,
+            platform: "darwin",
+            exec: fx.exec,
+          });
+          expect(r.code, r.io.err.text).toBe(EXIT.OK);
+          return fx.calls.filter((c) => c.file === OSASCRIPT).map((c) => c.args[1] ?? "");
+        };
+        const shown = await child();
+        const db = new DatabaseSync(storePath(sb.cacheDir), { readOnly: true });
+        const changes = db
+          .prepare("SELECT game_id, kind, old_value, new_value FROM schedule_change")
+          .all();
+        db.close();
+        expect(changes).toEqual([
+          {
+            game_id: snf.game_id,
+            kind: "kickoff",
+            old_value: new Date(k).toISOString(),
+            new_value: new Date(k - (3 * 60 + 55) * MIN).toISOString(),
+          },
+        ]);
+        expect(shown).toHaveLength(1);
+        expect(shown[0]).toMatch(
+          new RegExp(`NFL schedule changed: ${snf.away}@${snf.home} Sun 20:20 → Sun 16:25 ET`),
+        );
+        // the same release again, 61 min later: no second row, no second notification
+        clock.advance(61 * MIN);
+        expect(await child()).toEqual([]);
+        const again = new DatabaseSync(storePath(sb.cacheDir), { readOnly: true });
+        expect(again.prepare("SELECT COUNT(*) AS n FROM schedule_change").get()).toEqual({ n: 1 });
+        again.close();
+      });
+    }, 120_000);
 });
 
 describe("a rate limit", () => {
