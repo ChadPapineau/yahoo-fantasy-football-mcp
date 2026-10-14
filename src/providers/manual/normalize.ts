@@ -7,6 +7,7 @@
 // through the crosswalk's name + team + position match (plan 10 A5a).
 import { createHash } from "node:crypto";
 import type { NflTeam } from "../../config/schema.js";
+import { TOOL_INPUT_WEEK_MAX } from "../../config/weeks.js";
 import { MANUAL_KEY_RE } from "../../config/schema.js";
 import { nameKey } from "../../domain/crosswalk/normalize.js";
 import { ruleCapabilities } from "../../domain/league/rules.js";
@@ -39,9 +40,27 @@ import { buildScoringSettings, yardsAllowedProblem } from "./scoring.js";
 
 /** Default league slug when the file names none. */
 export const DEFAULT_LEAGUE_SLUG = "league";
-/** Default weeks when the file names none (a 17-week fantasy season). */
+/** Default first week when the file names none. */
 export const DEFAULT_START_WEEK = 1;
+/**
+ * The last fantasy week when the file names none AND no schedule is loaded for the league season —
+ * a named fallback (with a warning), never a season fact. With the schedule loaded the default is
+ * the season's last regular week − 1 (season-fresh spec §2.6), so an 18-, 19- or 20-week season
+ * gets 17, 18 or 19.
+ */
 export const DEFAULT_END_WEEK = 17;
+/** The warning when the fallback end week is used. */
+export const END_WEEK_FALLBACK_WARNING =
+  "league.yaml names no end_week and no NFL schedule is loaded for the league season: assuming week 17 until it is";
+
+/** Where `end_week` came from. */
+export type EndWeekBasis = "file" | "schedule" | "fallback";
+
+/** What normalisation may know about the league season's schedule. */
+export interface NormalizeOptions {
+  /** The league season's last regular-season week from the loaded schedule; null/absent = unknown. */
+  readonly lastRegularWeek?: Week | null;
+}
 
 /** One player (or team defence) as the manual league knows it. */
 export interface ManualPlayer {
@@ -81,6 +100,10 @@ export interface ManualLeagueData {
   readonly scoring_type: string;
   readonly start_week: Week;
   readonly end_week: Week;
+  /** `file` (league.end_week), `schedule` (last regular week − 1) or `fallback` (DEFAULT_END_WEEK). */
+  readonly end_week_basis: EndWeekBasis;
+  /** Non-fatal notes about defaults applied (fixed text; the tool layer passes them on). */
+  readonly warnings: readonly string[];
   readonly current_week_override: Week | null;
   readonly lock_mode: LockMode;
   readonly rules: LeagueRules;
@@ -235,8 +258,23 @@ export type NormalizeResult =
   | { readonly ok: true; readonly data: ManualLeagueData }
   | { readonly ok: false; readonly issues: readonly LeagueFileIssue[] };
 
+/**
+ * The league's end week: the file's, else the schedule's last regular week − 1 (kept within the
+ * start week and the tool-input bound), else the named fallback.
+ */
+export function defaultEndWeek(
+  fileEndWeek: Week | undefined,
+  startWeek: Week,
+  lastRegularWeek: Week | null,
+): { readonly end_week: Week; readonly basis: EndWeekBasis } {
+  if (fileEndWeek !== undefined) return { end_week: fileEndWeek, basis: "file" };
+  if (lastRegularWeek === null) return { end_week: DEFAULT_END_WEEK, basis: "fallback" };
+  const end = Math.min(TOOL_INPUT_WEEK_MAX, Math.max(startWeek, lastRegularWeek - 1));
+  return { end_week: end, basis: "schedule" };
+}
+
 /** Normalises a schema-valid file. Never throws for any schema-valid input. */
-export function normalizeLeague(f: LeagueFile): NormalizeResult {
+export function normalizeLeague(f: LeagueFile, opts: NormalizeOptions = {}): NormalizeResult {
   const issues: LeagueFileIssue[] = [];
   const issue = (path: string, reason: string): void => {
     issues.push({ path, reason });
@@ -247,7 +285,8 @@ export function normalizeLeague(f: LeagueFile): NormalizeResult {
   const league_key = `manual.l.${slug}`;
   if (!MANUAL_KEY_RE.league.test(league_key)) issue("league.key", "not a valid league slug");
   const start = f.league.start_week ?? DEFAULT_START_WEEK;
-  const end = f.league.end_week ?? DEFAULT_END_WEEK;
+  const endWeek = defaultEndWeek(f.league.end_week, start, opts.lastRegularWeek ?? null);
+  const end = endWeek.end_week;
   if (end < start) issue("league.end_week", "must not be before start_week");
   const cw = f.league.current_week ?? null;
   if (cw !== null && (cw < start || cw > end))
@@ -481,6 +520,8 @@ export function normalizeLeague(f: LeagueFile): NormalizeResult {
       scoring_type: f.league.scoring_type ?? "head",
       start_week: start,
       end_week: end,
+      end_week_basis: endWeek.basis,
+      warnings: Object.freeze(endWeek.basis === "fallback" ? [END_WEEK_FALLBACK_WARNING] : []),
       current_week_override: cw,
       lock_mode: f.league.lineup_lock ?? "per_game",
       rules,
