@@ -201,6 +201,11 @@ export interface League {
   readonly my_team_name: string | null;
   readonly weeks: readonly LeagueWeek[];
   readonly rules: LeagueRules;
+  /**
+   * Fixed-text notes about defaults the provider applied (the manual league's end-week fallback);
+   * every tool that reads the league passes them on as warnings. Absent when there are none.
+   */
+  readonly notes?: readonly string[];
 }
 
 /** A roster slot's class (plan 01 §8). */

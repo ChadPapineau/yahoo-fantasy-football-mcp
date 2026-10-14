@@ -338,6 +338,8 @@ export async function leagueContext(
       throw new FfError("VALIDATION", { field: "league_key", reason: "not_allowed" });
   }
   const got = await ctx.services.platform.getLeague(ref, opts);
+  // the provider's notes about defaults it applied (an end week from no schedule) reach the answer
+  for (const n of got.value.notes ?? []) if (!ctx.notes.includes(n)) ctx.notes.push(n);
   const lc: LeagueContext = {
     ref,
     league: got.value,

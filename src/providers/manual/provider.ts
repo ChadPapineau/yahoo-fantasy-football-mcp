@@ -8,6 +8,7 @@ import { lstatSync, statSync } from "node:fs";
 import path from "node:path";
 import { NFL_TEAMS, type NflTeam } from "../../config/schema.js";
 import { ensureSecureDir, PathSecurityError, readSecureFile } from "../../config/paths.js";
+import { ALL_WEEK_INDEXES } from "../../config/weeks.js";
 import type { ScheduleReader, NflGame } from "../../domain/analytics/types.js";
 import type { Clock } from "../../domain/clock.js";
 import { nameKey } from "../../domain/crosswalk/normalize.js";
@@ -24,6 +25,7 @@ import {
   weekPosition,
   kickoffMs,
 } from "../../domain/league/schedule.js";
+import { lastRegularWeek, seasonSchedule } from "../../domain/league/season.js";
 import { eligibleSlotNames, slotByName } from "../../domain/league/slots.js";
 import { manualPlayerKeyFor } from "../../domain/league/types.js";
 import {
@@ -64,8 +66,8 @@ import {
 import { MAX_LEAGUE_FILE_BYTES, parseLeagueYaml } from "./parse.js";
 import { issuesOf, leagueFileSchema } from "./schema.js";
 
-/** Every week number the schedule may hold (plan 02 §5 bound). */
-const ALL_WEEKS: readonly Week[] = Object.freeze(Array.from({ length: 22 }, (_, i) => i + 1));
+/** Every week number the schedule may hold (the structural bound, never a season length). */
+const ALL_WEEKS: readonly Week[] = ALL_WEEK_INDEXES;
 
 /** A request for a league, team or week this file does not hold → NOT_FOUND (plan 01 §4.3). */
 export class ManualNotFoundError extends Error {
@@ -170,7 +172,7 @@ export function nameMatcher(query: string): (name: string) => boolean {
 export class ManualLeagueProvider implements FantasyPlatform {
   readonly id = "manual" as const;
   private readonly opts: ManualLeagueProviderOptions;
-  private cache: { text: string; data: ManualLeagueData } | null = null;
+  private cache: { text: string; lastReg: Week | null; data: ManualLeagueData } | null = null;
 
   constructor(opts: ManualLeagueProviderOptions) {
     if (!path.isAbsolute(opts.file))
@@ -215,14 +217,21 @@ export class ManualLeagueProvider implements FantasyPlatform {
       mtimeMs = this.opts.clock.nowMs();
     }
     const as_of = new Date(Math.floor(mtimeMs)).toISOString();
-    if (this.cache?.text === text) return { data: this.cache.data, as_of };
+    // the default end week comes from the league season's schedule (season-fresh §2.6): the same
+    // text is normalised again when that schedule's last regular week changes
+    if (
+      this.cache?.text === text &&
+      this.cache.lastReg === this.lastRegWeek(this.cache.data.season)
+    )
+      return { data: this.cache.data, as_of };
     const raw = parseLeagueYaml(text);
     const parsed = leagueFileSchema.safeParse(raw);
     if (!parsed.success) throw new LeagueFileError("invalid", issuesOf(parsed.error, raw));
-    const norm = normalizeLeague(parsed.data);
+    const lastReg = this.lastRegWeek(parsed.data.league.season);
+    const norm = normalizeLeague(parsed.data, { lastRegularWeek: lastReg });
     if (!norm.ok) throw new LeagueFileError("invalid", norm.issues.slice(0, 50));
     for (const id of norm.data.identifiers) this.opts.logger?.registerSecret("identifier", id);
-    this.cache = { text, data: norm.data };
+    this.cache = { text, lastReg, data: norm.data };
     return { data: norm.data, as_of };
   }
 
@@ -258,6 +267,15 @@ export class ManualLeagueProvider implements FantasyPlatform {
   /** The season's games, or [] without an attached schedule. */
   private games(season: number): readonly NflGame[] {
     return this.opts.schedule?.games(season, ALL_WEEKS).rows ?? [];
+  }
+
+  /** The league season's last regular week from the attached schedule; null when unknown. */
+  private lastRegWeek(season: number): Week | null {
+    try {
+      return lastRegularWeek(seasonSchedule(this.games(season), season));
+    } catch {
+      return null;
+    }
   }
 
   private features(data: ManualLeagueData): ReadFeatures {
@@ -332,6 +350,7 @@ export class ManualLeagueProvider implements FantasyPlatform {
         my_team_name: d.my_team.name,
         weeks: Object.freeze(weeks),
         rules: d.rules,
+        ...(d.warnings.length > 0 ? { notes: d.warnings } : {}),
       });
       return this.stamp(league, l.as_of);
     });
