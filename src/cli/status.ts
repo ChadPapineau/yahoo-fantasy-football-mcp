@@ -13,7 +13,7 @@ import {
   type DatasetSourceId,
   type FreshnessState,
 } from "../config/freshness.js";
-import type { GameCalendar } from "../config/game-calendar.js";
+import { fallbackCalendar, type GameCalendar } from "../config/game-calendar.js";
 import { TOOL_INPUT_WEEK_MAX } from "../config/weeks.js";
 import { scheduleView, type ScheduleView } from "../domain/league/calendar.js";
 import { datasetCoverage } from "../domain/league/coverage.js";
@@ -95,7 +95,10 @@ export interface SourceStatus {
 
 /** What `sourceStatus` judges against besides refresh_log (all optional: absent = unknown). */
 export interface SourceJudgement {
-  /** The game calendar the TTL is judged by (the schedule-driven rule). */
+  /**
+   * The game calendar the TTL is judged by (the schedule-driven rule); absent (no schedule to read)
+   * = the fallback calendar, every instant hot — the never-under-refresh judgment.
+   */
   readonly cal?: GameCalendar;
   /** A recent season_check saying the season in progress is not published upstream. */
   readonly notPublished?: { readonly season: number; readonly checked_at: string } | null;
@@ -157,7 +160,7 @@ export function sourceStatus(
       checked_at: current.checked_at,
     },
     nowMs,
-    judge.cal,
+    judge.cal ?? fallbackCalendar("never_loaded"),
   );
   // never "fresh" for a file the server cannot attach (QA-1-038): the same checks the refresh runs.
   // A refreshed source whose file is gone or not a regular file is unreadable too, never "never

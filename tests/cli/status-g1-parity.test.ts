@@ -8,6 +8,8 @@ import { copyFileSync, mkdirSync, rmSync, statSync, truncateSync, writeFileSync 
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { renderStatus, sourceStatuses, type StatusReport } from "../../src/cli/status.js";
+import { scheduleView } from "../../src/domain/league/calendar.js";
+import { storeInternalsOf } from "../../src/store/store.js";
 import { body, connect, makeWorld, type World } from "../mcp/helpers/env.js";
 
 const file = (w: World, source: string): string =>
@@ -91,6 +93,38 @@ describe("ff status reads a current dataset file the way G1 does (QA-1-038)", ()
     },
     120_000,
   );
+});
+
+describe("ff status and G1 agree on a season upstream has not published yet (season-fresh §3.3)", () => {
+  it("not_published in both, for the season in progress", async () => {
+    const w = await makeWorld();
+    try {
+      const db = storeInternalsOf(w.store)?.db;
+      if (db === undefined) throw new Error("no store connection");
+      const season = scheduleView(w.store.datasets.schedules, w.clock.nowMs()).phase.season;
+      // the injuries file holds last season only; upstream was checked an hour ago for this one
+      db.prepare("UPDATE refresh_log SET seasons_json = ? WHERE source = 'nflverse:injuries'").run(
+        JSON.stringify([season - 1]),
+      );
+      await w.store.repos.seasonChecks.record({
+        source: "nflverse:injuries",
+        season,
+        checked_at: new Date(w.clock.nowMs() - 3_600_000).toISOString(),
+        status: "not_published",
+      });
+      w.store.reattachIfChanged();
+      const gs = await g1(w);
+      const mine = sourceStatuses(w.store, w.config, w.clock.nowMs());
+      for (const s of mine) {
+        const want = gs.get(s.source);
+        if (want !== undefined) expect(s.state, s.source).toBe(want);
+      }
+      expect(mine.find((s) => s.source === "nflverse:injuries")?.state).toBe("not_published");
+      expect(gs.get("nflverse:injuries")).toBe("not_published");
+    } finally {
+      w.cleanup();
+    }
+  }, 120_000);
 });
 
 /** The repair lines of the text dashboard for `r.sources` (the rest of the report is not needed). */
