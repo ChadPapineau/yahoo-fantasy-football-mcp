@@ -18,7 +18,6 @@ written before the build; where the build changed an approved plan text, [`plan/
 
 | Doc | One line |
 |---|---|
-| [`00-tooling-inventory.md`](research/00-tooling-inventory.md) | Which connectors and skills were available during the research phase, which helped, and which Skills the product itself should ship (finalised in 06) |
 | [`01-repo-security-audit.md`](research/01-repo-security-audit.md) | Twenty-one prior-art repositories read statically as untrusted code: per-repo verdicts (*Safe to learn from* · *Learn from with caution* · *Do not use*), the credential leaks found in two public histories (values never reproduced), dependency advisory counts, and the rejected list |
 | [`02-prior-art-lessons.md`](research/02-prior-art-lessons.md) | Architecture lessons from the repositories that passed: capability matrices, the choices that work (adopt the idea, not the code), the mistakes to avoid with the symptom each produces, and what the matrix says our design must do differently |
 | [`03-yahoo-api.md`](research/03-yahoo-api.md) | The Yahoo Fantasy Sports API capability reference: auth (authorization-code only, no PKCE, `oob` accepted, rotating refresh tokens), the full read and write surface, stat ids for the scoring engine, response-format traps, limits and finalisation, the gaps, the unverified items by name, and the three facts that most constrain the architecture |

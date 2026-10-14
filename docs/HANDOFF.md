@@ -102,7 +102,7 @@ Owner's next steps, in order:
 ## Executive summary (2026-09-30)
 
 **What exists.** A public, docs-only repo with a verified research pack
-(`docs/research/00–06`: tooling inventory, a 21-repo security audit,
+(`docs/research/01–06`: a 21-repo security audit,
 prior-art lessons, the Yahoo API reference, a data-source evaluation, the
 strategy/analytics methodology, the Skills/MCP design), a ten-file plan
 (`docs/plan/01–10`) refined through a three-round adversarial review
@@ -174,7 +174,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 
 | phase | status | artefacts |
 |---|---|---|
-| 0 — repo setup | ✅ done | `.gitignore`, `.env.example`, `main` pushed, description + 14 topics applied via `gh`, tooling inventory (`docs/research/00-*`) |
+| 0 — repo setup | ✅ done | `.gitignore`, `.env.example`, `main` pushed, description + 14 topics applied via `gh` |
 | 1 — research (waves 1–3) | ✅ 01–06 all verified (SHAs on origin, identifier scan, one load-bearing claim per doc checked at source) | `docs/research/01-*` … `06-*` |
 | 2 — plan | ✅ all ten files (`docs/plan/01-*`…`10-*`, 2,935 lines), both halves verified; plan 10 §4 lists 13 small tensions to fold in during the adversarial round | `docs/plan/` |
 | 2b — docs-only automation (plan 06 §4 step 1) | ✅ `docs` (Mermaid 7/7 + links, with self-tests) and `secrets` (gitleaks 8.30.1 pinned by sha256, 7 Yahoo rules, self-test, weekly full-history scan) green on `main` at `c30b997`; Dependabot (weekly version updates; security updates and vulnerability alerts are **not** on — Open items, QA-2-019); PR template. GitHub secret scanning + push protection were already enabled. **Branch ruleset applied 2026-10-06** (`24558591`: no force-push, no deletion, linear history, no bypass actors; plan 04 §5); required status checks deliberately deferred until PRs are required (a required check rejects every fresh direct push) | `.github/**`, `.gitleaks.toml`, `scripts/**` |

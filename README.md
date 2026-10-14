@@ -61,7 +61,7 @@ Four facts shape everything on this page, and the plan carries them openly:
 
 | Area | State | Evidence |
 |---|---|---|
-| Research pack (00–06) | ✅ complete, each doc verified against at least one load-bearing claim at source | [`docs/research/`](docs/README.md) |
+| Research pack (01–06) | ✅ complete, each doc verified against at least one load-bearing claim at source | [`docs/research/`](docs/README.md) |
 | Refined plan (01–10) | ✅ complete, adversarially reviewed, approved 2026-09-30; amended where the build changed it ([plan changelog](docs/plan/changelog.md)) | [`docs/plan/00-index.md`](docs/plan/00-index.md) |
 | Docs CI — every Mermaid block renders, every internal link resolves | ✅ live on every push | [`docs.yml`](.github/workflows/docs.yml) |
 | Secrets CI — gitleaks with Yahoo-specific rules, weekly full-history scan | ✅ live on every push | [`secrets.yml`](.github/workflows/secrets.yml), [`.gitleaks.toml`](.gitleaks.toml) |
