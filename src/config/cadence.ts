@@ -243,11 +243,11 @@ export function dueDecision(i: DueInput): DueDecision {
   }
 
   // TTL guard: due when the next tick (plus its tolerance) could judge a class stale.
-  let guardAt = Number.POSITIVE_INFINITY;
-  for (const id of SOURCE_CLASSES[source]) {
-    const until = freshUntilMs(freshnessClass(id), state.basis, cal);
-    if (until !== null) guardAt = Math.min(guardAt, until - TICK_MS - TICK_SLACK_MS);
-  }
+  const basisT = state.basis;
+  const untils = SOURCE_CLASSES[source]
+    .map((id) => freshUntilMs(freshnessClass(id), basisT, cal))
+    .filter((u): u is number => u !== null);
+  const guardAt = Math.min(...untils) - TICK_MS - TICK_SLACK_MS;
   if (nowMs >= guardAt) return d(true, "ttl_guard", null);
 
   const basis = basisOf(state.basis);
@@ -259,8 +259,7 @@ export function dueDecision(i: DueInput): DueDecision {
 /** The release basis of a stamp: the later of checked_at and fetched_at. */
 function basisOf(t: StampInstants): number {
   const f = Date.parse(t.fetched_at);
-  const c = t.checked_at === null ? Number.NaN : Date.parse(t.checked_at);
-  return Number.isFinite(c) ? Math.max(c, f) : f;
+  return t.checked_at === null ? f : Math.max(Date.parse(t.checked_at), f);
 }
 
 // --- answer time (§6) -------------------------------------------------------------------------------
