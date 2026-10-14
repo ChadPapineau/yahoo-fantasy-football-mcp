@@ -9,6 +9,52 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
 
 ### Added
 
+- **Season-agnostic, schedule-driven, fresh at answer time** (`build/season-fresh`, 2026-10-14):
+  - The season model: the season in progress, its phase (preseason, regular season, postseason,
+    off-season) and week, its regular and postseason weeks and its game days come from the loaded
+    NFL schedule (`src/domain/league/season.ts`, `src/config/game-calendar.ts`); a calendar rule is
+    used only to bootstrap before a schedule first loads. Kickoff-relative windows, the same in every
+    time zone; a fallback calendar treats every instant as game time when no usable schedule exists.
+  - `ff refresh due`, the one scheduled tick (launchd `refresh-due`, minutes 0/15/30/45 and at load):
+    it decides per source from the schedule what is due — schedules every 15 min from 3 h before a
+    kickoff, hourly whenever a kickoff is within 7 days, 6 h off-season; injuries, stats, rosters and
+    weather on their own phase cadence — with repair first, a 14-minute floor across processes,
+    failure backoff 15/30/60 min, a TTL guard and `--dry-run` explanations; a `job_run` heartbeat.
+  - Answer-time refresh: before a tool answers, `serve` revalidates the sources it reads through a
+    bounded, single-flight `ff refresh --on-demand` child (6 s for fast sources, 15 s to repair a
+    required one; ≤ 3 children, ≤ 20 an hour; fixed argv, an environment allow-list, no credentials,
+    no shell); the server process itself still makes no network call. `meta.refresh` reports each
+    source's outcome, with fixed warnings; `FF_ON_DEMAND_REFRESH` (`wait` default, `background`,
+    `off`; `off` in fixture mode). New child flags: several targets, `--on-demand`, `--no-migrate`,
+    `--expect-version`, a `--json` result shape.
+  - Kickoff-change detection: every schedules publish is diffed (kickoff, date, venue, added,
+    removed, week moves) into the `schedule_change` table, with one collapsed `--notify`
+    notification; G1 `schedule.recent_changes`, warnings in the roster, league, schedule,
+    projection, lineup, matchup and waiver tools, E13/E14 `lock_status` on logged recommendations,
+    and E12's warning when a cited analysis predates a change.
+  - Tentative kickoffs: Week-18 placeholder weeks, NFL flex windows (`src/config/flex-rules.ts`,
+    advisory) and TBD times — D3 `kickoff_tentative`, `tentative_reason`, `flex_deadline`, G1
+    `schedule.tentative_weeks`, warnings with the re-check time.
+  - G1 and `ff status`: `season` and `schedule` blocks built by the same functions; `sources[]`
+    `not_published`, `next_check_at`, `backoff_until`; `jobs[]` from heartbeats; seven new checks.
+    `ff doctor` row 23 (the league file's season, reference tables past their vintage, the week
+    bound).
+  - Store migration 003 (`schedule_change`, `job_run`, `season_check`, `provider_backoff`), the
+    `refresh:<source>` run lock taken before the first request, a persisted provider pause on
+    429 / Retry-After (`rate_limited`), `season_check` rows for a season upstream has not published.
+  - A reference-vintage registry (`src/config/reference-vintage.ts`) for the venue table, the flex
+    rules and the analytics base rates; publish warnings for a game roof that disagrees with the
+    venue table past its vintage and for a neutral-site game resolved to its home team's stadium.
+  - Skills: orient reads the season and schedule blocks, never asks for `ff refresh` for a season
+    not published upstream, explains `meta.refresh` and allows one re-ask after `in_progress`; a
+    moved kickoff comes first with the new lock time and tentative weeks carry their re-check time;
+    start-sit and stream-kdef re-run in the final 90 minutes before the earliest lock; retro marks
+    calls made under a moved lock; onboard's new-season step keeps last season's file as
+    `league-<season>.yaml` and names no fixed season; new evals SS-8–SS-10, KD-4, RT-4, ON-M6.
+  - Tests: season-model and zone-invariance properties over synthetic 18/19/20-week seasons
+    2026–2030 in all 39 UTC offsets, the cadence replay of a healthy tick, the politeness property,
+    answer-time fault rows with real children, a year in the life of an install 2027–2030, the
+    no-network-in-server spy, `tests/lint/season-agnostic.test.ts`.
 - **Phase 1a (1a-full, the Yahoo-free half; `docs/plan/10-phasing-and-acceptance.md` §3.1a)** on
   `build/phase-1a`:
   - Store (`src/store`): `node:sqlite` with WAL, STRICT tables, forward-only migrations with a
@@ -86,6 +132,37 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
 
 ### Changed
 
+- **launchd jobs** (season-fresh build): `refresh-due` (`RunAtLoad` true), `store-prune` and
+  `store-backup` replace the per-source jobs; the retired labels `nflverse-schedules`,
+  `nflverse-daily`, `nflverse-stats` and `weather` are booted out and removed by
+  `ff install-launchd` and by `ff uninstall`, and `ff doctor` row 11 warns on a retired or
+  out-of-date plist and a missing tick heartbeat. **Upgrade step, once: `ff install-launchd`.**
+  Until then the old plists keep working. Off macOS, schedule `ff refresh due` every 15 min.
+- **TTL rule:** schedules and lines are judged by kickoff windows from the schedule — 30 min inside
+  `[kickoff − 24 h, kickoff + 4 h)`, otherwise until the next window opens (≤ 6.5 h); the weekday
+  set `GAME_DAYS` is deleted; expiry never depends on the calendar.
+- **Refresh seasons** follow the phase season: schedules always last, this and next season (the next
+  season loads from its May release); stats this and last; injuries this; weekly rosters by phase.
+  A new season's empty file is `not_published`, not a schema failure.
+- Coverage-aware gating: a finished season's data no longer expires; a season upstream has not
+  published is a named assumption (optional source) or `STALE_ONLY` `season_not_published`
+  (required source), never an outage; `STALE_ONLY` gains the `refresh_in_progress` and
+  `refresh_failed` variants.
+- Week bounds come from each season's schedule (a structural bound of 30 in the data layer); the
+  tool-input bound stays 22 under tool contract 1, flagged by doctor row 23 and G1 when a schedule
+  passes it. A league file without `end_week` keeps the named fallback of week 17 for now.
+- ESLint: `src/mcp` may not import `src/http`, `src/sources` or `node:child_process`.
+- **Store version 3 (migration 003) — rollback note:** a build from before this change refuses a v3
+  store. To roll back, restore `store.sqlite.bak-v2` from the backup directory (taken before the
+  migration), boot out and delete `io.github.fantasy-football-mcp.ff.refresh-due`, and run the older
+  build's `ff install-launchd`.
+- **Dependencies** (`80fdbbf`, the same pins as Dependabot PR #7): `@modelcontextprotocol/server`
+  and `@modelcontextprotocol/client` 2.2.0 → 2.3.1 (`@modelcontextprotocol/core` 2.3.1; the SDK's
+  manifest licence is Apache-2.0 since 2.3.0, on the licence allow-list), `hyparquet` 1.31.2 →
+  1.31.3, `@types/node` 24.19.2, `eslint` 10.12.0, `typescript-eslint` 8.71.1; still a
+  five-package runtime tree. Visible change: `prompts/get` without `arguments` now answers for
+  `ff.start_sit` and `ff.retro` (validated as `{}`); `ff.stream` still refuses. `ff_get_status`
+  reports `sdk_version` 2.3.1. Rollback: revert `80fdbbf` (lockfile and allow-list move together).
 - **QA round 2 behaviour changes** (`docs/qa/2026-10-06-qa-round2.md`):
   - **Dataset files are now `ds_schema` 3** (QA-2-032): a file written by an earlier build may hold
     the opponent's sack yardage with the wrong sign, so it is refused until it is republished. Run
@@ -133,6 +210,20 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
 
 ### Fixed
 
+- **QA-2-037** — game days off Thursday, Sunday and Monday (Wednesday openers, Thanksgiving Friday,
+  Saturdays, Christmas on any weekday) got the off-day cadence and TTL: game days now come from the
+  schedule data (owner's decision), and a lines check made on a Saturday-game day reads stale after
+  30 min in every time zone.
+- **The September `STALE_ONLY`**: core tools refused for days while the new season's injuries and
+  stats were not yet published upstream, and the hint looped on `ff refresh all`.
+- **QA-2-062** — `exclude` and `status: O` could give different `delta_vs_next` intervals for one
+  lineup (the solver's tie-break chose which entrant took which freed seat): the made changes are now
+  chosen canonically (largest made gain, then the highest sum of made-change p10s, then a fixed
+  key/seat order) and lineup totals are summed in `player_key` order.
+- Two concurrent refreshes of one source both downloaded; a 429 was recorded as `network` and its
+  `Retry-After` ignored; weather re-fetched every venue on every run; stats post-game runs fired only
+  after Thursday, Sunday and Monday games; G1 `jobs[]` was always empty; a renamed or removed
+  launchd job left its plist behind.
 - **QA round 2, re-verification, second sweep and integration round**
   (`docs/qa/2026-10-06-qa-round2.md`: 105 fixes re-checked, 22 reopened; 20 new findings, QA-2-026 to
   QA-2-045; the fix round then verified independently and its problems and hand-offs worked in an

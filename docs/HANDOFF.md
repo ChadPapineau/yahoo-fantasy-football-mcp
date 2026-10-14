@@ -14,48 +14,48 @@ confirmation. News text is data, not instructions.
 
 ## ▶ NEXT STEP
 
-**State (2026-10-06).** Phase 1a is built, hardened by QA/pentest round 1 and on `main` (merged
-2026-09-30). The product runs on `ManualLeagueProvider` (`<config>/league.yaml`) + nflverse +
-weather; Yahoo is not connected (no API access). On 2026-10-06 the public history was rewritten
-(no-reply identity on every commit, no co-author trailers, no working notes; QA-1-095) and `main`
-gained branch ruleset `24558591` (no force-push, no deletion, linear history). The seven skipped
-round-1 hand-offs are decided: four closed, three deferred with a recorded design and a reopen
-trigger (§ Decisions made). **QA round 2 is complete and merged**
-([`qa/2026-10-06-qa-round2.md`](qa/2026-10-06-qa-round2.md)). Its first half — the deferred-items
-analysis and a review of its own commits, QA-2-001 to QA-2-025 — is on `main` with the A17 script.
-Its second half is on `build/qa2-fixes` (from `main` at `f6ba81e`, which has not moved since, so the
-branch fast-forwards; last code commit `1c46181`, then the round's records `7ea4abc`; CI green on
-`7ea4abc`: `ci` 37457598480, `docs` 37457598476, `secrets` 37457598479). All 105 round-1 and round-2 fixes were re-checked with a
-mutation run (83 held, 22 reopened); a second sweep confirmed 20 new findings, QA-2-026 to QA-2-045
-(one high: `exclude` kept an inactive starter in the lineup); a fix round worked the 42 items; an
-independent verification of that round found 8 problems (3 major: `exclude` still kept the inactive
-starter whenever his replacement was Questionable, a decisive lineup change carried an unrelated
-coin flip, and `ff_analyze_matchup` left my unmatched starter out of P(win)); and an integration
-round fixed them and finished the hand-offs. Final tally: of the 22 reopened fixes, 21 are fixed and
-QA-1-080 is deferred behind a typed refusal; of the 20 sweep findings, 18 are fixed (QA-2-045's TE
-premium part deferred), QA-2-037 is deferred and QA-2-028 closed; QA-2-046 is fixed and QA-2-047 and
-QA-2-048 are deferred; and seven low findings were registered, QA-2-049 to QA-2-055 (1 fixed, 3 open,
-3 deferred).
+**State (2026-10-14).** Phase 1a is built and on `main`, hardened by QA rounds 1 and 2 (round 2
+merged 2026-10-06: [`qa/2026-10-06-qa-round2.md`](qa/2026-10-06-qa-round2.md)); `main` also carries
+the dependency round (`80fdbbf`: MCP SDK 2.3.1, hyparquet 1.31.3, four dev tools). The product runs on
+`ManualLeagueProvider` (`<config>/league.yaml`) + nflverse + weather; Yahoo is not connected (no API
+access). **The season-fresh build is on `build/season-fresh`** (from `main` at `80fdbbf`, which has
+not moved, so the branch fast-forwards). It meets the owner's four requirements: (1) every league and
+season going forward — the season, its phase, weeks and game days come from the published NFL
+schedule, with no year, week count or weekday in code (`tests/lint/season-agnostic.test.ts`); (2) the
+schedule is followed week over week — one 15-minute launchd tick (`refresh-due`) checks it every 15
+min from 3 h before each kickoff and at least hourly all season, every schedules release is diffed for
+kickoff changes and flexes, and tentative kickoffs (Week-18 placeholders, flex windows) are flagged
+with their re-check time; (3) the newest data — every answer revalidates its sources through a
+bounded, single-flight `ff refresh --on-demand` child (6 s; 15 s to repair) while the server process
+stays network-free, and a season upstream has not published yet reads `not_published`, never an
+outage; (4) game days from the schedule data (QA-2-037, decided and fixed). QA-2-062, the
+lineup-exclude property failure the dependency round found, is fixed. Records: the QA register's
+§ Season and freshness build (SF-01 to SF-26), `CHANGELOG.md`, plans 01–10 amended (plan
+`changelog.md`). Merging is the owner's decision.
 
 Owner's next steps, in order:
 
-1. **Merged** (2026-10-06): `build/qa2-fixes` is on `main` with CI green; QA-2-054 was fixed before the
-   merge (`89c2906`). Open low items for a later pass: QA-2-052, QA-2-053 and QA-2-056 to QA-2-061
-   (register § Open after round 2).
-2. **Set it up, or upgrade** — README § Getting started: build in
-   `~/Developer/yahoo-fantasy-football-mcp`, `print-config` → add to Claude, copy the Skills,
-   `ff refresh all`, then `/onboard` to write `~/.config/fantasy-football-mcp/league.yaml` (0600,
-   never in the repo). An install from before this branch needs **`ff refresh all`** once (dataset
-   files are now `ds_schema` 3, QA-2-032; until then the tools answer `STALE_ONLY`) and
-   `ff install-launchd` again (QA-2-035).
-3. **Owner decisions, each with a recommendation** (register § Open after round 2 has the evidence
+1. **Review and merge `build/season-fresh`** (fast-forward) once CI on its head is green — the `ci`
+   workflow is the full gate (lint, typecheck, test with the coverage gate, supply-chain, pack,
+   process, smoke, skills), plus `docs` and `secrets`. Open low items for a later pass, unchanged:
+   QA-2-052, QA-2-053 and QA-2-056 to QA-2-061 (register § Open after round 2).
+2. **Upgrade an install — one step, once:** `git pull && npm ci && npm run build`, then
+   **`ff install-launchd`**. It installs the `refresh-due` tick and removes the four retired
+   per-source jobs; until it runs the old jobs keep working and `ff doctor` row 11 says so. The store
+   migrates itself to version 3 on first use (backup taken first; no `ff refresh all` is needed —
+   `ds_schema` did not change). Rollback: CHANGELOG § Changed (restore `store.sqlite.bak-v2`, boot out
+   `io.github.fantasy-football-mcp.ff.refresh-due`, run the older build's `install-launchd`). Off
+   macOS: `ff refresh due` every 15 min with systemd or cron. Restart the clients after upgrading
+   (a server started before the upgrade turns its answer-time refresh off and says so).
+   A new install: README § Getting started (`print-config` → add to Claude, copy the Skills,
+   `ff refresh all`, `/onboard`, `ff install-launchd`).
+3. **One wiring left open by the build** (a file no part of it owned): `src/providers/manual/provider.ts`
+   should call `normalizeLeague(parsed.data, { lastRegularWeek: lastRegularWeek(scheduleView(…).schedule(season)) })`,
+   include that value in its league cache key, and surface `ManualLeagueData.warnings` in
+   `ff_get_league`. Until then a league file without `end_week` gets week 17 (the named fallback,
+   right for an 18-week season); the onboard Skill asks for the week instead of relying on it.
+4. **Owner decisions, each with a recommendation** (register § Open after round 2 has the evidence
    and reopen triggers):
-   - **QA-2-037 — decide before 2026-11-25** (Wed GB@LA, the next game off Thursday, Sunday and
-     Monday; weeks 15–16 are fantasy-playoff weeks). Game days from `ds_schedules`, or a 30-minute
-     schedules job every day. *Recommendation:* game days from `ds_schedules` — what plans 01 §5.2 and
-     06 §1.2 already specify, and the only option that follows a flexed or added game without a code
-     change; keep the 30-minute-every-day job as the fallback if that multi-owner change cannot land
-     by 2026-11-25.
    - **QA-1-080 with QA-2-050** — E2's truncation contract for lineups deeper than about 14 starting
      seats, and `rec.subjects` past 20. *Recommendation:* keep the interim `VALIDATION`
      `lineup_too_deep` refusal until a league that deep is actually used (the reopen trigger). When
@@ -70,7 +70,7 @@ Owner's next steps, in order:
      regret can never reach `min_n`, and even per-player error fell one short (29 of 30) in the A9
      chain with both rosters projected. Hold A15 (< 500 ms) with a sample cap.
    - **QA-2-048** — `brier.p_active`. *Recommendation:* store the issued `p_active` with each
-     projection (a nullable column, store migration 003) rather than estimating it from the samples
+     projection (a nullable column, store migration 004 — 003 is the season-fresh tables) rather than estimating it from the samples
      (standard error up to 0.022, none for DEF), and define "played" by `roster_weekly` status for the
      week (not `INA`), after checking on a past week that `INA` marks game-day inactives; a stats row
      misses active players who recorded nothing.
@@ -82,9 +82,16 @@ Owner's next steps, in order:
    - **Item 12** — E5 availability under the manual league. *Recommendation:* adopt the option in item
      12 (players on another team's roster in `league.yaml` are `T` and not offered; `waivers` are `W`;
      everyone else `unknown`): a kicker another team rosters is advice you cannot act on.
-4. **A17, Claude Desktop half (about 10 minutes, mostly the app restart; steps in item 9).** The
-   Claude Code half is recorded under "Build facts" (2026-10-06: the model sees both copies).
-5. **Then Phase 2** (usage data, waivers for all positions — with the E5 schema deferred from 1a,
+   - **Projection-table compaction (SF-20)** — the season-fresh review proposed pruning stored
+     projections, which plan 10 T12 rules out. *Recommendation:* keep it deferred; reopen when plan 01
+     §5.6's 100 MB is measured after item 14's smaller sample encoding.
+   - **The contract-2 batch** needs no decision now (§ Decisions made, 2026-10-14): it fires on its
+     own trigger.
+5. **A17, Claude Desktop half (about 10 minutes, mostly the app restart; steps in item 9).** The
+   Claude Code half is recorded under "Build facts" (2026-10-06: the model sees both copies). The
+   same manual step should note Claude Desktop's tool-call timeout (plan 01 A-13: answer-time refresh
+   assumes ≥ 15 s).
+6. **Then Phase 2** (usage data, waivers for all positions — with the E5 schema deferred from 1a,
    § Deferred designs — trades, injury cascades, news).
 
 ## Executive summary (2026-09-30)
@@ -169,7 +176,8 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 3 — adversarial review | ✅ **closed after three rounds** (`a98d41f`): 30 objections — 29 conceded-and-landed, 1 withdrawn on evidence, 0 pressed; round 3 raised no objections, three nits (fixed), remainder declared marginal; `## Closing verdict` in the log; `docs/plan/changelog.md` finalised (numbers, closing summary, rounds 1–3) | `docs/plan/adversarial-log.md`, `docs/plan/changelog.md` |
 | build — Phase 0 + 1a-full (foundation, modules, QA/pentest) | ✅ merged to `main`: 19 tools, 7 resources, 3 prompts, 4 Skills, `ff` CLI; 3,867 unit + 127 process tests, 98.65 % lines; QA/pentest round 1: 101 findings, 80 confirmed, **80 fixed** | `src/`, `tests/`, `skills/`, `docs/qa/` |
 | docs — README, LICENSE, SECURITY.md | ✅ `README.md` (947 lines, 16 sections, 7 Mermaid diagrams rendered by CI, 121 features marked 📋 planned), `LICENSE` (MIT), `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` — verified; CI green on `a7dad60` | root + `docs/README.md`, `docs/plan/00-index.md` |
-| QA round 2 | ✅ complete except the merge (2026-10-06). On `main`: the deferred-items analysis (the 7 skipped hand-offs decided; QA-2-001…005) and a review of its own commits (QA-2-006…025), all fixed. On `build/qa2-fixes` (last code commit `1c46181`, records `7ea4abc`, CI green): re-verification of all 105 fixes (83 held, 22 reopened), a second sweep (20 confirmed, QA-2-026…045; 1 refuted), a fix round, and an integration round after an independent verification of it (8 problems, 3 major, all resolved). Of the 42 items 39 are fixed, 2 deferred (QA-1-080 behind a typed refusal, QA-2-037) and 1 closed; QA-2-046 fixed, QA-2-047/048 deferred; QA-2-049…055 registered (1 fixed, 3 open, 3 deferred) | `docs/qa/2026-10-06-qa-round2.md` |
+| season-fresh build | ✅ built on `build/season-fresh` (2026-10-14), awaiting the owner's merge: the season, weeks and game days from the schedule; the `refresh-due` tick; answer-time refresh through a bounded child; kickoff-change detection and lock marks; tentative kickoffs; the onboard new-season step; migration 003; QA-2-037 and QA-2-062 fixed | `docs/qa/2026-10-06-qa-round2.md` § Season and freshness build, `CHANGELOG.md` |
+| QA round 2 | ✅ complete and merged (2026-10-06). On `main`: the deferred-items analysis (the 7 skipped hand-offs decided; QA-2-001…005) and a review of its own commits (QA-2-006…025), all fixed. On `build/qa2-fixes` (last code commit `1c46181`, records `7ea4abc`, CI green): re-verification of all 105 fixes (83 held, 22 reopened), a second sweep (20 confirmed, QA-2-026…045; 1 refuted), a fix round, and an integration round after an independent verification of it (8 problems, 3 major, all resolved). Of the 42 items 39 are fixed, 2 deferred (QA-1-080 behind a typed refusal, QA-2-037) and 1 closed; QA-2-046 fixed, QA-2-047/048 deferred; QA-2-049…055 registered (1 fixed, 3 open, 3 deferred) | `docs/qa/2026-10-06-qa-round2.md` |
 
 ## Decisions made
 
@@ -217,11 +225,27 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 2026-10-06 | **Dataset files go to `ds_schema` 3** (QA-2-032, `fb1b2e3`): a layout-2 team-defence file may hold upstream's negative sack yardage, so every layout-2 file is refused at attach until republished (`DS_SCHEMA_VERSION` is one global value); run `ff refresh all` once after upgrading | the documented contract (`opp_sack_yards_lost` a non-negative magnitude) must hold for every file served; the QA-1-017 / QA-1-098 precedent and path |
 | 2026-10-06 | **`ff_analyze_matchup` refuses when one of my starters is unmatched** (QA-2-046, `35989bb`): `NOT_FOUND` with `MATCHUP_UNMATCHED_STARTER_HINT`, as for the opponent's side (QA-1-043), rather than a P(win) without his points | E3's whole answer is P(win); E2 withholds P(win) for the same input |
 | 2026-10-06 | **Interim for QA-1-080: a lineup too deep for one result is `VALIDATION` `lineup_too_deep` with a hint** (`3969e15`), using the server's own fit and `REC_LIMITS`, so a result that fits is never refused | an `INTERNAL` with nothing to act on needed no product decision to replace; the truncation contract stays deferred |
+| 2026-10-14 | **The owner's requirements for every season going forward:** use this server for every Yahoo league and season, agnostic to season, schedule and year; follow the NFL schedule week over week, several times a day when a game could be flexed, so every lock time, projection and recommendation is right; always work with the newest data; game days from the schedule data | the owner's instruction; built on `build/season-fresh` |
+| 2026-10-14 | **QA-2-037 decided and fixed: game days come from the schedule data** (`0c0673e`, `874259c`, `d21f875`). Kickoff-relative windows from `ds_games` (hot = 24 h before a kickoff to 4 h after), the same in every time zone; `GAME_DAYS` and the weekday rule deleted; a schedule-less store treats every instant as game time | the recommendation of 2026-10-06; the only option that follows a flexed or added game without a code change |
+| 2026-10-14 | **Answer-time revalidation through an on-demand child** (`f294cb0`, `f26e2f9`): before a tool answers, `serve` starts a bounded, single-flight `ff refresh --on-demand` child (6 s fast, 15 s repair, ≤ 3 children, ≤ 20 an hour; fixed argv, environment allow-list, no credentials, no shell); the server process stays network-free. `FF_ON_DEMAND_REFRESH=wait\|background\|off` | "always the newest data"; an in-process refresh stays rejected because `node:sqlite` is synchronous (a parquet decode in `serve` stalls the stdio loop — plan 01 D8) |
+| 2026-10-14 | **One schedule-driven tick replaces the per-source launchd jobs** (`874259c`): `refresh-due` at minutes 0/15/30/45 with `RunAtLoad`; the labels `nflverse-schedules`, `nflverse-daily`, `nflverse-stats` and `weather` are retired, never reused, and removed by `ff install-launchd` and `ff uninstall`. Off macOS: `ff refresh due` every 15 min under systemd or cron | one place decides cadence from the schedule; `StartCalendarInterval` coalesces runs missed while asleep (`StartInterval` drops them); quarter-hours are the same instants in every zone |
+| 2026-10-14 | **Store migration 003 (`season_fresh`)**: `schedule_change`, `job_run`, `season_check`, `provider_backoff`; no `ds_schema` bump (no forced `ff refresh all`). **QA-2-048's planned migration becomes 004** | one migration for the build's four tables; the change history is local state, not a dataset |
+| 2026-10-14 | **Deferred as one batch: tool contract 1 → 2** — widen the tool-input week bound (`TOOL_INPUT_WEEK_MAX` 22) and add an optional `season` to `ff_analyze_retrospective` and `ff_list_recommendations`, with every Skill's metadata in the same push. Everything below the tool inputs is data-driven now. **Reopen trigger:** a published NFL schedule with a last week past 22 (`ff doctor` row 23 / G1 `schedule_week_bound` turns red), the first league-file rollover with logged records from the previous season (expected August 2027), or the first release — whichever comes first. Until then last season's review uses `FF_LEAGUE_FILE=<config>/league-<season>.yaml` | an input-schema change bumps `tool_contract` (2026-10-06 decision) and couples the registry with every `SKILL.md` and eval; batching makes one bump |
+| 2026-10-14 | **Season-agnostic rule** in `CONTRIBUTING.md`, enforced by `tests/lint/season-agnostic.test.ts`: no year literal or weekday rule in `src/` outside the vintage-stamped reference tables (`src/config/reference-vintage.ts`, `src/config/flex-rules.ts`) | the owner's requirement (1); reference data that must be written down warns once a season passes its vintage |
+| 2026-10-14 | **Dependency round adopted** (`80fdbbf`): MCP SDK server and client 2.3.1 (core 2.3.1; licence Apache-2.0 since 2.3.0, on the allow-list), hyparquet 1.31.3, four dev tools. **Deferred** to the next reviewed Dependabot group: hyparquet 1.31.4, typescript-eslint 8.71.2, zod 4.6.7 (zod needs the allow-list update and the one-copy rule); the `yaml@2.9.1` literal in the runtime-tree test and the SDK's `maxToolInputElements` wait for the next yaml bump and a wrapper that keeps coded errors | the same pins as Dependabot PR #7, with the allow-list regenerated by the documented procedure |
+| 2026-10-14 | **Deferred:** stored-projection compaction (an owner decision against plan 10 T12; reopen at plan 01 §5.6's 100 MB measured after item 14); `FF_LEAGUE_KEYS` per season (Phase 1b; reopen when it starts) | neither blocks a season; both are recorded in the register's SF table |
 
-## Stack facts (checked 2026-09-29)
+## Stack facts (checked 2026-09-29; current pins 2026-10-14)
 
-- `@modelcontextprotocol/server` **2.2.0** is the npm `latest` dist-tag
-  (registry read; nothing installed). The plan pins it exactly.
+- **Current (2026-10-14, `80fdbbf`):** `@modelcontextprotocol/server` and `@modelcontextprotocol/client`
+  **2.3.1** (bringing `@modelcontextprotocol/core` 2.3.1), `hyparquet` 1.31.3, `zod` 4.6.5, `yaml`
+  2.9.1 — still a 5-package runtime tree. The SDK's manifest licence is **Apache-2.0 since 2.3.0**
+  (the `LICENSE` file keeps the MIT text for earlier contributions); Apache-2.0 is on the licence
+  allow-list, and the package is installed from the registry, not redistributed. The
+  `registerTool(name, { inputSchema: deferValidation(schema), … }, wrapHandler(schema, fn))` pattern
+  holds under 2.2.0 and 2.3.1; 2.3.1 validates a `prompts/get` without `arguments` as `{}`.
+- *Historical (checked 2026-09-29):* `@modelcontextprotocol/server` **2.2.0** was then the npm `latest` dist-tag
+  (registry read; nothing installed). The plan pinned it exactly.
 - `node:sqlite` loads on the local Node **22.23.2** but still emits
   `ExperimentalWarning: SQLite is an experimental feature and might change
   at any time`. The plan (01 D4) calls it a release candidate and assumes
@@ -240,8 +264,8 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 - Node **24.21.0** via fnm for this repo only (`.nvmrc` = 24; the machine's global default stays
   22). `node:sqlite` on 24 prints no experimental warning; `ATTACH 'file:…?mode=ro'` is
   honoured; **at most 10 attached databases** — Phase 2 needs attach-on-demand (LRU).
-- Pins (exact): `@modelcontextprotocol/server` 2.2.0, `zod` 4.6.5 (one copy, test-enforced),
-  `hyparquet` 1.31.2, `yaml` 2.9.1 → a **5-package runtime tree**; TypeScript **6.0.3** (not
+- Pins (exact) at the foundation stage: `@modelcontextprotocol/server` 2.2.0, `zod` 4.6.5 (one copy, test-enforced),
+  `hyparquet` 1.31.2, `yaml` 2.9.1 → a **5-package runtime tree** (since 2026-10-14: server 2.3.1, hyparquet 1.31.3 — § Stack facts); TypeScript **6.0.3** (not
   7.x: typescript-eslint 8.71 requires < 6.1 and TS 7 has no JS API for typed lint).
 - Contract deviations from the plan text (deliberate, documented in the file headers):
   `FantasyPlatform.getPlayerWeekStats` → `getPlayerStats` (week or season), every read returns
@@ -252,7 +276,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   `FA | W | T | unknown` (plan 07); `delta_pwin` bands |Δ| < 0.04 small, < 0.10 medium, else large.
 - Tools must be registered as `registerTool(name, { inputSchema: deferValidation(schema), … },
   wrapHandler(schema, fn))` — the only pattern that keeps plan 01 §4.3 coded errors under SDK
-  2.2.0.
+  2.2.0 and 2.3.1.
 - **A17 — does the client show the model `structuredContent`?** (plan 10 A17; item 9 below says
   how to run it). Replace each "not recorded yet" with the line the check prints or the manual
   step gives:
@@ -481,7 +505,13 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
   a trigger; CI green on `1c46181`)
 - [ ] fix QA-2-054 and QA-2-053 (recommended before the merge), then merge `build/qa2-fixes`
   (fast-forward); QA-2-052 after
-- [ ] **Chad:** decide QA-2-037 before 2026-11-25; QA-1-080 (with QA-2-050), QA-2-045 (TE premium),
+- [x] **Chad:** decide QA-2-037 — decided 2026-10-14 (game days from the schedule) and built on
+  `build/season-fresh`
+- [ ] **Chad:** review and merge `build/season-fresh`; then `ff install-launchd` once on each install
+- [ ] wire the league season's last regular week into `src/providers/manual/provider.ts` (▶ NEXT STEP
+  item 3)
+- [ ] the contract-2 batch when its trigger fires (§ Decisions made, 2026-10-14)
+- [ ] **Chad:** QA-1-080 (with QA-2-050), QA-2-045 (TE premium),
   QA-2-047, QA-2-048, QA-2-051, QA-2-055 and item 12 when convenient (recommendations in ▶ NEXT STEP)
 
 ## Log
@@ -635,3 +665,19 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
   QA-2-048 was deferred (no stored pre-lock `p_active` to feed), and seven low findings were registered
   (QA-2-049 to QA-2-055: 1 fixed, 3 open, 3 deferred). CI green on `1c46181` (`ci` 37455321403,
   `secrets` 37455321274). Next: QA-2-054 and QA-2-053, then the merge (▶ NEXT STEP).
+- 2026-10-14 — **Dependency round** (`80fdbbf`, on `main`): MCP SDK 2.3.1, hyparquet 1.31.3 and four
+  dev tools, the same pins as Dependabot PR #7; the runtime allow-list regenerated (still 5
+  packages); `SDK_VERSION` 2.3.1; a randomised property found QA-2-062.
+- 2026-10-14 — **Season-fresh build** (`build/season-fresh`, `9036f06` … ): the owner's four
+  requirements (every season going forward; the schedule followed closely; the newest data; game days
+  from the schedule) built from one spec over three design reviews, in parallel by file ownership on
+  one checkout, each piece test-first and mutation-checked. The game calendar, season model and refresh
+  policy (`0c0673e`, wave 2 `d21f875`: `GAME_DAYS` deleted); store migration 003, the run-start
+  lock, `rate_limited` and the persisted provider pause, `season_check` (`e1aff9a`, `caa7cab`);
+  `ff refresh due`, the child flags, launchd retirement, doctor rows 9/11/23 and the status blocks
+  (`874259c`); the answer-time orchestrator, `meta.refresh`, season-aware gating and the
+  schedule surfacing (`f294cb0`, `f26e2f9`, `812ae7a`); the analytics season-agnostic (`d403c48`)
+  and QA-2-062 (`626f6d4`, `e57acf4`); the Skills (`b6eb079`, `70f3c17`) and the plans, research
+  and QA records (`64d570e`). Open: the provider's `end_week` wiring (▶ NEXT STEP item 3), the fault
+  row for a renamed column (needs a schema-broken parquet fixture), an end-to-end rollover with
+  synthetic roster/stats/injury sources, and the contract-2 batch.

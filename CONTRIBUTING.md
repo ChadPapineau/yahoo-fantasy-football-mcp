@@ -55,6 +55,17 @@ no Yahoo API access, so the product runs on `ManualLeagueProvider` (league setti
 - Other changes may be in progress in the same checkout: keep to the paths your change touches;
   stage explicit paths only — never `git add -A`, `-u` or a directory — and never `git stash`,
   `git checkout <file>`, `git reset --hard`, or edit/format files outside your change.
+- **Season-agnostic code.** The server serves every NFL season, schedule and year without a code
+  change, so no code names a season, a year, a season's week count or a game weekday. Season facts
+  — the season in progress and its phase, its regular and postseason weeks, kickoffs and game days —
+  come from the loaded schedule data (`src/domain/league/season.ts`, `src/config/game-calendar.ts`);
+  a fact that must be written down lives in a reference table stamped with `verified_through_season`
+  (`src/config/reference-vintage.ts`, `src/config/flex-rules.ts`), which warns once a season passes
+  it. Week bounds are structural (`WEEK_INDEX_MAX`) or the tool contract's input bound
+  (`TOOL_INPUT_WEEK_MAX`), never a season length. `tests/lint/season-agnostic.test.ts` enforces it:
+  no year literal (2015–2040) under `src/` outside those two tables, and no `getDay()`/`getUTCDay()`
+  outside the D3 display helper. Tests that depend on the season vary it — synthetic seasons of
+  different lengths and openers (`tests/helpers/season/`), and every UTC offset — never one value.
 - Conventional Commits (`feat|fix|docs|test|chore|refactor|perf|ci|build(scope): subject`).
 - Everything ships with tests (vitest; fast-check where the plan names properties), adversarial
   by default. Coverage gate: plan 05 §7, never lowered to pass a build. Run your module's tests

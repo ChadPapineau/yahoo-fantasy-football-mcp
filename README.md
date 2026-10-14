@@ -32,6 +32,8 @@ A local [Model Context Protocol](https://modelcontextprotocol.io/) server, writt
 - [Skills reference](#skills-reference)
 - [Getting started (Phase 1a)](#getting-started-phase-1a--your-league-via-leagueyaml)
 - [The `ff` CLI as built (Phase 1a)](#the-ff-cli-as-built-phase-1a)
+- [Freshness at answer time](#freshness-at-answer-time)
+- [New season](#new-season)
 - [Configuration](#configuration)
 - [Launch configuration for Claude Desktop and Claude Code](#launch-configuration-for-claude-desktop-and-claude-code)
 - [Security model](#security-model)
@@ -48,6 +50,8 @@ A local [Model Context Protocol](https://modelcontextprotocol.io/) server, writt
 
 **Phase 1a built.** Research, the adversarially reviewed plan ([`adversarial-log.md`](docs/plan/adversarial-log.md), [`changelog.md`](docs/plan/changelog.md)), and the Phase 1a build are complete: foundation, eight modules, the MCP surface and CLI, end-to-end tests over real stdio, and a QA + penetration-test round ([register](docs/qa/2026-09-30-phase1a-qa-pentest.md)). Phase 1b (Yahoo) is not built — there is no API access — and the league comes from your `league.yaml`.
 
+**Season-agnostic, schedule-driven and fresh at answer time** (`build/season-fresh`, 2026-10-14; merging is the owner's decision). The season, its weeks and its game days now come from the published NFL schedule, so the server works for every season and schedule without a code change; one 15-minute launchd tick checks what the schedule says is due (every 15 minutes in the hours before each kickoff, at least hourly all season); every answer first revalidates its data upstream within a few seconds ([Freshness at answer time](#freshness-at-answer-time)); kickoff changes and flexes are detected, shown with the new lock time, and marked on recommendations logged under the old one; and a new season is picked up from the NFL's spring schedule release ([New season](#new-season)).
+
 Four facts shape everything on this page, and the plan carries them openly:
 
 1. **Yahoo API access is application-gated and read-only by default.** Yahoo's developer access page says the Fantasy Sports API "currently provides read access only" and that write access "is not available at this time"; access itself is a form followed by human review, and as of 2026-09-30 no one in the public issue threads reports having been approved through the new form yet. See [`docs/research/03-yahoo-api.md` §A](docs/research/03-yahoo-api.md#a-auth) and [§G](docs/research/03-yahoo-api.md#g-the-three-facts-that-most-constrain-the-architecture). The owner must apply; the plan splits the first phase so that everything that does not need Yahoo is built and accepted first ([Roadmap](#roadmap)).
@@ -58,12 +62,13 @@ Four facts shape everything on this page, and the plan carries them openly:
 | Area | State | Evidence |
 |---|---|---|
 | Research pack (00–06) | ✅ complete, each doc verified against at least one load-bearing claim at source | [`docs/research/`](docs/README.md) |
-| Refined plan (01–10) | ✅ complete, adversarially reviewed, **awaiting owner approval** | [`docs/plan/00-index.md`](docs/plan/00-index.md) |
+| Refined plan (01–10) | ✅ complete, adversarially reviewed, approved 2026-09-30; amended where the build changed it ([plan changelog](docs/plan/changelog.md)) | [`docs/plan/00-index.md`](docs/plan/00-index.md) |
 | Docs CI — every Mermaid block renders, every internal link resolves | ✅ live on every push | [`docs.yml`](.github/workflows/docs.yml) |
 | Secrets CI — gitleaks with Yahoo-specific rules, weekly full-history scan | ✅ live on every push | [`secrets.yml`](.github/workflows/secrets.yml), [`.gitleaks.toml`](.gitleaks.toml) |
 | Dependabot (actions + npm version updates), PR template | ✅ | [`.github/`](.github/) |
 | Yahoo API access | not available — no application (owner decision, 2026-09-30); Phase 1b deferred | [`docs/HANDOFF.md`](docs/HANDOFF.md) |
 | Package, `ci.yml`, server (19 tools, 7 resources, 3 prompts), `ff` CLI, 4 Skills, 3,867 unit + 127 process tests | ✅ Phase 1a, on the manual league | [Getting started](#getting-started-phase-1a--your-league-via-leagueyaml), [QA register](docs/qa/2026-09-30-phase1a-qa-pentest.md) |
+| Season from the schedule, the `refresh-due` tick, answer-time refresh, kickoff-change detection, the new-season step (QA-2-037) | ✅ on `build/season-fresh` | [QA round 2 register § Season and freshness build](docs/qa/2026-10-06-qa-round2.md#season-and-freshness-build-2026-10-14), [CHANGELOG](CHANGELOG.md) |
 
 ---
 
@@ -102,7 +107,7 @@ Every row is traceable to the tool catalog ([`docs/plan/07-tool-catalog.md`](doc
 | Tool | What it does | Source | Priority | Status |
 |---|---|---|---|---|
 | `ff_get_injuries` | Official designations, practice trend, Yahoo and Sleeper status side by side with `sources_agree`, a first-cut `p_active` with its basis; **on game day availability comes from Yahoo status only** (`p_active_basis: "yahoo_gameday_status"`) because inactives exist in no other free source | nflverse `injuries` (Wed–Sat) · Yahoo status · Sleeper | P0 | ✅ |
-| `ff_get_schedule` | Kickoffs, byes, betting lines → implied team totals, roof, surface, rest days, weather where evidenced — the market anchor, one row per game | nflverse `schedules` · The Odds API (optional) · Open-Meteo / NWS | P0 | ✅ |
+| `ff_get_schedule` | Kickoffs, byes, betting lines → implied team totals, roof, surface, rest days, weather where evidenced — the market anchor, one row per game; kickoffs that may still move (Week-18 placeholders, flex windows, times not yet set) are flagged with their re-check time, and recent kickoff changes are named | nflverse `schedules` · The Odds API (optional) · Open-Meteo / NWS | P0 | ✅ |
 | `ff_get_player_usage` | Per-game opportunity and efficiency inputs, trailing-window summaries with change points, `xFP − actual` gap; `routes_proxy` named honestly (no free in-season route data exists) | nflverse `stats_player_week`, `snap_counts`, pbp subset · ffopportunity | P1 | 📋 |
 | `ff_get_depth_chart` | A team's depth chart with the snap-share cross-check beside it | nflverse `depth_charts` · Sleeper | P1 | 📋 |
 | `ff_get_defense_profile` | Regressed opponent adjustments (shrunk, ramping with weeks), pace, pass rate, pressure — never a raw points-allowed table | nflverse `stats_team_week`, pbp · FTN charting | P1 | 📋 |
@@ -146,16 +151,16 @@ Each engine implements a named method from the analytics research; every result 
 
 | Feature | What it does | Priority | Status |
 |---|---|---|---|
-| `ff_get_status` tool · `ff://status` resource | Server version and protocol eras, auth and provisioning state, capabilities, limiter state, per-source freshness and licence, crosswalk coverage, store size, pending journal rows, launchd job results, the offline doctor rows | P0 | ✅ |
+| `ff_get_status` tool · `ff://status` resource | Server version and protocol eras, auth and provisioning state, capabilities, limiter state, **the NFL season and phase from the schedule (and whether your league file matches it)**, **the game calendar, recent kickoff changes and tentative weeks**, per-source freshness (including a season upstream has not published yet), licence, when the tick next checks each source and any provider pause, crosswalk coverage, store size, pending journal rows, the launchd jobs' heartbeats, the offline doctor rows | P0 | ✅ |
 | `ff auth` | One-time Yahoo login; `oob` by default (no port, no certificate, no callback to register), an https-localhost listener on a **fixed** port as opt-in | Phase 1b | 📋 |
-| `ff doctor` | Twenty-two checks, offline by default (Node ≥ 24.15, absolute launch paths, mode bits, token file, secret file, gate key, store health, dataset ages, pending journal, launchd jobs, `.npmrc`, the write flag's session warning, stale `dist/`, the client's own MCP log tail); `--online` adds token validity, provisioning, clock skew and source reachability; `--fix` repairs with consent; never rotates a token | Phase 1a/1b | 📋 |
-| `ff status` | The one-page dashboard the resource and tool also serve | Phase 1a | 📋 |
-| `ff refresh <source\|all>` | The **only** writer of dataset files — polls, downloads, asserts schema and codec, publishes a fresh per-source SQLite file by atomic rename | Phase 1a | 📋 |
-| `ff install-launchd` / `ff uninstall` | Generates per-job launchd plists with absolute paths; removes what it created and prints what it will not touch | Phase 1a | 📋 |
-| `ff print-config --client desktop\|code` | Emits the launch-config snippet with **resolved absolute paths** and no secret values | Phase 1a | 📋 |
+| `ff doctor` | Twenty-three checks, offline by default (Node ≥ 24.15, absolute launch paths, mode bits, token file, secret file, gate key, store health, dataset ages — a season not yet published upstream is a warning, never a failure —, pending journal, launchd jobs — retired or out-of-date plists and the refresh tick's heartbeat —, `.npmrc`, the write flag's session warning, stale `dist/`, the client's own MCP log tail, **the season**: league file vs the NFL season, reference tables past their vintage, the week bound); `--online` adds token validity, provisioning, clock skew and source reachability; `--fix` repairs with consent; never rotates a token | Phase 1a/1b | ✅ 1a rows |
+| `ff status` | The one-page dashboard the resource and tool also serve, with the same season and schedule blocks | Phase 1a | ✅ |
+| `ff refresh <source\|all\|due>` | The **only** writer of dataset files — polls, downloads, asserts schema and codec, publishes a fresh per-source SQLite file by atomic rename; `due` is the schedule-driven tick | Phase 1a | ✅ |
+| `ff install-launchd` / `ff uninstall` | Generates the launchd plists with absolute paths (and retires an earlier version's jobs); removes what it created and prints what it will not touch | Phase 1a | ✅ |
+| `ff print-config --client desktop\|code` | Emits the launch-config snippet with **resolved absolute paths** and no secret values | Phase 1a | ✅ |
 | `ff confirm <id>` | The terminal confirmation channel for a prepared write (TTY required) | Phase W | 📋 |
 | `ff smoke` | Live smoke against your real league — lists leagues, reads settings, scores one roster week against Yahoo's totals; run by you, never by CI | Phase 1b | 📋 |
-| Zero-token automation | Nightly and game-day dataset refreshes, roster and free-agent snapshots with diffs, transactions append, token check, pre-kickoff check, journal reconcile, weekly prune and backup — every job a CLI subcommand under launchd, every failure a `refresh_log` row and a rate-limited macOS notification ([`docs/plan/06-automation-inventory.md`](docs/plan/06-automation-inventory.md)) | Phase 1a → 2 | 📋 |
+| Zero-token automation | The schedule-driven `refresh-due` tick for every dataset and weekly prune and backup (Phase 1a, ✅); roster and free-agent snapshots with diffs, transactions append, token check, pre-kickoff check, journal reconcile (Phase 1b/2, 📋) — every job a CLI subcommand under launchd, every failure a `refresh_log` row and a rate-limited macOS notification ([`docs/plan/06-automation-inventory.md`](docs/plan/06-automation-inventory.md)) | Phase 1a → 2 | ✅ 1a / 📋 |
 | Docs CI (Mermaid render + link check) and secrets CI (gitleaks, weekly history scan) | Protect the plan documents and the public repository today | Phase 0 | ✅ |
 
 ---
@@ -179,7 +184,7 @@ flowchart LR
     SKILLS["Skills bundle<br/>12 procedures the model follows"]
     STORE["SQLite store + per-source dataset files<br/>~/.cache/fantasy-football-mcp/"]
     TOK["OAuth tokens, gate key, client secret<br/>~/.config/fantasy-football-mcp/ (0700, 0600)"]
-    JOBS["ff refresh jobs<br/>launchd, a separate process"]
+    JOBS["ff refresh<br/>the launchd tick or an on-demand child, a separate process"]
   end
   subgraph EXT["External — the only hosts the server may reach"]
     YAHOO["Yahoo Fantasy Sports API<br/>XML over HTTPS, OAuth 2.0"]
@@ -198,6 +203,7 @@ flowchart LR
   SKILLS -. "loaded by the client" .-> CC
   SRV --> STORE
   SRV --> TOK
+  SRV -. "starts on demand, bounded" .-> JOBS
   JOBS --> STORE
   SRV -- "cache-first, one global limiter" --> YAHOO
   JOBS -- "timestamp.txt poll, parquet" --> NFLV
@@ -268,7 +274,7 @@ flowchart TB
     RSS["RotoWire + ESPN RSS<br/>every 15 min in season"]
     WX["Open-Meteo / NWS<br/>hourly for the coming outdoor games"]
   end
-  subgraph REFRESH["ff refresh source — launchd, never inside the server"]
+  subgraph REFRESH["ff refresh source — the launchd tick or an on-demand child, never inside the server"]
     POLL["poll the version<br/>timestamp.txt or release updated_at"]
     SKIP["unchanged — exit 0"]
     DL["download to a temp file"]
@@ -547,7 +553,7 @@ Every tool below comes from [`docs/plan/07-tool-catalog.md`](docs/plan/07-tool-c
 |---|---|---|---|---|---|---|
 | `ff_get_player_usage` | Opportunity and efficiency inputs with trailing summaries | `players: PlayerSelector`, `window?` 1–17, `include_prior_season?` | per player: `trailing` (snap, target, carry, red-zone shares, WOPR, `xfp_gap_sum`, `change_point`), `games[]` (full only), `role_confidence_games`, `data_gaps[]`; `routes_proxy` named as a proxy | EX | P1 | 📋 |
 | `ff_get_injuries` | Designations, practice trend, `p_active` | `players?: PlayerSelector` (default: my roster), `only_flagged?` | per player: `official`, `yahoo`, `sleeper` blocks with `as_of`; `p_active` + `p_active_basis`; `trend`; `ir_eligible`; `sources_agree` (suppressed on game day); `game_day` | EX | P0 | ✅ |
-| `ff_get_schedule` | Kickoffs, byes, lines, weather | `weeks?` (≤ 6), `nfl_team?`, `include_weather?`, `include_lines?` | `games[]` with `kickoff_et`, `roof`, `rest_days`, `lines { spread_line, total_line, implied, moneyline, secondary }`, `weather`; `byes` | EX | P0 | ✅ |
+| `ff_get_schedule` | Kickoffs, byes, lines, weather | `weeks?` (≤ 6), `nfl_team?`, `include_weather?`, `include_lines?` | `games[]` with `kickoff_et`, `kickoff_tentative`, `tentative_reason`, `flex_deadline`, `roof`, `rest_days`, `lines { spread_line, total_line, implied, moneyline, secondary }`, `weather`; `byes`; kickoff-change and tentative-week warnings | EX | P0 | ✅ |
 | `ff_get_depth_chart` | Depth chart with the snap cross-check | `nfl_team?` or `player`, `positions?` | `teams[].groups[].slots[]` with `rank`, `snap_pct_last3`; `sleeper_cross_check` | EX | P1 | 📋 |
 | `ff_get_defense_profile` | Regressed opponent adjustments | `nfl_team?` or `all`, `position?`, `window_weeks?` 4–17 | `defenses[]` with `afpa` per position (allowed, league mean, adjusted, `shrink_w`, multiplier), pace, pass rate, pressure, EPA allowed; `evidence_note` | EX | P1 | 📋 |
 | `ff_get_news` | RSS items matched to players with a claim extract | `players?`, `nfl_team?`, `since_hours?` 1–168, `limit?` 1–50, `sources?` | `items[]` with `players_matched[]`, `title`/`blurb` (wrapped), `url` (text only), `claim { type, direction, extractor }`, `reliability_prior` | EX | P1 | 📋 |
@@ -571,8 +577,8 @@ Every tool below comes from [`docs/plan/07-tool-catalog.md`](docs/plan/07-tool-c
 | `ff_analyze_evidence` | News-vs-stats reconciliation with a calibrated table | `player`, `claim? { text ≤ 400, source?, time?, type? }` | `flag`, `prior`, `evidence[]`, `posterior`, `what_would_confirm[]`, `consequence`, `calibration_state { table_n, note }`, `rec` | AN | P2 | 📋 |
 | `ff_analyze_league_activity` | League activity digest | `since_days?` 1–30, `include_rival_needs?` | `transactions` by team with FAAB spent, `standings_movement[]`, `pending_trades_visible[]`, `top_added[]`/`top_dropped[]`, `rival_needs[]`, `faab_price_model`, `rec` | AN | P1 | 📋 |
 | `ff_record_recommendation` | Write the recommendation log | `kind`, `week`, `rec`, `alternatives[]`, `source_calls[]`, `followed_hint?`, `client_ref?`, `note?` ≤ 200 | `log_id`, `recorded_at`, `deduplicated` | LW | P0 | ✅ |
-| `ff_analyze_retrospective` | Score last week's calls | `week?`, `kinds?`, `min_n?` (30) | `calls[]` (`followed`, `regret`, `decisive`), `metrics` (`per_player` CRPS/pinball/coverage/Spearman, `swap_regret`, `brier` per type or "n too small"), `n_by_metric[]`, `sample_size_caveats[]`, `rec` | AN | P0 | ✅ |
-| `ff_list_recommendations` | Browse the log | `week?`, `kind?`, `limit?`, `offset?` | `items[]` with `action_summary` (path-listed as untrusted), `followed`; `page` | OP | P0 | ✅ |
+| `ff_analyze_retrospective` | Score last week's calls | `week?`, `kinds?`, `min_n?` (30) | `calls[]` (`followed`, `regret`, `decisive`, `lock_status`), `metrics` (`per_player` CRPS/pinball/coverage/Spearman, `swap_regret`, `brier` per type or "n too small"), `n_by_metric[]`, `sample_size_caveats[]`, `rec` | AN | P0 | ✅ |
+| `ff_list_recommendations` | Browse the log | `week?`, `kind?`, `limit?`, `offset?` | `items[]` with `action_summary` (path-listed as untrusted), `followed`, `lock_status`; `page` | OP | P0 | ✅ |
 | `ff_analyze_scoring` | What-if scoring under settings variants | `lines[1..25]`, `variants?[0..5]` | `results[]` with `points_league`, `by_variant` | AN | later | 📋 |
 | `ff_analyze_draft` | Draft assistant | — | — | AN | later | 📋 |
 
@@ -600,7 +606,7 @@ Every `ff_prepare_*` returns `{ prepared_id, kind, diff { human, structured[] },
 
 | Tool | Purpose | Key inputs | Output summary | Fam. | Prio. | Status |
 |---|---|---|---|---|---|---|
-| `ff_get_status` | The status snapshot | `include_checks?` | `server` (version, SDK, protocol eras, node, `tool_contract`), `auth`, `capabilities { read, write {…} }`, `league`, `limiter`, `sources[]` with licence and age, `crosswalk`, `store`, `journal`, `jobs[]`, `checks[]` | OP | P0 | ✅ |
+| `ff_get_status` | The status snapshot | `include_checks?` | `server` (version, SDK, protocol eras, node, `tool_contract`), `auth`, `capabilities { read, write {…} }`, `league`, `limiter`, `season` (NFL season, phase and week from the schedule; the league file's season and whether it matches; not-published sources; reference tables past their vintage; the week bound), `schedule` (calendar, recent kickoff changes, tentative weeks, next check), `sources[]` with licence, age, freshness (`fresh`, `stale`, `expired`, `never_loaded`, `unreadable`, `not_published`), `next_check_at`, `backoff_until`, `crosswalk`, `store`, `journal`, `jobs[]` (tick, prune and backup heartbeats), `checks[]` | OP | P0 | ✅ |
 | `ff_get_playbook` | A Skill's procedure text for clients without Skills or prompts | `skill` | `body`, `references[]` | OP | later | 📋 |
 | `ff_debug_echo` · `ff_debug_elicit` | Two throwaway spikes, **fixture mode only**: does the client forward `structuredContent` to the model? does it render a form-mode elicitation? Results go to `docs/HANDOFF.md` and are deleted afterwards | — | a nonce · an APPROVE/REJECT round trip | OP | Phase 1a week 1 · Phase 1b | 📋 |
 
@@ -636,7 +642,7 @@ Prompts (`ff.<workflow>`, one per user-invocable Skill, bodies generated from `S
 | `WRITE_NOT_AVAILABLE` | A write tool was called while the app has read scope | no |
 | `RATE_LIMITED` | HTTP 999 / connection reset after backoff (3 attempts, full jitter, cap 60 s) | after `retry_after_s` |
 | `UPSTREAM_UNAVAILABLE` | 5xx, timeout, malformed body, or any network error — stale cache is served in `data` with a warning where one exists | yes |
-| `STALE_ONLY` | Only data older than the class's hard limit exists and `allow_stale` was not set | yes |
+| `STALE_ONLY` | Only data older than the class's hard limit exists and `allow_stale` was not set. The message says why: the file is missing or unreadable; a refresh is still running (ask again in a minute); the refresh failed (the hint names the code); or upstream has not published that season yet (upstream's state — no `ff refresh` changes it) | yes, except a season not published |
 | `STORE_BUSY` | A required local write could not take the SQLite lock within ~1 s (a refresh or a second client process) | shortly |
 | `INVALID_KEY` · `VALIDATION` · `NOT_FOUND` | Key grammar · zod failure · Yahoo "data not found" | no |
 | `CONFIRMATION_REQUIRED` · `CONFIRMATION_EXPIRED` · `PRECONDITION_CHANGED` · `CONFIRMATION_DENIED` | Confirmation-gate states | see the gate |
@@ -697,11 +703,16 @@ No Yahoo account, API key or password is involved anywhere. You need Node and ab
    probability.
 7. **Use it:** "who should I start this week?" (`start-sit`), "which defense should I stream?"
    (`stream-kdef`), and after the week is final, `/retro` to score last week's advice.
-8. **Optional:** `node dist/cli.js install-launchd` schedules the data refreshes (nightly and game-day).
+8. **Recommended:** `node dist/cli.js install-launchd` installs the `refresh-due` tick (every 15 minutes and at login; it checks the NFL schedule and refreshes only what is due) and the weekly prune and backup. Not on macOS: schedule `ff refresh due` every 15 minutes with systemd or cron (and `ff prune`, `ff backup` weekly). Without a tick the answers still revalidate their data as you ask ([Freshness at answer time](#freshness-at-answer-time)), but nothing is checked between conversations.
 
 Upgrades: `git pull && npm ci && npm run build && node dist/cli.js refresh all`, then `doctor` (it warns when
 the client is launching a stale `dist/`; dataset files from an older schema are refused until refreshed).
-After a Node upgrade re-run `print-config`. Removal: `node dist/cli.js uninstall` (data only with `--purge --yes`).
+After a Node upgrade re-run `print-config`. **Upgrading to the season-fresh build:** run
+`node dist/cli.js install-launchd` once — it installs the `refresh-due` tick and removes the earlier per-source
+jobs (`nflverse-schedules`, `nflverse-daily`, `nflverse-stats`, `weather`); until then those keep working and
+`doctor` row 11 says so. The store migrates itself to version 3 on first use (a backup is taken first); an
+older build then refuses the store — to roll back, restore the backup and run the older build's
+`install-launchd`. Removal: `node dist/cli.js uninstall` (data only with `--purge --yes`).
 
 ---
 
@@ -711,20 +722,49 @@ Phase 1a is built on the `build/phase-1a` branch (the manual league: `<config>/l
 
 | Subcommand | What it does |
 |---|---|
-| `serve` | The MCP server on stdio (what a client launches). No network at startup; stdin EOF, SIGTERM, SIGINT, SIGHUP, EPIPE or reparenting → a clean shutdown |
-| `refresh <target> [--seasons 2025,2026] [--force] [--notify] [--json]` | The only writer of dataset files. Targets: `all`, `nflverse`, `nflverse:schedules`, `nflverse:daily` (injuries + roster_weekly), `nflverse:stats`, the single source ids, `weather` |
+| `serve` | The MCP server on stdio (what a client launches). No network at startup, and no network call in its own process ever; before an answer it may start `ff refresh --on-demand` as a bounded child ([Freshness at answer time](#freshness-at-answer-time)); stdin EOF, SIGTERM, SIGINT, SIGHUP, EPIPE or reparenting → a clean shutdown (live children get SIGTERM) |
+| `refresh <target…> [--seasons <years>] [--force] [--notify] [--json]` | The only writer of dataset files. Targets (several at once; schedules first): `all`, `nflverse`, `nflverse:schedules`, `nflverse:daily` (injuries + roster_weekly), `nflverse:stats`, the single source ids, `weather`. Without `--seasons` the seasons follow the NFL season in progress from the loaded schedule (schedules: last, this and next season). A run takes the source's lock before its first request (a second run is skipped as `locked`), and a 429 / Retry-After pauses the provider for up to 2 h (`--force` overrides the pause for a manual run) |
+| `refresh due [--dry-run] [--json] [--notify]` | **The tick.** Reads the NFL schedule and refreshes only what is due: schedules every 15 min from 3 h before each kickoff, every 30 min within a day of one, hourly whenever a kickoff is within 7 days, every 6 h off-season; injuries every 2 h near games; stats hourly after games; rosters every 6 h; weather hourly while an outdoor game is in the forecast range. Never within 14 min of the last attempt; backs off 15/30/60 min after failures. After a schedules change it records kickoff changes and (with `--notify`) sends one notification. Nothing due → exits in well under a second with no network. `--dry-run` prints each decision and why, without network or writes |
+| `refresh --on-demand --no-migrate --expect-version <v> …` | The answer-time child `serve` starts (not for interactive use): at most 2 attempts, a 60 s self-deadline, exit 2 before any request when the store needs a migration or the installed version differs from the server's |
 | `status [--json]` · `doctor [--json] [--online] [--fix --yes]` | The freshness dashboard; the install diagnosis (exit code = worst finding). Neither creates nor migrates the store |
 | `print-config --client desktop\|code` | The launch config with absolute paths and no secrets |
-| `install-launchd [--jobs a,b] [--dry-run]` · `uninstall [--dry-run] [--purge [--purge-config] --yes]` | The six LaunchAgents below; removal (data only with `--purge --yes`) |
+| `install-launchd [--jobs a,b] [--dry-run]` · `uninstall [--dry-run] [--purge [--purge-config] --yes]` | The three LaunchAgents below, retiring an earlier version's jobs; removal of current and retired jobs (data only with `--purge --yes`) |
 | `prune` · `backup [--to <abs path>]` | Expired cache rows and temp debris; a consistent `store.sqlite` backup (4 weekly copies kept) |
 
 **Exit codes:** 0 ok · 1 failure · 2 usage or configuration · 5 `serve` forced shutdown.
 
 **Fixture mode:** with `FF_FIXTURE_DIR=<checkout>/fixtures`, `ff refresh` reads the committed fixtures through the production HTTP client's allow-list/size/redirect code (no socket is opened) and `serve` registers the fixture-only `ff_debug_echo`. Without `--seasons`, fixture mode requests the seasons the fixture tree records (`default_seasons` in `fixtures/nflverse/manifest.json`: 2025–2026 schedules, 2026 for the rest) instead of the clock-derived production defaults, so a bare `refresh all` publishes every source. For example, into a throwaway cache: `FF_FIXTURE_DIR=$PWD/fixtures FF_CACHE_DIR=<tmp> node dist/cli.js refresh all`.
 
-**Scheduled jobs** (`ff install-launchd`, local time; kickoffs are Eastern, so on a non-Eastern Mac they are approximate): `nflverse-schedules` every 30 min Thu/Sun/Mon and every 6 h otherwise · `nflverse-daily` every 6 h (04:30, 10:30, 16:30, 22:30), inside the 12 h injuries TTL · `nflverse-stats` 04:30 daily plus Sun 13:00/17:00/21:00 and 00:30 Fri/Mon/Tue · `weather` hourly at :05 Wed–Mon (dropped when `FF_WEATHER_SOURCE=off`) · `store-prune` Sun 03:00 · `store-backup` Sun 03:10.
+**Scheduled jobs** (`ff install-launchd`): `refresh-due` — `ff refresh due --notify` at minutes 0, 15, 30 and 45 of every hour and at login (the same instants in every time zone; a run missed while the Mac slept fires once on wake) · `store-prune` Sun 03:00 · `store-backup` Sun 03:10 (local time). Each writes a heartbeat that `ff doctor` row 11 and `ff_get_status` `jobs[]` read. The earlier per-source jobs (`nflverse-schedules`, `nflverse-daily`, `nflverse-stats`, `weather`) are retired: `install-launchd` removes them, and `--jobs weather` is a usage error naming `refresh-due`. Off macOS, run `ff refresh due` every 15 minutes with systemd or cron.
 
 **Checks:** `npm test` (unit + in-process integration), `npm run test:coverage` + `npm run check:coverage` (the gate), `npm run build && npm run test:process` (spawned `dist/` server: lifecycle, end-to-end over stdio, the Skills dry run, latency), `npm run smoke` (the A3a smoke over real stdio, both protocol eras), `npm run check:skills`.
+
+---
+
+## Freshness at answer time
+
+**The guarantee.** When your machine is online, every answer reflects the newest upstream release that existed at most 15 minutes before it for the fast inputs — the schedule with kickoffs and betting lines, injuries, and weather (for weather, the current hour) — or the answer says why not. The slower inputs (weekly stats, weekly rosters) are revalidated in the background and waited on only when they are missing, unreadable or past their hard limit. This is the freshest *upstream* release: nflverse publishes injury reports about once a day, and no free source has game-day inactives.
+
+**How.** Before a tool answers, the server checks the sources that tool reads. A fast source last checked 15 or more minutes ago is revalidated: the server starts `ff refresh --on-demand` as a separate child process — fixed arguments, a short list of non-secret settings, no Yahoo or Odds credentials, no text from the conversation — and waits up to 6 seconds (up to 15 seconds to repair a source the answer cannot do without). Many questions at once share one refresh per source; at most 3 run at once and 20 an hour. The server process itself never downloads anything; every download still goes through `ff refresh`'s host allow-list, schema checks and atomic publish. Set `FF_ON_DEMAND_REFRESH=background` to never wait, or `off` to rely on the tick alone.
+
+**What you see.**
+- Usually nothing: the data was checked recently, or the refresh finished within the wait.
+- A refresh still running at 6 s: the answer uses the data it has and says "refreshing … in the background … ask again in a minute for newer data"; the next question gets the new release.
+- Offline, or the provider failed or asked to slow down: the answer uses the stored release and names its age ("could not refresh … this answer uses the release checked 2 h ago"; "not retrying … until …"). Data inside its hard limit is still used.
+- Nothing usable at all: `STALE_ONLY`, whose message says whether a refresh is still running (ask again in a minute), failed (with the reason), or whether upstream simply has not published that season yet.
+- After you upgrade `ff` under a running client: "restart the client: the installed ff no longer matches this server" — the answers keep using the stored data until you restart.
+
+Your client must allow a tool call at least 15 seconds (the TypeScript MCP client's default is 60 s; Claude Desktop's is not verified — if yours is shorter, use `FF_ON_DEMAND_REFRESH=background`).
+
+**Kickoff changes.** Every schedules refresh is compared with the previous one. A flexed game, a game moved between days or weeks, a new venue, or a game added or removed is recorded; `ff_get_status` lists the last 14 days of changes, the roster, schedule, projection and analysis tools name the ones in the weeks you ask about ("kickoff changed for CHI@BUF (week 15): Sat … 20:20 ET → Sun … 13:00 ET …; lock times use the new kickoff"), and with the tick installed you get one macOS notification per change set. Lock times always use the current kickoff. A recommendation logged before its game moved is marked `lock_status: "moved"` in the log and the weekly review. Weeks whose kickoffs may still change — Week 18 before the NFL sets it, games still inside the NFL's flex notice window, games without a time — are flagged with the time to re-check.
+
+## New season
+
+Nothing is tied to a particular year. The NFL's schedule for the next season is picked up automatically when it is published (typically in May): the tick always fetches last, this and next season's schedule, the server's idea of the season in progress — preseason, regular season, postseason, off-season, and the week — comes from the loaded games, and stats, injuries and weekly rosters follow that season. Before the first injury report or week-1 stats exist upstream, those sources read `not_published`: the answers name the missing input and never ask you to refresh.
+
+Your `league.yaml` names one season. When the NFL season moves on, `ff_get_status` (`season.league_matches: false`), `ff doctor` row 23 and the analytics tools' warnings say so, and the `onboard` Skill offers its **new-season step** ("set up my new season"): it keeps last season's file as `league-<season>.yaml` (0600) in the same directory, asks only what changed — including the last week of the regular season, since seasons differ in length — and shows a new `league.yaml` with the same league key, the new season and your post-draft roster (empty until the draft). Nothing changes until you say yes, and the Skill never writes the file itself.
+
+**Last season's review after the rollover:** the weekly review reads the league file's season. To review the previous season, set `FF_LEAGUE_FILE` to `<config>/league-<season>.yaml` in the client's server entry (`FF_LEAGUE_FILE=… node dist/cli.js print-config --client …` prints it), restart the client, ask, then remove it again. A `season` argument for the review is planned with the next tool-contract change.
 
 ---
 
@@ -748,6 +788,7 @@ Phase 1a is built on the `build/phase-1a` branch (the manual league: `<config>/l
 | `FF_AUTH_PORT` | no | `8765` | The opt-in `ff auth --listener` port — fixed, never falls back, because the callback must match Yahoo's registration exactly |
 | `FF_LOG_LEVEL` | no | `info` | `error` · `warn` · `info` · `debug`; JSON lines on **stderr only** (stdout is the MCP transport) |
 | `FF_WEATHER_SOURCE` | no | `open-meteo` | `open-meteo` (keyless, non-commercial terms) or `nws` (keyless, US venues, public domain) |
+| `FF_ON_DEMAND_REFRESH` | no | `wait` (`off` in fixture mode unless set) | `wait`: revalidate a tool's data before answering, up to 6 s (15 s to repair); `background`: start the refresh but never wait; `off`: never refresh at answer time — the tick alone keeps data current. Any other value is a configuration error. `ff print-config` copies it ([Freshness at answer time](#freshness-at-answer-time)) |
 | `ODDS_API_KEY` | no | unset (source disabled) | The Odds API free tier as a secondary lines source (≤ 3 polls a day) |
 | `FF_FIXTURE_DIR` | test only | unset | Serves recorded, anonymised Yahoo fixtures instead of the network; refused when `YAHOO_CLIENT_ID` is set |
 
