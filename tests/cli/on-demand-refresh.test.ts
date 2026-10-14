@@ -6,6 +6,7 @@
 // outcomes from the child's JSON cross-checked with refresh_log, a spawn or version failure disabling
 // the process's on-demand refresh, `background` never waiting and `off` never spawning.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ON_DEMAND } from "../../src/config/cadence.js";
 import { scheduleCalendar, type GameCalendar } from "../../src/config/game-calendar.js";
 import type { DatasetSourceId } from "../../src/config/freshness.js";
 import type { OnDemandMode, WeatherSource } from "../../src/config/schema.js";
@@ -20,6 +21,7 @@ import { systemClock } from "../../src/domain/clock.js";
 import type { ScheduleView } from "../../src/domain/league/calendar.js";
 import {
   CHILD_ENV_KEYS,
+  SPAWN_RETRY_MS,
   createOnDemandRefresher,
   type ChildHandle,
   type OnDemandPorts,
@@ -105,7 +107,7 @@ interface FakeChild {
   readonly env: Readonly<Record<string, string>>;
   readonly kills: string[];
   exit(code: number | null, stdout?: string): void;
-  fail(code: string): void;
+  fail(code: string | undefined): void;
 }
 
 function fakeSpawner(): { spawn: Spawner; children: FakeChild[] } {
@@ -127,7 +129,7 @@ function fakeSpawner(): { spawn: Spawner; children: FakeChild[] } {
         resolve({ code, stdout });
       },
       fail: (code) => {
-        reject(Object.assign(new Error("spawn failed"), { code }));
+        reject(Object.assign(new Error("spawn failed"), code === undefined ? {} : { code }));
       },
     });
     const handle: ChildHandle = {
@@ -425,6 +427,49 @@ describe("a season upstream has not published yet", () => {
   });
 });
 
+describe("a child that finds the run lock taken joins that run within the budget", () => {
+  it("the child answers locked at 300 ms; the other run lands v2 at 2 s: `updated`, not `joined`", async () => {
+    // the tick takes refresh:<source> between the server's decision and the child's start (its
+    // quarter-hour boot): before 2026-10-14 the answer said "another ff refresh is updating …" at
+    // 300 ms although the other run finished well inside the 6 s budget
+    for (const source of ["nflverse:schedules", "nflverse:injuries"] as const) {
+      t = rig();
+      t.log.ok(source, `${source}-v1`, Date.now() - 2 * H);
+      const r = t.make();
+      const t1 = Date.now();
+      const call = r.ensureFresh([source], { requestId: RID(1) });
+      await vi.advanceTimersByTimeAsync(100);
+      t.locks.set(source, { pid: 777, acquired_at: iso(Date.now()) });
+      await vi.advanceTimersByTimeAsync(200);
+      t.spawner.children[0]!.exit(0, json({ source, status: "skipped", reason: "locked" }));
+      await vi.advanceTimersByTimeAsync(1_700);
+      t.log.ok(source, `${source}-v2`, Date.now());
+      t.locks.delete(source);
+      await vi.advanceTimersByTimeAsync(300);
+      const rep = await call;
+      expect(row(rep, source), source).toMatchObject({ outcome: "updated", code: null });
+      expect(Date.now() - t1).toBeLessThanOrEqual(2_300);
+    }
+  });
+
+  it("a lock still held when the budget ends stays `joined` (locked)", async () => {
+    const r = t.make();
+    const call = r.ensureFresh(["nflverse:schedules"], { requestId: RID(1) });
+    await vi.advanceTimersByTimeAsync(100);
+    t.locks.set("nflverse:schedules", { pid: 777, acquired_at: iso(Date.now()) });
+    t.spawner.children[0]!.exit(
+      0,
+      json({ source: "nflverse:schedules", status: "skipped", reason: "locked" }),
+    );
+    await vi.advanceTimersByTimeAsync(7_000);
+    expect(row(await call, "nflverse:schedules")).toMatchObject({
+      outcome: "joined",
+      code: "locked",
+    });
+    expect(Date.now() - T0).toBeLessThanOrEqual(7_100);
+  });
+});
+
 describe("joining another process's run (no spawn)", () => {
   it("polls refresh_log while the other process holds refresh:<source>; its outcome is reported", async () => {
     t.locks.set("nflverse:injuries", { pid: 777, acquired_at: iso(T0 - 2_000) });
@@ -584,27 +629,86 @@ describe("decisions before any spawn", () => {
   });
 });
 
-describe("failures that disable on-demand refresh for the process", () => {
-  it("ENOENT (async spawn error) → failed:spawn, disabled, one warning; later calls do nothing", async () => {
-    const r = t.make();
-    const call = r.ensureFresh(["nflverse:injuries"], { requestId: RID(1) });
-    await vi.advanceTimersByTimeAsync(10);
-    t.spawner.children[0]!.fail("ENOENT");
-    expect(row(await call, "nflverse:injuries")).toMatchObject({
-      outcome: "failed",
-      code: "spawn",
+describe("spawn failures: a permanent one disables answer-time refresh, a transient one backs off", () => {
+  // Only a binary that is missing or not executable, or a sandbox / Node permission model refusing
+  // child processes, lasts as long as the server: EAGAIN (the per-user process limit), EMFILE or
+  // ENOMEM on a loaded machine pass. Before 2026-10-14 every spawn error turned answer-time refresh
+  // off for the life of the server, and only the call that hit it said so.
+  for (const code of ["ENOENT", "EACCES", "EPERM", "ERR_ACCESS_DENIED"])
+    it(`${code} (async spawn error) → failed:spawn with no retry, disabled, one warning; later calls do nothing`, async () => {
+      const r = t.make();
+      const call = r.ensureFresh(["nflverse:injuries"], { requestId: RID(1) });
+      await vi.advanceTimersByTimeAsync(10);
+      t.spawner.children[0]!.fail(code);
+      expect(row(await call, "nflverse:injuries")).toMatchObject({
+        outcome: "failed",
+        code: "spawn",
+        next_retry_at: null,
+      });
+      expect(r.state()).toBe("disabled_spawn");
+      await vi.advanceTimersByTimeAsync(H);
+      expect(await r.ensureFresh(["nflverse:schedules"], { requestId: RID(2) })).toBeNull();
+      expect(t.spawner.children).toHaveLength(1);
+      expect(t.lines.filter((l) => l.event === "refresh.on_demand_disabled")).toHaveLength(1);
     });
-    expect(r.state()).toBe("disabled_spawn");
-    expect(await r.ensureFresh(["nflverse:schedules"], { requestId: RID(2) })).toBeNull();
-    expect(t.spawner.children).toHaveLength(1);
-    expect(t.lines.filter((l) => l.event === "refresh.on_demand_disabled")).toHaveLength(1);
+
+  it("a spawner that throws synchronously (EACCES, EPERM: a sandbox) is the same", async () => {
+    for (const code of ["EACCES", "EPERM"]) {
+      const r = createOnDemandRefresherThrowing(code);
+      const rep = await r.ensureFresh(["nflverse:injuries"], { requestId: RID(1) });
+      expect(row(rep, "nflverse:injuries")).toMatchObject({
+        outcome: "failed",
+        code: "spawn",
+        next_retry_at: null,
+      });
+      expect(r.state(), code).toBe("disabled_spawn");
+    }
   });
 
-  it("a spawner that throws synchronously (EACCES, a sandbox) is the same", async () => {
-    const r = createOnDemandRefresherThrowing();
+  for (const code of ["EAGAIN", "EMFILE", "ENOMEM", undefined])
+    it(`${String(code)} (transient) → failed:spawn with its retry time; nothing spawned for 15 min; then it spawns again`, async () => {
+      const r = t.make();
+      const call = r.ensureFresh(["nflverse:injuries"], { requestId: RID(1) });
+      await vi.advanceTimersByTimeAsync(10);
+      const failedAt = Date.now();
+      t.spawner.children[0]!.fail(code);
+      expect(row(await call, "nflverse:injuries")).toMatchObject({
+        outcome: "failed",
+        code: "spawn",
+        next_retry_at: iso(failedAt + SPAWN_RETRY_MS),
+      });
+      expect(r.state()).toBe("wait");
+      // inside the backoff: no child, the answer says when it retries
+      await vi.advanceTimersByTimeAsync(5 * MIN);
+      const pending = r.ensureFresh(["nflverse:schedules"], { requestId: RID(2) });
+      await vi.advanceTimersByTimeAsync(ON_DEMAND.callCapMs);
+      const held = await pending;
+      expect(row(held, "nflverse:schedules")).toMatchObject({
+        outcome: "backoff",
+        code: "spawn",
+        next_retry_at: iso(failedAt + SPAWN_RETRY_MS),
+      });
+      expect(t.spawner.children).toHaveLength(1);
+      // an hour later answer-time refresh works again
+      await vi.advanceTimersByTimeAsync(H);
+      const again = r.ensureFresh(["nflverse:schedules"], { requestId: RID(3) });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(t.spawner.children).toHaveLength(2);
+      t.log.check("nflverse:schedules", Date.now());
+      t.spawner.children[1]!.exit(0, json({ source: "nflverse:schedules", status: "unchanged" }));
+      expect(row(await again, "nflverse:schedules")?.outcome).toBe("revalidated");
+      expect(t.lines.filter((l) => l.event === "refresh.on_demand_disabled")).toEqual([]);
+    });
+
+  it("a synchronous transient throw (EAGAIN) backs off the same way", async () => {
+    const r = createOnDemandRefresherThrowing("EAGAIN");
     const rep = await r.ensureFresh(["nflverse:injuries"], { requestId: RID(1) });
-    expect(row(rep, "nflverse:injuries")).toMatchObject({ outcome: "failed", code: "spawn" });
-    expect(r.state()).toBe("disabled_spawn");
+    expect(row(rep, "nflverse:injuries")).toMatchObject({
+      outcome: "failed",
+      code: "spawn",
+      next_retry_at: iso(T0 + SPAWN_RETRY_MS),
+    });
+    expect(r.state()).toBe("wait");
   });
 
   it("exit 2 (version mismatch / pending migration) → failed:version, disabled", async () => {
@@ -621,7 +725,7 @@ describe("failures that disable on-demand refresh for the process", () => {
   });
 });
 
-function createOnDemandRefresherThrowing(): OnDemandRefresher {
+function createOnDemandRefresherThrowing(code: string): OnDemandRefresher {
   return createOnDemandRefresher(
     {
       mode: "wait",
@@ -638,7 +742,7 @@ function createOnDemandRefresherThrowing(): OnDemandRefresher {
         debug: () => undefined,
       },
       spawn: () => {
-        throw Object.assign(new Error("denied"), { code: "EACCES" });
+        throw Object.assign(new Error("denied"), { code });
       },
     },
     {

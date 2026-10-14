@@ -39,6 +39,7 @@ import { abortableSleep, type Sleep } from "../http/sleep.js";
 import { sourceStateOf } from "../mcp/refresh.js";
 import type {
   McpLogger,
+  OnDemandState,
   RefreshOutcome,
   RefreshOutcomeCode,
   RefreshReport,
@@ -95,7 +96,7 @@ export interface OnDemandRefresher {
   ensureFresh: EnsureFresh;
   /** SIGTERM to every live child (serve's shutdown); never waits. */
   shutdown(): void;
-  state(): "wait" | "background" | "off" | "disabled_spawn" | "disabled_version";
+  state(): OnDemandState;
 }
 
 /** The read-only store ports the decisions read (no writes). */
@@ -355,6 +356,35 @@ const HOUR_MS = 3_600_000;
 /** How often a join on another process's run lock re-reads refresh_log (§6.3). */
 export const JOIN_POLL_MS = 250;
 
+/**
+ * Spawn errors that last as long as this server: the binary is missing or not executable, or a
+ * sandbox or Node's permission model refuses child processes. They turn answer-time refresh off for
+ * the process; any other spawn error (EAGAIN — the per-user process limit —, EMFILE, ENOMEM, …)
+ * fails that call only and holds new children back for SPAWN_RETRY_MS.
+ */
+export const PERMANENT_SPAWN_CODES: ReadonlySet<string> = new Set([
+  "ENOENT",
+  "ENOTDIR",
+  "EACCES",
+  "EPERM",
+  "ENOEXEC",
+  "ERR_ACCESS_DENIED",
+]);
+/** How long a transient spawn failure holds new answer-time children back. */
+export const SPAWN_RETRY_MS = 15 * 60_000;
+
+/** Whether a spawn error is permanent for this process (PERMANENT_SPAWN_CODES). */
+export function isPermanentSpawnError(e: unknown): boolean {
+  const code = (e as { code?: unknown } | null)?.code;
+  return typeof code === "string" && PERMANENT_SPAWN_CODES.has(code);
+}
+
+/** A child that could not be started: when a new one may be tried (null: never, in this process). */
+interface SpawnFailure {
+  readonly spawn: true;
+  readonly retryAt: number | null;
+}
+
 const iso = (ms: number): string => new Date(ms).toISOString();
 
 /** Builds the orchestrator. `mode: "off"` gives one that never spawns and reports nothing. */
@@ -370,6 +400,8 @@ export function createOnDemandRefresher(
   const spawnTimes: number[] = [];
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let closed = false;
+  /** Until when a transient spawn failure holds new children back (0: it does not). */
+  let spawnRetryAt = 0;
 
   const now = (): number => o.clock.nowMs();
 
@@ -427,19 +459,19 @@ export function createOnDemandRefresher(
     sources: ReadonlySet<DatasetSourceId>,
     before: ReadonlyMap<DatasetSourceId, RefreshLogRow | null>,
     startedAt: number,
-    result: { code: number | null; stdout: string } | "spawn",
+    result: { code: number | null; stdout: string } | SpawnFailure,
   ): Map<DatasetSourceId, SourceOutcome> => {
     const at = now();
     const out = new Map<DatasetSourceId, SourceOutcome>();
-    const all = (outcome: RefreshOutcome, code: RefreshOutcomeCode): void => {
-      for (const id of sources) out.set(id, { outcome, code, at, until: null });
+    const all = (outcome: RefreshOutcome, code: RefreshOutcomeCode, until: string | null): void => {
+      for (const id of sources) out.set(id, { outcome, code, at, until });
     };
-    if (result === "spawn") {
-      all("failed", "spawn");
+    if ("spawn" in result) {
+      all("failed", "spawn", result.retryAt === null ? null : iso(result.retryAt));
       return out;
     }
     if (result.code === 2) {
-      all("failed", "version");
+      all("failed", "version", null);
       return out;
     }
     const parsed = parseChildOutput(result.stdout) ?? [];
@@ -476,7 +508,7 @@ export function createOnDemandRefresher(
     sources: ReadonlySet<DatasetSourceId>,
     before: ReadonlyMap<DatasetSourceId, RefreshLogRow | null>,
     startedAt: number,
-    result: { code: number | null; stdout: string } | "spawn",
+    result: { code: number | null; stdout: string } | SpawnFailure,
   ): Map<DatasetSourceId, SourceOutcome> => {
     const fallback = (code: RefreshOutcomeCode): Map<DatasetSourceId, SourceOutcome> =>
       new Map([...sources].map((id) => [id, { outcome: "failed", code, at: now(), until: null }]));
@@ -489,7 +521,26 @@ export function createOnDemandRefresher(
     }
   };
 
-  const start = (judged: readonly Judged[], nowMs: number): Flight | "spawn" | "throttled" => {
+  /**
+   * A child that could not be started: a permanent error turns answer-time refresh off for the
+   * process (once, with one warning); any other holds new children back for SPAWN_RETRY_MS.
+   */
+  const spawnFailed = (e: unknown): SpawnFailure => {
+    const code = (e as { code?: unknown } | null)?.code;
+    o.logger.warn("refresh.spawn_failed", { code: typeof code === "string" ? code : "unknown" });
+    if (isPermanentSpawnError(e)) {
+      if (state === "wait" || state === "background") {
+        state = "disabled_spawn";
+        o.logger.warn("refresh.on_demand_disabled", { reason: "spawn" });
+      }
+      return { spawn: true, retryAt: null };
+    }
+    spawnRetryAt = Math.max(spawnRetryAt, now() + SPAWN_RETRY_MS);
+    o.logger.warn("refresh.spawn_backoff", { until: iso(spawnRetryAt) });
+    return { spawn: true, retryAt: spawnRetryAt };
+  };
+
+  const start = (judged: readonly Judged[], nowMs: number): Flight | SpawnFailure | "throttled" => {
     while (spawnTimes.length > 0 && (spawnTimes[0] ?? 0) <= nowMs - HOUR_MS) spawnTimes.shift();
     if (live.size >= ON_DEMAND.maxChildren || spawnTimes.length >= ON_DEMAND.maxSpawnsPerHour)
       return "throttled";
@@ -506,8 +557,7 @@ export function createOnDemandRefresher(
         { env: childEnv(o.env) },
       );
     } catch (e) {
-      o.logger.warn("refresh.spawn_failed", { code: (e as { code?: unknown }).code ?? "unknown" });
-      return "spawn";
+      return spawnFailed(e);
     }
     spawnTimes.push(nowMs);
     o.logger.info("refresh.child_started", { sources: [...sources], pid: child.pid });
@@ -524,12 +574,7 @@ export function createOnDemandRefresher(
       finished: false,
       settled: child.done.then(
         (r) => safeSettle(sources, before, nowMs, r),
-        (e: unknown) => {
-          o.logger.warn("refresh.spawn_failed", {
-            code: (e as { code?: unknown }).code ?? "unknown",
-          });
-          return safeSettle(sources, before, nowMs, "spawn");
-        },
+        (e: unknown) => safeSettle(sources, before, nowMs, spawnFailed(e)),
       ),
     };
     live.add(flight);
@@ -541,10 +586,7 @@ export function createOnDemandRefresher(
       live.delete(flight);
       for (const id of sources) if (flights.get(id) === flight) flights.delete(id);
       const codes = new Set([...m.values()].map((x) => x.code));
-      if (codes.has("spawn") && state !== "off") {
-        state = "disabled_spawn";
-        o.logger.warn("refresh.on_demand_disabled", { reason: "spawn" });
-      } else if (codes.has("version") && state !== "off") {
+      if (codes.has("version") && (state === "wait" || state === "background")) {
         state = "disabled_version";
         o.logger.warn("refresh.on_demand_disabled", { reason: "version" });
       }
@@ -576,7 +618,7 @@ export function createOnDemandRefresher(
       for (const j of judged)
         if (j.action.kind === "wait") budget = Math.max(budget, j.action.budget_ms);
       budget = Math.min(budget, ON_DEMAND.callCapMs);
-      const waits: Promise<unknown>[] = [];
+      const waits: { readonly id: DatasetSourceId; readonly flight: Flight }[] = [];
       const joined: { id: DatasetSourceId; flight: Flight; waited: boolean }[] = [];
       const external: {
         id: DatasetSourceId;
@@ -603,7 +645,7 @@ export function createOnDemandRefresher(
         const mine = flights.get(j.id);
         if (mine !== undefined && !mine.finished) {
           joined.push({ id: j.id, flight: mine, waited });
-          if (waited) waits.push(mine.settled);
+          if (waited) waits.push({ id: j.id, flight: mine });
           continue;
         }
         const lock = ports.runLocks.held(j.id);
@@ -619,42 +661,53 @@ export function createOnDemandRefresher(
         }
         toStart.push(j);
       }
-      if (toStart.length > 0) {
+      if (toStart.length > 0 && t0 < spawnRetryAt) {
+        // a transient spawn failure holds new children back: say when they are tried again
+        for (const j of toStart)
+          set(j.id, {
+            outcome: "backoff",
+            code: "spawn",
+            started_at: null,
+            at: iso(t0),
+            next_retry_at: iso(spawnRetryAt),
+          });
+      } else if (toStart.length > 0) {
         const f = start(toStart, t0);
-        if (f === "throttled" || f === "spawn") {
+        if (f === "throttled" || "spawn" in f) {
           for (const j of toStart)
             set(j.id, {
               outcome: f === "throttled" ? "throttled" : "failed",
               code: f === "throttled" ? null : "spawn",
               started_at: null,
               at: iso(t0),
-              next_retry_at: null,
+              next_retry_at: f === "throttled" || f.retryAt === null ? null : iso(f.retryAt),
             });
-          if (f === "spawn") {
-            state = "disabled_spawn";
-            o.logger.warn("refresh.on_demand_disabled", { reason: "spawn" });
-          }
         } else {
           for (const j of toStart) {
             const waited = j.action.kind === "wait";
             joined.push({ id: j.id, flight: f, waited });
-            if (waited) waits.push(f.settled);
+            if (waited) waits.push({ id: j.id, flight: f });
           }
         }
       }
-      // wait: this server's children, and other processes' run locks polled through refresh_log
+      // wait: this server's children, and other processes' run locks polled through refresh_log —
+      // also when a child found the run lock taken (the tick took it between this decision and the
+      // child's start): that run is joined like another process's, within the same budget
+      const deadline = t0 + budget;
       if (budget > 0 && (waits.length > 0 || external.some((e) => e.waited))) {
-        const deadline = t0 + budget;
         const abort = new AbortController();
         const timeout = (ms: number): Promise<void> =>
           sleep(Math.max(0, ms), abort.signal).catch(() => undefined);
-        const polls = external
-          .filter((e) => e.waited)
-          .map(async (e) => {
-            while (now() < deadline && ports.runLocks.held(e.id) !== null)
-              await timeout(Math.min(JOIN_POLL_MS, deadline - now()));
-          });
-        await Promise.race([Promise.all([...waits, ...polls]), timeout(deadline - now())]);
+        const pollLock = async (id: DatasetSourceId): Promise<void> => {
+          while (now() < deadline && ports.runLocks.held(id) !== null)
+            await timeout(Math.min(JOIN_POLL_MS, deadline - now()));
+        };
+        const children = waits.map(async ({ id, flight }) => {
+          const x = (await flight.settled).get(id);
+          if (x?.outcome === "joined" && x.code === "locked") await pollLock(id);
+        });
+        const polls = external.filter((e) => e.waited).map((e) => pollLock(e.id));
+        await Promise.race([Promise.all([...children, ...polls]), timeout(deadline - now())]);
         abort.abort();
       }
       const t1 = now();
@@ -662,13 +715,18 @@ export function createOnDemandRefresher(
         if (j.flight.finished) {
           const m = await j.flight.settled;
           const x = m.get(j.id);
+          // a child that found the run lock taken: what that run did, once its lock is gone
+          const other =
+            x?.outcome === "joined" && x.code === "locked" && ports.runLocks.held(j.id) === null
+              ? fromLog(j.id, j.flight.before.get(j.id) ?? null, j.flight.startedAt)
+              : null;
           if (x !== undefined) {
             set(j.id, {
-              outcome: x.outcome,
-              code: x.code,
+              outcome: other?.outcome ?? x.outcome,
+              code: other === null ? x.code : other.code,
               started_at: iso(j.flight.startedAt),
-              at: iso(x.at),
-              next_retry_at: x.until,
+              at: iso(other === null ? x.at : t1),
+              next_retry_at: other === null ? x.until : null,
             });
             continue;
           }

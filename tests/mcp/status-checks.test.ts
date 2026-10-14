@@ -67,3 +67,57 @@ describe("G1 checks: required datasets vs optional drivers (QA-1-015)", () => {
     }
   });
 });
+
+describe("G1 on_demand: what the server's answer-time refresh is doing now, not what was configured", () => {
+  // The check read the configured mode, so after the installed ff stopped matching the server (exit 2)
+  // or the child could not be started, G1 kept saying on_demand ok "wait" while no answer was
+  // refreshed any more.
+  it("wait → ok; after a version-mismatch exit 2 → not ok, disabled_version; a permanent spawn failure → disabled_spawn", async () => {
+    for (const [name, child] of [
+      [
+        "version",
+        () => ({ pid: 1, done: Promise.resolve({ code: 2, stdout: "" }), kill: () => undefined }),
+      ],
+      [
+        "spawn",
+        () => ({
+          pid: null,
+          done: Promise.reject(Object.assign(new Error("missing"), { code: "ENOENT" })),
+          kill: () => undefined,
+        }),
+      ],
+    ] as const) {
+      const w = await makeWorld({
+        env: { FF_ON_DEMAND_REFRESH: "wait" },
+        onDemand: { spawn: child },
+      });
+      try {
+        const g1 = async (): Promise<Check | undefined> => {
+          const { client, close } = await connect(w);
+          const r = await client.callTool({
+            name: "ff_get_status",
+            arguments: { include_checks: true },
+          });
+          await close();
+          return (
+            JSON.parse((r.content as { text: string }[])[0]?.text ?? "{}") as G1
+          ).data.checks.find((c) => c.id === "on_demand");
+        };
+        expect(await g1(), name).toEqual({ id: "on_demand", ok: true, detail: "wait" });
+        // half an hour on, an answer reading injuries revalidates it: the child fails
+        w.clock.advance(30 * 60_000);
+        const { client, close } = await connect(w);
+        await client.callTool({ name: "ff_get_injuries", arguments: {} });
+        await close();
+        expect(w.refresher.state(), name).toBe(`disabled_${name}`);
+        expect(await g1(), name).toEqual({
+          id: "on_demand",
+          ok: false,
+          detail: `disabled_${name}`,
+        });
+      } finally {
+        w.cleanup();
+      }
+    }
+  }, 60_000);
+});

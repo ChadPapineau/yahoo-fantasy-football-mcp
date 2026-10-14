@@ -35,7 +35,7 @@ import { defineTool, type ToolContext } from "../define.js";
 import { UNTRUSTED_POINTER, bareUntrusted, buildEnvelope, type InputStamp } from "../envelope.js";
 import { FfError, describeForLog, wrapHandler } from "../errors.js";
 import { basisOf, nextTickAt, providerOf, tickDecisionOf } from "../refresh.js";
-import type { McpServerOptions, McpServices } from "../services.js";
+import type { McpServerOptions, McpServices, OnDemandState } from "../services.js";
 import { bare, leagueContext, leagueUniverse, textSource, type LeagueContext } from "./common.js";
 import { advertisedInputSchema, advertisedOutputSchema, FAMILY_ANNOTATIONS } from "../define.js";
 import { bareName, gsisId, iso, playerKey, week } from "./schemas.js";
@@ -559,8 +559,22 @@ function seasonStatusChecks(
       detail: season.week_bound_exceeded ? "week_bound_exceeded" : "ok",
     },
     { id: "refresh_tick", ok: tickDetail === "ok", detail: tickDetail },
-    { id: "on_demand", ok: true, detail: ctx.options.onDemand },
+    onDemandCheck(ctx.services.onDemandState?.() ?? ctx.options.onDemand),
   ];
+}
+
+/**
+ * G1 `on_demand`: what this server's answer-time refresh is doing now — ok for the configured modes
+ * (`off` included: a choice), not ok once the server turned it off because `ff refresh` could not be
+ * started (`disabled_spawn`) or the installed `ff` no longer matches it (`disabled_version`): answers
+ * are then no longer revalidated until the client restarts.
+ */
+export function onDemandCheck(state: OnDemandState): StatusCheck {
+  return {
+    id: "on_demand",
+    ok: state === "wait" || state === "background" || state === "off",
+    detail: state,
+  };
 }
 
 /** The G1 snapshot (also `ff://status`). A missing/invalid league file is a warning, not an error. */

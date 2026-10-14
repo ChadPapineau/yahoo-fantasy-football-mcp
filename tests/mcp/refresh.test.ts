@@ -150,6 +150,23 @@ describe("refreshWarnings", () => {
     );
   });
 
+  it("a transient spawn failure names its retry, never 'until it restarts'; its backoff names the retry too", () => {
+    const at = iso(NOW + 900_000);
+    const w = refreshWarnings(
+      rep([
+        { outcome: "failed", code: "spawn", next_retry_at: at },
+        { source: "nflverse:schedules", outcome: "backoff", code: "spawn", next_retry_at: at },
+      ]),
+      services,
+      NOW,
+    );
+    expect(w).not.toContain(SPAWN_FAILED_WARNING);
+    expect(w).toEqual([
+      `could not start ff refresh for nflverse:injuries (spawn); retrying after ${at}; this answer uses the release checked 2h ago`,
+      `not retrying nflverse:schedules until ${at} (spawn); no release of it is loaded yet`,
+    ]);
+  });
+
   it("any report: lines are fixed vocabulary, ≤ 400 chars, deduplicated", () => {
     const src = fc.constantFrom<DatasetSourceId>(
       "nflverse:schedules",

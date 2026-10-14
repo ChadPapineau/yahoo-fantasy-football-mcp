@@ -87,6 +87,9 @@ export interface RefreshReport {
   readonly sources: readonly RefreshSourceReport[];
 }
 
+/** Answer-time refresh's state in this server process (G1 `on_demand`). */
+export type OnDemandState = "wait" | "background" | "off" | "disabled_spawn" | "disabled_version";
+
 /** The logger surface src/mcp needs (the cli Logger satisfies it; src/mcp may not import src/cli). */
 export interface McpLogger {
   error(event: string, fields?: Readonly<Record<string, unknown>>): void;
@@ -147,6 +150,12 @@ export interface McpServices {
     sources: readonly DueSource[],
     opts: { readonly requestId: string },
   ): Promise<RefreshReport | null>;
+  /**
+   * What answer-time refresh is doing now (G1 `on_demand`): the configured mode, or why this server
+   * turned it off (`disabled_spawn`: ff refresh could not be started; `disabled_version`: the
+   * installed ff no longer matches this server). Absent = the configured mode.
+   */
+  onDemandState?(): OnDemandState;
   /** Called at the start of every tool call / resource read (e.g. `Store.reattachIfChanged`). */
   beforeCall?(): void;
   /** Seed source for calls without `seed` (default: crypto). */

@@ -300,6 +300,7 @@ export function buildServices(args: {
     storeStats: () => store.stats(),
     scheduleView: view,
     ...(refresher.state() === "off" ? {} : { ensureFresh: refresher.ensureFresh }),
+    onDemandState: () => refresher.state(),
     beforeCall: () => {
       try {
         store.reattachIfChanged();

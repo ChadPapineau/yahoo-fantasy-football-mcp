@@ -169,7 +169,10 @@ export function nextTickAt(ms: number): number {
 /** The warning when the installed `ff` refused the child (`--expect-version` / `--no-migrate`). */
 export const RESTART_CLIENT_WARNING =
   "restart the client: the installed ff no longer matches this server";
-/** The warning when the child could not be started at all (a sandbox, a missing binary). */
+/**
+ * The warning when the child can never be started by this server (a missing or non-executable
+ * binary, a sandbox): answer-time refresh is off until the client restarts.
+ */
 export const SPAWN_FAILED_WARNING =
   "answers use the stored releases: this server could not start ff refresh (spawn), so it does not refresh at answer time until it restarts";
 
@@ -219,6 +222,11 @@ export function refreshWarnings(
         break;
       case "failed":
         if (s.code === "version" || s.code === "migration") add(RESTART_CLIENT_WARNING);
+        else if (s.code === "spawn" && s.next_retry_at !== null)
+          // a transient spawn failure (EAGAIN, EMFILE, ENOMEM): this call only, retried later
+          add(
+            `could not start ff refresh for ${s.source} (spawn); retrying after ${s.next_retry_at}; ${usedRelease(checked)}`,
+          );
         else if (s.code === "spawn") add(SPAWN_FAILED_WARNING);
         else
           add(`could not refresh ${s.source} (${s.code ?? "internal"}); ${usedRelease(checked)}`);
