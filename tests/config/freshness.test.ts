@@ -21,34 +21,10 @@ import {
   type FreshnessClassId,
   type FreshnessState,
 } from "../../src/config/freshness.js";
+import { fallbackCalendar, scheduleCalendar } from "../../src/config/game-calendar.js";
 
 const classes = FRESHNESS_CLASS_IDS.map((id) => FRESHNESS_TABLE[id]);
 const RANK: Record<FreshnessState, number> = { fresh: 0, stale: 1, expired: 2 };
-
-/** Zones from UTC−11 to UTC+14, half- and three-quarter-hour offsets included (QA-2-025). */
-const ZONES = [
-  "UTC",
-  "Pacific/Pago_Pago",
-  "America/Los_Angeles",
-  "America/New_York",
-  "Asia/Kolkata",
-  "Asia/Kathmandu",
-  "Pacific/Auckland",
-  "Pacific/Chatham",
-  "Pacific/Kiritimati",
-] as const;
-
-/** Runs `f` with the process time zone set to `zone` (Node re-reads TZ on assignment), then restores it. */
-function inZone<T>(zone: string, f: () => T): T {
-  const prev = process.env.TZ;
-  process.env.TZ = zone;
-  try {
-    return f();
-  } finally {
-    if (prev === undefined) delete process.env.TZ;
-    else process.env.TZ = prev;
-  }
-}
 
 describe("freshness table shape (plan 01 A-4..A-9: shape, not values)", () => {
   it("has exactly one row per class id, keyed by its own id", () => {
@@ -271,6 +247,13 @@ describe("stampState — the class basis picks the instant (critics C-12, C-08b)
   const iso = (msAgo: number) => new Date(NOW - msAgo).toISOString();
   const H = 3_600_000;
   const D = 24 * H;
+  /** A schedule whose kickoffs are all far from NOW (off-window TTLs apply), and the fallback. */
+  const FAR = scheduleCalendar({
+    kickoffs: [NOW + 400 * D],
+    outdoorKickoffs: [],
+    fileVersion: "v",
+  });
+  const CALS = [FAR, fallbackCalendar("never_loaded")] as const;
 
   it("release basis: an unchanged release checked an hour ago is fresh however old the download", () => {
     const cls = freshnessClass("nflverse_stats_player_week");
@@ -278,6 +261,7 @@ describe("stampState — the class basis picks the instant (critics C-12, C-08b)
       cls,
       { as_of: iso(10 * D), fetched_at: iso(10 * D), checked_at: iso(H) },
       NOW,
+      FAR,
     );
     expect(st.state).toBe("fresh");
     expect(st.basis_at).toBe(iso(H));
@@ -289,42 +273,59 @@ describe("stampState — the class basis picks the instant (critics C-12, C-08b)
     const cls = freshnessClass("nflverse_schedules");
     // 7 h: past the 30-min game-day TTL AND the 6 h 30 off-day TTL (QA-1-036), whatever day NOW is
     expect(
-      stampState(cls, { as_of: iso(D), fetched_at: iso(D), checked_at: iso(7 * H) }, NOW).state,
+      stampState(cls, { as_of: iso(D), fetched_at: iso(D), checked_at: iso(7 * H) }, NOW, FAR)
+        .state,
     ).toBe("stale");
     expect(
-      stampState(cls, { as_of: iso(9 * D), fetched_at: iso(9 * D), checked_at: iso(8 * D) }, NOW)
-        .state,
+      stampState(
+        cls,
+        { as_of: iso(9 * D), fetched_at: iso(9 * D), checked_at: iso(8 * D) },
+        NOW,
+        FAR,
+      ).state,
     ).toBe("expired");
   });
   it("release basis: checked_at null or older than fetched_at falls back to the later instant", () => {
     const cls = freshnessClass("nflverse_injuries");
-    const a = stampState(cls, { as_of: iso(H), fetched_at: iso(H), checked_at: null }, NOW);
+    const a = stampState(cls, { as_of: iso(H), fetched_at: iso(H), checked_at: null }, NOW, FAR);
     expect(a.basis_at).toBe(iso(H));
-    const b = stampState(cls, { as_of: iso(H), fetched_at: iso(H), checked_at: iso(5 * D) }, NOW);
+    const b = stampState(
+      cls,
+      { as_of: iso(H), fetched_at: iso(H), checked_at: iso(5 * D) },
+      NOW,
+      FAR,
+    );
     expect(b.basis_at).toBe(iso(H));
     expect(b.state).toBe("fresh");
   });
   it("file basis (manual_league): judged from the mtime (as_of), not the read time", () => {
     const cls = freshnessClass("manual_league");
-    const st = stampState(cls, { as_of: iso(8 * D), fetched_at: iso(0), checked_at: null }, NOW);
+    const st = stampState(
+      cls,
+      { as_of: iso(8 * D), fetched_at: iso(0), checked_at: null },
+      NOW,
+      FAR,
+    );
     expect(st.state).toBe("stale");
     expect(st.basis_at).toBe(iso(8 * D));
     expect(st.age_s).toBe(8 * 86_400);
     // no hard limit for the manual league: never expired
     expect(
-      stampState(cls, { as_of: iso(400 * D), fetched_at: iso(0), checked_at: null }, NOW).state,
+      stampState(cls, { as_of: iso(400 * D), fetched_at: iso(0), checked_at: null }, NOW, FAR)
+        .state,
     ).toBe("stale");
   });
   it("age basis uses fetched_at; immutable is always fresh", () => {
     const w = freshnessClass("weather");
     expect(
-      stampState(w, { as_of: iso(0), fetched_at: iso(2 * H), checked_at: iso(0) }, NOW).state,
+      stampState(w, { as_of: iso(0), fetched_at: iso(2 * H), checked_at: iso(0) }, NOW, FAR).state,
     ).toBe("stale");
     const c = freshnessClass("crosswalk");
     const st = stampState(
       c,
       { as_of: iso(900 * D), fetched_at: iso(900 * D), checked_at: null },
       NOW,
+      FAR,
     );
     expect(st.state).toBe("fresh");
     expect(st.age_s).toBe(900 * 86_400);
@@ -332,16 +333,17 @@ describe("stampState — the class basis picks the instant (critics C-12, C-08b)
   it("a future instant (clock skew) reads age 0; garbage throws instead of reading fresh", () => {
     const cls = freshnessClass("weather");
     expect(
-      stampState(cls, { as_of: iso(-H), fetched_at: iso(-H), checked_at: null }, NOW).age_s,
+      stampState(cls, { as_of: iso(-H), fetched_at: iso(-H), checked_at: null }, NOW, FAR).age_s,
     ).toBe(0);
     expect(() =>
-      stampState(cls, { as_of: "x", fetched_at: "not a date", checked_at: null }, NOW),
+      stampState(cls, { as_of: "x", fetched_at: "not a date", checked_at: null }, NOW, FAR),
     ).toThrow(RangeError);
     expect(() =>
       stampState(
         freshnessClass("nflverse_pbp"),
         { as_of: iso(0), fetched_at: iso(0), checked_at: "nope" },
         NOW,
+        FAR,
       ),
     ).toThrow(RangeError);
     expect(() =>
@@ -349,44 +351,13 @@ describe("stampState — the class basis picks the instant (critics C-12, C-08b)
         freshnessClass("manual_league"),
         { as_of: "nope", fetched_at: iso(0), checked_at: null },
         NOW,
+        FAR,
       ),
     ).toThrow(RangeError);
     expect(() =>
-      stampState(cls, { as_of: iso(0), fetched_at: iso(0), checked_at: null }, NaN),
+      stampState(cls, { as_of: iso(0), fetched_at: iso(0), checked_at: null }, NaN, FAR),
     ).toThrow(RangeError);
   });
-  // The oracle classifies with the TTL that applies at the basis instant: schedules and lines get their
-  // off-day TTL on an off day (QA-1-036). Without it the property failed for any sampled basis age
-  // between 30 min and 6.5 h on those two classes (QA-2-025). Game days are LOCAL days, so the pinned
-  // counterexample is built from local wall-clock time and held in every zone, the ones east of
-  // UTC+12:30 included (a UTC-built "Saturday 11:30" is already Sunday in Pacific/Auckland).
-  it("an off-day check of a game-day class is classified with its off-day TTL, in every time zone (QA-2-025 counterexample)", () => {
-    const cls = freshnessClass("nflverse_schedules");
-    const judge = (basisMs: number, nowMs: number) => {
-      const at = new Date(basisMs).toISOString();
-      return stampState(cls, { as_of: at, fetched_at: at, checked_at: at }, nowMs);
-    };
-    for (const zone of ZONES)
-      inZone(zone, () => {
-        // Saturday 2026-10-10 11:30 local: an off day; Sunday 2026-10-11 11:30 local: a game day
-        const sat = new Date(2026, 9, 10, 11, 30).getTime();
-        const sun = new Date(2026, 9, 11, 11, 30).getTime();
-        expect(new Date(sat).getDay(), zone).toBe(6);
-        const off = judge(sat, sat + 1_801_000);
-        expect(off.age_s, zone).toBe(1801);
-        expect(off.state, zone).toBe("fresh");
-        // the same age on a game day is past the 30-minute TTL
-        expect(judge(sun, sun + 1_801_000).state, zone).toBe("stale");
-      });
-  });
-
-  it("the zone switch the test above relies on is real (non-vacuity)", () => {
-    // 2026-10-10T11:30:00Z is Saturday in UTC and already Sunday in Pacific/Kiritimati (UTC+14)
-    const utcSat = Date.UTC(2026, 9, 10, 11, 30);
-    expect(inZone("UTC", () => new Date(utcSat).getDay())).toBe(6);
-    expect(inZone("Pacific/Kiritimati", () => new Date(utcSat).getDay())).toBe(0);
-  });
-
   it("property: for every class and basis instant, state equals classifyAge of the basis age", () => {
     fc.assert(
       fc.property(
@@ -399,42 +370,52 @@ describe("stampState — the class basis picks the instant (critics C-12, C-08b)
             fetched_at: iso(fetchedAgo * 1000),
             checked_at: iso(checkedAgo * 1000),
           };
-          const st = stampState(cls, t, NOW);
-          const basisAgo = cls.basis === "release" ? Math.min(fetchedAgo, checkedAgo) : fetchedAgo;
-          expect(st.age_s).toBe(basisAgo);
-          expect(st.state).toBe(
-            cls.basis === "immutable"
-              ? "fresh"
-              : classifyAge(cls, basisAgo, ttlAt(cls, NOW - basisAgo * 1000)),
-          );
+          for (const cal of CALS) {
+            const st = stampState(cls, t, NOW, cal);
+            const basisAgo =
+              cls.basis === "release" ? Math.min(fetchedAgo, checkedAgo) : fetchedAgo;
+            expect(st.age_s).toBe(basisAgo);
+            expect(st.state).toBe(
+              cls.basis === "immutable"
+                ? "fresh"
+                : classifyAge(cls, basisAgo, ttlAt(cls, NOW - basisAgo * 1000, cal)),
+            );
+          }
         },
       ),
     );
   });
 });
 
-describe("schedules and lines: a 30-minute TTL on game days only [QA-1-036]", () => {
-  // local wall-clock instants, as launchd's calendar fires them (2026-09-30 is a Wednesday)
-  const local = (d: number, h: number, m = 0): number => new Date(2026, 8, d, h, m).getTime();
+describe("schedules and lines: 30 minutes in a hot window, until the next window outside one [QA-1-036, QA-2-037]", () => {
+  // kickoffs as the schedule data has them (instants), never a weekday rule
+  const K = Date.parse("2026-09-27T17:00:00.000Z"); // a 13:00 ET kickoff
+  const cal = scheduleCalendar({
+    kickoffs: [K, K + 7 * 86_400_000],
+    outdoorKickoffs: [],
+    fileVersion: "v",
+  });
+  const H = 3_600_000;
   const stamp = (checkedMs: number) => ({
     as_of: "2026-09-01T00:00:00.000Z",
     fetched_at: "2026-09-01T00:00:00.000Z",
     checked_at: new Date(checkedMs).toISOString(),
   });
   for (const id of ["nflverse_schedules", "lines"] as const)
-    it(`${id}: an off-day check stays fresh through the 6-hourly cadence; a game-day check goes stale after 30 min`, () => {
+    it(`${id}: an off-window check stays fresh until the next window; a hot-window check goes stale after 30 min`, () => {
       const cls = freshnessClass(id);
-      // Wednesday 06:00 check: the next is at 12:00 (+ run time)
-      expect(stampState(cls, stamp(local(30, 6)), local(30, 11, 59)).state).toBe("fresh");
-      expect(stampState(cls, stamp(local(30, 6)), local(30, 12, 31)).state).toBe("stale");
-      // Sunday 13:00 check: the job runs every 30 min
-      expect(stampState(cls, stamp(local(27, 13)), local(27, 13, 29)).state).toBe("fresh");
-      expect(stampState(cls, stamp(local(27, 13)), local(27, 13, 31)).state).toBe("stale");
-      // Thursday and Monday are game days too
-      expect(stampState(cls, stamp(local(24, 20)), local(24, 20, 31)).state).toBe("stale");
-      expect(stampState(cls, stamp(local(28, 20)), local(28, 20, 31)).state).toBe("stale");
-      // Saturday is an off day
-      expect(stampState(cls, stamp(local(26, 12)), local(26, 18, 0)).state).toBe("fresh");
+      // three days after a kickoff: the next window opens 24 h before the next kickoff (4 days on),
+      // so the off-window TTL (6 h 30) applies
+      const off = K + 3 * 86_400_000;
+      expect(stampState(cls, stamp(off), off + 6 * H, cal).state).toBe("fresh");
+      expect(stampState(cls, stamp(off), off + 6.6 * H, cal).state).toBe("stale");
+      // inside the hot window: 30 minutes
+      expect(stampState(cls, stamp(K - 2 * H), K - 2 * H + 29 * 60_000, cal).state).toBe("fresh");
+      expect(stampState(cls, stamp(K - 2 * H), K - 2 * H + 31 * 60_000, cal).state).toBe("stale");
+      // an off-window check an hour before the window opens expires when it opens
+      const opens = K + 7 * 86_400_000 - 24 * H;
+      expect(stampState(cls, stamp(opens - H), opens, cal).state).toBe("fresh");
+      expect(stampState(cls, stamp(opens - H), opens + 31 * 60_000, cal).state).toBe("stale");
     });
   it("every other class keeps one TTL every day", () => {
     for (const id of FRESHNESS_CLASS_IDS)
