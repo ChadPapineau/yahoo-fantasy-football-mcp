@@ -32,6 +32,7 @@ import {
   type LaunchdJob,
 } from "../../src/cli/launchd.js";
 import { main } from "../../src/cli/main.js";
+import { parseTargets } from "../../src/cli/refresh.js";
 import { fakeExec, fakePackage, makeIo, sandbox, type Sandbox } from "./helpers.js";
 
 let sb: Sandbox | undefined;
@@ -137,6 +138,19 @@ describe("the job table: one refresh tick + weekly prune and backup", () => {
       "weather",
     ]);
     for (const n of RETIRED_JOB_NAMES) expect(JOBS.map((j) => j.name)).not.toContain(n);
+  });
+
+  it("an upgraded binary under the earlier version's plists keeps working until install-launchd runs: their argv still parse", () => {
+    // the retired jobs ran `ff refresh <target> --notify` with these targets
+    const legacy: Record<string, string> = {
+      "nflverse-schedules": "nflverse:schedules",
+      "nflverse-daily": "nflverse:daily",
+      "nflverse-stats": "nflverse:stats",
+      weather: "weather",
+    };
+    expect(Object.keys(legacy)).toEqual([...RETIRED_JOB_NAMES]);
+    for (const target of Object.values(legacy))
+      expect(parseTargets([target]), target).toEqual([target]);
   });
 
   it("selectJobs: all by default, a subset by name; unknown names refused (bounded echo); a retired name names refresh-due", () => {
