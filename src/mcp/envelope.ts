@@ -31,6 +31,7 @@ import type { DatasetStamp, InputFreshness } from "../domain/analytics/types.js"
 import { IR_ELIGIBLE_STATUSES, SLOT_NAME_RE, type PlatformStamp } from "../domain/league/types.js";
 import { DECISION_METRIC_RE } from "../domain/reclog/types.js";
 import { MANUAL_FA_POOL_WARNING } from "../providers/platform.js";
+import { REFRESH_OUTCOME_CODES, REFRESH_OUTCOMES, type RefreshReport } from "./services.js";
 
 export { IR_ELIGIBLE_STATUSES, MANUAL_FA_POOL_WARNING };
 
@@ -487,6 +488,12 @@ export interface EnvelopeMeta {
   readonly untrusted_fields: readonly UntrustedField[];
   /** True when any number in `data` is ours, not the platform's (research 04 §G.1). */
   readonly estimate: boolean;
+  /**
+   * The answer-time refresh behind this result (season-fresh spec §6.4): absent when nothing was
+   * attempted (every input recently checked), present when a refresh was waited on, joined, started
+   * in the background or held back (backoff, throttled, failed).
+   */
+  readonly refresh?: RefreshReport;
 }
 
 /** List-tool paging (plan 01 §4.2). */
@@ -528,6 +535,8 @@ export interface EnvelopeInput<D> {
   readonly page?: PageInfo;
   /** Tool-authored warnings (fixed strings; never upstream text). */
   readonly warnings?: readonly string[];
+  /** The answer-time refresh report (`meta.refresh`); omitted when nothing was attempted. */
+  readonly refresh?: RefreshReport;
 }
 
 function isoOrThrow(s: string): number {
@@ -617,6 +626,7 @@ export function buildEnvelope<D>(input: EnvelopeInput<D>): Envelope<D> {
     attribution,
     untrusted_fields: untrusted,
     estimate: input.estimate === true,
+    ...(input.refresh === undefined ? {} : { refresh: input.refresh }),
   };
   return input.page === undefined
     ? { data: input.data, meta, truncated: false, warnings }
@@ -903,6 +913,25 @@ export const attributionSchema = z.strictObject({
   url: z.url().max(200),
 });
 
+/** The most `meta.refresh.sources` rows (one per dataset source a tool reads). */
+export const REFRESH_SOURCES_MAX = 8;
+
+/** One `meta.refresh.sources[]` row (fixed vocabulary only). */
+export const refreshSourceSchema = z.strictObject({
+  source: z.string().regex(/^[a-z_]+:[a-z_]+$/),
+  outcome: z.enum(REFRESH_OUTCOMES),
+  code: z.enum(REFRESH_OUTCOME_CODES).nullable(),
+  started_at: isoSchema.nullable(),
+  at: isoSchema,
+  next_retry_at: isoSchema.nullable(),
+});
+
+/** `meta.refresh` (season-fresh spec §6.4). */
+export const refreshReportSchema = z.strictObject({
+  mode: z.enum(["wait", "background"]),
+  sources: z.array(refreshSourceSchema).min(1).max(REFRESH_SOURCES_MAX),
+});
+
 /** The `meta` block. */
 export const metaSchema = z.strictObject({
   schema_version: z.literal(ENVELOPE_SCHEMA_VERSION),
@@ -916,6 +945,7 @@ export const metaSchema = z.strictObject({
   attribution: z.array(attributionSchema).max(30),
   untrusted_fields: z.array(untrustedFieldSchema).max(200),
   estimate: z.boolean(),
+  refresh: refreshReportSchema.optional(),
 });
 
 /** List-tool paging. */

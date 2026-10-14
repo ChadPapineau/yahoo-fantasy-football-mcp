@@ -1357,4 +1357,40 @@ describe("envelopeSchema / metaSchema / untrustedTextSchema", () => {
     const { request_id: _drop, ...noId } = meta;
     expect(ok(metaSchema, noId)).toBe(false);
   });
+  it("meta.refresh (season-fresh §6.4): absent unless given, fixed vocabulary, 1..8 rows", () => {
+    const none = buildEnvelope({ requestId: RID, data: {}, nowMs: NOW, inputs: [] });
+    expect("refresh" in none.meta).toBe(false);
+    const row = {
+      source: "nflverse:injuries" as const,
+      outcome: "in_progress" as const,
+      code: null,
+      started_at: "2026-09-30T17:59:54.000Z",
+      at: "2026-09-30T18:00:00.000Z",
+      next_retry_at: null,
+    };
+    const env = buildEnvelope({
+      requestId: RID,
+      data: {},
+      nowMs: NOW,
+      inputs: [],
+      refresh: { mode: "wait", sources: [row] },
+    });
+    const meta = (JSON.parse(serializeEnvelope(env)) as { meta: Record<string, unknown> }).meta;
+    expect(meta.refresh).toEqual({ mode: "wait", sources: [row] });
+    expect(ok(metaSchema, meta)).toBe(true);
+    const withRefresh = (refresh: unknown) => ok(metaSchema, { ...meta, refresh });
+    expect(withRefresh({ mode: "wait", sources: [] })).toBe(false);
+    expect(withRefresh({ mode: "wait", sources: Array.from({ length: 9 }, () => row) })).toBe(
+      false,
+    );
+    expect(withRefresh({ mode: "wait", sources: Array.from({ length: 8 }, () => row) })).toBe(true);
+    expect(withRefresh({ mode: "sometimes", sources: [row] })).toBe(false);
+    expect(withRefresh({ mode: "wait", sources: [{ ...row, outcome: "exploded" }] })).toBe(false);
+    // a code is a fixed word, never upstream text
+    expect(withRefresh({ mode: "wait", sources: [{ ...row, code: "HTTP 500 <html>" }] })).toBe(
+      false,
+    );
+    expect(withRefresh({ mode: "wait", sources: [{ ...row, extra: 1 }] })).toBe(false);
+    expect(withRefresh({ mode: "wait", sources: [{ ...row, at: "yesterday" }] })).toBe(false);
+  });
 });

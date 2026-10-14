@@ -1,6 +1,7 @@
 // services.ts — what the MCP surface is given by the composition root (plan 01 §1.1: src/mcp may
 // not import src/store or node:fs, so `ff serve` builds this object from the real store, provider
 // and files and hands it to createServer). Typed only by domain/provider interfaces.
+import type { DatasetSourceId } from "../config/freshness.js";
 import type { Toolset, WeatherSource } from "../config/schema.js";
 import type {
   DatasetReaders,
@@ -15,9 +16,69 @@ import type {
   CrosswalkRepository,
   RosterWeeklyReader,
 } from "../domain/crosswalk/types.js";
-import type { TransactionsSeenRepository } from "../domain/league/types.js";
+import type { IsoInstant, TransactionsSeenRepository } from "../domain/league/types.js";
 import type { RecommendationLogRepository } from "../domain/reclog/types.js";
 import type { FantasyPlatform } from "../providers/platform.js";
+
+// --- answer-time refresh (season-fresh spec §6, plan 07 §2 `meta.refresh`) ------------------------------
+
+/**
+ * What became of one source's answer-time refresh: `updated` (a new release was published),
+ * `revalidated` (the release is unchanged and was re-checked), `in_progress` (still running when the
+ * wait budget ended — the next call attaches it), `joined` (another process is refreshing it),
+ * `failed`, `backoff` (not retried until `next_retry_at`), `throttled` (the per-server cap), `skipped`
+ * (nothing to fetch: not published upstream, off-season, no games).
+ */
+export const REFRESH_OUTCOMES = [
+  "updated",
+  "revalidated",
+  "in_progress",
+  "joined",
+  "failed",
+  "backoff",
+  "throttled",
+  "skipped",
+] as const;
+export type RefreshOutcome = (typeof REFRESH_OUTCOMES)[number];
+
+/** Why, in a fixed vocabulary (never upstream text); null when the outcome says it all. */
+export const REFRESH_OUTCOME_CODES = [
+  "network",
+  "rate_limited",
+  "not_found",
+  "schema",
+  "aborted",
+  "locked",
+  "spawn",
+  "version",
+  "migration",
+  "not_published",
+  "off_season",
+  "no_games",
+  "internal",
+] as const;
+export type RefreshOutcomeCode = (typeof REFRESH_OUTCOME_CODES)[number] | null;
+
+/** One source's line of `meta.refresh`. */
+export interface RefreshSourceReport {
+  readonly source: DatasetSourceId;
+  readonly outcome: RefreshOutcome;
+  readonly code: RefreshOutcomeCode;
+  /** When the refresh this answer waited on or joined started; null when none ran. */
+  readonly started_at: IsoInstant | null;
+  /** When this outcome was judged. */
+  readonly at: IsoInstant;
+  /** The earliest instant a retry is allowed (backoff, a not-yet-published season), or null. */
+  readonly next_retry_at: IsoInstant | null;
+}
+
+/** `meta.refresh`: present only when a refresh was attempted, joined or held back for this answer. */
+export interface RefreshReport {
+  /** FF_ON_DEMAND_REFRESH (`background` never waits). */
+  readonly mode: "wait" | "background";
+  /** 1..8 rows, schedules first. */
+  readonly sources: readonly RefreshSourceReport[];
+}
 
 /** The logger surface src/mcp needs (the cli Logger satisfies it; src/mcp may not import src/cli). */
 export interface McpLogger {

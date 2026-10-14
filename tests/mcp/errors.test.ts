@@ -19,6 +19,9 @@ import { leagueKeySchema, playerKeySchema, weekSchema } from "../../src/mcp/boun
 import { buildEnvelope, toToolResult, type ToolSuccessResult } from "../../src/mcp/envelope.js";
 import {
   DATASET_NEVER_LOADED_HINT,
+  DATASET_UNREADABLE_MESSAGE,
+  REFRESH_IN_PROGRESS_HINT,
+  STALE_ONLY_VARIANTS,
   ERROR_CODES,
   ERROR_TABLE,
   FfError,
@@ -30,6 +33,8 @@ import {
   isNetworkError,
   newRequestId,
   safeFieldPath,
+  refreshFailedHint,
+  seasonNotPublishedHint,
   toToolError,
   toWireError,
   wrapHandler,
@@ -437,6 +442,56 @@ describe("cross-layer hints and codes (critics C-13b, C-14)", () => {
       body(Object.assign(new Error("z"), { ffCode: "NOT_FOUND", ffHint: MANUAL_NO_OPPONENT_HINT }))
         .hint,
     ).toBe(MANUAL_NO_OPPONENT_HINT);
+  });
+});
+
+describe("STALE_ONLY variants (QA-1-038; season-fresh spec §3.3, §6.4)", () => {
+  it("each variant has its own fixed message and retryability; the table's otherwise", () => {
+    const plain = body(new FfError("STALE_ONLY"));
+    expect(plain.message).toBe(ERROR_TABLE.STALE_ONLY.message);
+    expect(plain.retryable).toBe(true);
+    expect(body(new FfError("STALE_ONLY", { variant: "dataset_unreadable" })).message).toBe(
+      DATASET_UNREADABLE_MESSAGE,
+    );
+    const progress = body(
+      new FfError("STALE_ONLY", { variant: "refresh_in_progress", hint: REFRESH_IN_PROGRESS_HINT }),
+    );
+    expect(progress.message).toBe(STALE_ONLY_VARIANTS.refresh_in_progress.message);
+    expect(progress.retryable).toBe(true);
+    expect(progress.hint).toBe(REFRESH_IN_PROGRESS_HINT);
+    const failed = body(
+      new FfError("STALE_ONLY", {
+        variant: "refresh_failed",
+        hint: refreshFailedHint("nflverse:schedules", "network"),
+      }),
+    );
+    expect(failed.message).toBe(STALE_ONLY_VARIANTS.refresh_failed.message);
+    expect(failed.hint).toContain("(network)");
+    const unpublished = body(
+      new FfError("STALE_ONLY", {
+        variant: "season_not_published",
+        hint: seasonNotPublishedHint("nflverse:schedules", 2029, "3h"),
+      }),
+    );
+    expect(unpublished.message).toBe(STALE_ONLY_VARIANTS.season_not_published.message);
+    expect(unpublished.retryable).toBe(false);
+    expect(unpublished.hint).toContain("2029");
+    // upstream's state, never "run ff refresh" (the September loop, D2 high #1)
+    expect(unpublished.hint).not.toMatch(/ff refresh/);
+  });
+  it("a variant on another code, or an unknown variant, changes nothing", () => {
+    const e = new FfError("NOT_FOUND", { variant: "refresh_failed" });
+    expect(body(e).message).toBe(ERROR_TABLE.NOT_FOUND.message);
+    const forged = new FfError("STALE_ONLY", { variant: "toString" as never });
+    expect(body(forged).message).toBe(ERROR_TABLE.STALE_ONLY.message);
+  });
+  it("every variant hint passes the result's hint check for any season and source", () => {
+    for (const season of [2026, 2027, 2028, 2029, 2030, 2041])
+      for (const src of ["nflverse:schedules", "nflverse:stats_player_week", "weather:nws"]) {
+        expect(seasonNotPublishedHint(src, season, "35h")).toMatch(/^[\x20-\x7e]{1,300}$/);
+        expect(refreshFailedHint(src, "rate_limited")).toMatch(/^[\x20-\x7e]{1,300}$/);
+      }
+    expect(REFRESH_IN_PROGRESS_HINT).toMatch(/^[\x20-\x7e]{1,300}$/);
   });
 });
 

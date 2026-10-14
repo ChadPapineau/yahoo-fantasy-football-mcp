@@ -146,16 +146,53 @@ export interface FfErrorDetails {
   /** A server-authored hint that replaces the table hint (never built from upstream text). */
   readonly hint?: string;
   /**
-   * A fixed alternative message for the code (QA-1-038): `dataset_unreadable` — STALE_ONLY for a
-   * dataset the refresh log lists as current whose file is missing or cannot be attached, which is
-   * not "older than its hard limit" and which `allow_stale` cannot help.
+   * A fixed alternative message for STALE_ONLY (STALE_ONLY_VARIANTS): why no usable release of a
+   * required dataset exists — its file is unreadable (QA-1-038), a refresh is still running or just
+   * failed (season-fresh §6.4), or upstream has not published the season yet (§3.3).
    */
-  readonly variant?: "dataset_unreadable";
+  readonly variant?: StaleOnlyVariant;
 }
 
 /** STALE_ONLY's message when the current dataset file is missing or unreadable (QA-1-038). */
 export const DATASET_UNREADABLE_MESSAGE =
   "The dataset file the last refresh recorded is missing or unreadable.";
+
+/** The STALE_ONLY variants: each a fixed message and its own retryability. */
+export const STALE_ONLY_VARIANTS = Object.freeze({
+  /** The refresh log lists a current file the server cannot attach (QA-1-038). */
+  dataset_unreadable: { message: DATASET_UNREADABLE_MESSAGE, retryable: true },
+  /** The answer-time refresh of a never-loaded or expired dataset was still running at its budget. */
+  refresh_in_progress: {
+    message: "The dataset is being refreshed now; no release within its hard limit is loaded yet.",
+    retryable: true,
+  },
+  /** The answer-time refresh of a never-loaded or expired dataset failed. */
+  refresh_failed: {
+    message: "The dataset could not be refreshed, and no release within its hard limit is loaded.",
+    retryable: true,
+  },
+  /** Upstream has not published the season a required dataset was read for (a recent check says so). */
+  season_not_published: {
+    message: "The season asked for is not published upstream yet for a required dataset.",
+    retryable: false,
+  },
+} satisfies Record<string, { message: string; retryable: boolean }>);
+/** A STALE_ONLY variant. */
+export type StaleOnlyVariant = keyof typeof STALE_ONLY_VARIANTS;
+
+/** STALE_ONLY refresh_in_progress's hint (season-fresh §6.4). */
+export const REFRESH_IN_PROGRESS_HINT =
+  "A refresh of this dataset is running now; ask again in a minute.";
+
+/** STALE_ONLY refresh_failed's hint, naming the failure code (fixed vocabulary). */
+export function refreshFailedHint(source: string, code: string): string {
+  return `The refresh of ${source} failed (${code}); ask again later, or run \`ff refresh ${source}\` in a terminal to see why.`;
+}
+
+/** STALE_ONLY season_not_published's hint: names the season and says it is upstream's state. */
+export function seasonNotPublishedHint(source: string, season: number, checkedAge: string): string {
+  return `Upstream has not published ${source} for the ${String(season)} season yet (checked ${checkedAge} ago). This is upstream's state, not a local fault; ask again after it is published.`;
+}
 
 /**
  * The server's coded error. Its `message` is the table's fixed text; nothing caller-supplied goes
@@ -354,15 +391,18 @@ export function toWireError(e: unknown, requestId: string): ToolWireErrorResult 
 export function toToolError(e: unknown, requestId: string): ToolErrorResult {
   const { code, details } = classifyError(e);
   const spec = ERROR_TABLE[code];
+  const variant =
+    code === "STALE_ONLY" &&
+    typeof details.variant === "string" &&
+    Object.prototype.hasOwnProperty.call(STALE_ONLY_VARIANTS, details.variant)
+      ? STALE_ONLY_VARIANTS[details.variant]
+      : null;
   const error: Record<string, unknown> = {
     code,
-    message:
-      code === "STALE_ONLY" && details.variant === "dataset_unreadable"
-        ? DATASET_UNREADABLE_MESSAGE
-        : spec.message,
+    message: variant?.message ?? spec.message,
     hint:
       typeof details.hint === "string" && SAFE_HINT.test(details.hint) ? details.hint : spec.hint,
-    retryable: spec.retryable,
+    retryable: variant?.retryable ?? spec.retryable,
     request_id: REQUEST_ID_RE.test(requestId) ? requestId : "r-unknown",
   };
   if (typeof details.field === "string") error.field = details.field.slice(0, 120);
