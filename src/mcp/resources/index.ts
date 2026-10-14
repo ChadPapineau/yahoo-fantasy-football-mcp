@@ -10,6 +10,7 @@ import {
   type McpServer,
   type ReadResourceResult,
 } from "@modelcontextprotocol/server";
+import { TOOL_INPUT_WEEK_MAX } from "../../config/weeks.js";
 import { LOG_ID_RE, RECOMMENDATION_KINDS } from "../../domain/reclog/types.js";
 import { toolContext, type ToolContext } from "../define.js";
 import {
@@ -256,7 +257,9 @@ export function registerResources(
       list: undefined,
       complete: {
         week: (value) =>
-          Array.from({ length: 22 }, (_, i) => String(i + 1)).filter((w) => w.startsWith(value)),
+          Array.from({ length: TOOL_INPUT_WEEK_MAX }, (_, i) => String(i + 1)).filter((w) =>
+            w.startsWith(value),
+          ),
       },
     }),
     {
@@ -267,7 +270,7 @@ export function registerResources(
     (uri, variables) => {
       const raw = variables.week;
       const w = typeof raw === "string" && /^\d{1,2}$/.test(raw) ? Number(raw) : NaN;
-      if (!(Number.isInteger(w) && w >= 1 && w <= 22))
+      if (!(Number.isInteger(w) && w >= 1 && w <= TOOL_INPUT_WEEK_MAX))
         throw new ResourceNotFoundError("ff://rec/week/{week}", "not found");
       return readAsEnvelope(uri.href, services, options, async (ctx) => {
         const lc = await leagueContext(ctx, {});

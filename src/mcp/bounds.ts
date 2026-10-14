@@ -7,6 +7,7 @@
 // (C-17); E5/E1/C2 bounds (C-18); log-id / request-id schemas (C-21, C-03); and the E12
 // `ff_record_recommendation` input schema, composed from the envelope's Rec/Dist schemas (C-08).
 import { z } from "zod/v4";
+import { TOOL_INPUT_WEEK_MAX } from "../config/weeks.js";
 import {
   GSIS_ID_RE,
   KEY_MAX_CHARS,
@@ -54,7 +55,7 @@ export type { NflTeam };
 
 /** Every bound in one frozen table (plan 02 §5; plan 07 per-tool inputs). */
 export const BOUNDS = Object.freeze({
-  week: { min: 1, max: 22 },
+  week: { min: 1, max: TOOL_INPUT_WEEK_MAX },
   season: { min: 2001, max: 2100 },
   limit: { min: 1, max: 100, default: 25 },
   offset: { min: 0, max: 10_000, default: 0 },

@@ -3,6 +3,7 @@
 // list tool: no outputSchema). Platform facts: served from what the FantasyPlatform returns; the
 // manual league's missing features carry the fixed MANUAL_FEATURE_WARNINGS (critic C-14).
 import { z } from "zod/v4";
+import { TOOL_INPUT_WEEK_MAX } from "../../config/weeks.js";
 import { appliedRounding, floorApplies } from "../../domain/scoring/engine.js";
 import { unmappedIds } from "../../domain/scoring/settings.js";
 import type { PositionType } from "../../domain/scoring/types.js";
@@ -279,7 +280,7 @@ const a2Data = z.strictObject({
         provisional: z.boolean(),
       }),
     )
-    .max(22)
+    .max(TOOL_INPUT_WEEK_MAX)
     .optional(),
   stat_map: z
     .array(z.strictObject({ stat_id: statId, canonical }))

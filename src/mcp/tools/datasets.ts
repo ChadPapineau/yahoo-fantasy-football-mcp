@@ -5,6 +5,7 @@
 // §6.4: news/injury text feeds analytics only as extracted structured features).
 import { z } from "zod/v4";
 import { freshnessClass, isExpired } from "../../config/freshness.js";
+import { REFERENCE_VINTAGES } from "../../config/reference-vintage.js";
 import { GAME_DAY_WINDOW_MS, INJURY_REPORT } from "../../domain/analytics/constants.js";
 import {
   pActive,
@@ -153,8 +154,14 @@ const d2Data = z.strictObject({
 export const LINES_EXPIRED_WARNING =
   "betting lines omitted: older than 24 h (run `ff refresh nflverse:schedules` in a terminal)";
 
-/** The fixed base-rate note (plan 07 D2). */
-export const BASE_RATES_NOTE = "Q → played 71 % 2017–2023 (05 §3.5)";
+/** The p_active base rates' basis seasons, from the reference registry (never a string here). */
+const P_ACTIVE_SEASONS = REFERENCE_VINTAGES.analytics_base_rates.basis_seasons?.p_active;
+/** The fixed base-rate note (plan 07 D2); its seasons come from the reference registry. */
+export const BASE_RATES_NOTE = `Q → played 71 % ${
+  P_ACTIVE_SEASONS === undefined
+    ? "(basis seasons unrecorded)"
+    : `${String(P_ACTIVE_SEASONS[0])}–${String(P_ACTIVE_SEASONS[1])}`
+} (05 §3.5)`;
 
 /** The teams whose players' p_active rests on a carried, expired or pending-DNP report state. */
 interface NamedStates {
