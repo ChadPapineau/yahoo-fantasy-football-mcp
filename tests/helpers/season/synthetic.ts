@@ -62,9 +62,22 @@ export function thanksgiving(year: number): string {
   return addDays(nextWeekday(`${String(year)}-11-01`, 4), 21);
 }
 
+const kickoffCache = new Map<string, string | null>();
+
+/** kickoffUtcFromEastern, memoised (the generator asks for the same slots over and over). */
+function eastern(date: string, hhmm: string): string | null {
+  const key = `${date} ${hhmm}`;
+  let v = kickoffCache.get(key);
+  if (v === undefined) {
+    v = kickoffUtcFromEastern(date, hhmm);
+    kickoffCache.set(key, v);
+  }
+  return v;
+}
+
 /** Epoch ms of an Eastern wall time (`HH:MM`) on `date`. */
 export function etMs(date: string, hhmm: string): number {
-  const iso = kickoffUtcFromEastern(date, hhmm);
+  const iso = eastern(date, hhmm);
   if (iso === null) throw new Error(`synthetic: bad Eastern time ${date} ${hhmm}`);
   return Date.parse(iso);
 }
@@ -164,7 +177,7 @@ function game(
     game_id: `${String(season)}_${pad2(week)}_${away}_${home}`,
     season,
     week,
-    kickoff: slot.time === null ? null : kickoffUtcFromEastern(slot.date, slot.time),
+    kickoff: slot.time === null ? null : eastern(slot.date, slot.time),
     away,
     home,
     stadium_id: venue,
@@ -400,7 +413,11 @@ export function setWeek18(games: readonly NflGame[]): NflGame[] {
     const slots = finalWeekSlots(weekdayOf(sun) === 0 ? sun : nextWeekday(sun, 0), idx.length);
     idx.forEach(([g, i], j) => {
       const slot = slots[j]!;
-      out[i] = { ...g, kickoff: kickoffUtcFromEastern(slot.date, slot.time), gameday: slot.date };
+      out[i] = {
+        ...g,
+        kickoff: slot.time === null ? null : eastern(slot.date, slot.time),
+        gameday: slot.date,
+      };
     });
   }
   return out;
