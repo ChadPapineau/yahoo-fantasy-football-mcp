@@ -8,7 +8,19 @@
     "src/providers/yahoo/errors.ts",
     "src/auth/token-store.ts",
     "src/cli/log.ts",
-    "src/domain/reclog/metrics.ts"
+    "src/domain/reclog/metrics.ts",
+    "src/config/weeks.ts",
+    "src/config/game-calendar.ts",
+    "src/config/cadence.ts",
+    "src/config/flex-rules.ts",
+    "src/config/reference-vintage.ts",
+    "src/domain/league/season.ts",
+    "src/domain/league/calendar.ts",
+    "src/domain/league/coverage.ts",
+    "src/domain/league/schedule-changes.ts",
+    "src/domain/league/kickoff-status.ts",
+    "src/domain/league/status-blocks.ts",
+    "src/domain/reclog/lock-check.ts"
   ],
   "exclude": ["src/cli.ts", "src/cli/cli.ts", "src/**/*.d.ts", "src/**/generated/**"]
 }

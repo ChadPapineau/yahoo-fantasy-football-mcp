@@ -25,11 +25,42 @@ const summary = (files: Record<string, ReturnType<typeof entry>>, total = entry(
   ...files,
 });
 
-describe("the committed gate is plan 05 §7", () => {
-  it("global 90/85/90/90 and the seven 100 % modules", () => {
+/** Plan 05 §7's seven 100 % modules. */
+const PLAN_05_MODULES = [
+  "src/domain/scoring/**",
+  "src/domain/gate/**",
+  "src/providers/yahoo/path.ts",
+  "src/providers/yahoo/errors.ts",
+  "src/auth/token-store.ts",
+  "src/cli/log.ts",
+  "src/domain/reclog/metrics.ts",
+];
+/** The season-fresh build's pure modules (season-fresh spec §12 B1: 100 % lines and branches). */
+const SEASON_FRESH_MODULES = [
+  "src/config/weeks.ts",
+  "src/config/game-calendar.ts",
+  "src/config/cadence.ts",
+  "src/config/flex-rules.ts",
+  "src/config/reference-vintage.ts",
+  "src/domain/league/season.ts",
+  "src/domain/league/calendar.ts",
+  "src/domain/league/coverage.ts",
+  "src/domain/league/schedule-changes.ts",
+  "src/domain/league/kickoff-status.ts",
+  "src/domain/league/status-blocks.ts",
+  "src/domain/reclog/lock-check.ts",
+];
+
+describe("the committed gate is plan 05 §7 (only ever raised)", () => {
+  it("global 90/85/90/90, plan 05's seven 100 % modules and the season-fresh pure modules", () => {
     expect(gate.global).toEqual({ lines: 90, branches: 85, functions: 90, statements: 90 });
-    expect(gate.perFile100).toHaveLength(7);
-    expect(gate.perFile100).toContain("src/domain/reclog/metrics.ts");
+    for (const m of [...PLAN_05_MODULES, ...SEASON_FRESH_MODULES])
+      expect(gate.perFile100).toContain(m);
+    // never fewer: a module may join the list, none may leave it
+    expect(gate.perFile100.length).toBeGreaterThanOrEqual(
+      PLAN_05_MODULES.length + SEASON_FRESH_MODULES.length,
+    );
+    expect(new Set(gate.perFile100).size).toBe(gate.perFile100.length);
   });
 });
 
