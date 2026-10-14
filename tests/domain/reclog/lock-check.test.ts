@@ -81,9 +81,7 @@ describe("lockCheck", () => {
     const snf = sundayNight(before, 9);
     const other =
       before.find((g) => g.week === 9 && g.kickoff === snf.kickoff && g !== snf) ??
-      (before.find(
-        (g) => g.week === 9 && g.game_id !== snf.game_id && g.kickoff !== null,
-      )!);
+      before.find((g) => g.week === 9 && g.game_id !== snf.game_id && g.kickoff !== null)!;
     // a change row for the other game that happens to carry the same old instant
     const row: ScheduleChange = {
       detected_at: "2028-10-20T00:00:00.000Z",

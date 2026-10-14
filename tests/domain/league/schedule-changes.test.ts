@@ -165,7 +165,7 @@ describe("diffSchedules", () => {
     const twice = [
       ...a,
       {
-        ...(a.find((g) => g.week === 13 && g.away === snf.away && g.home === snf.home)!),
+        ...a.find((g) => g.week === 13 && g.away === snf.away && g.home === snf.home)!,
         week: 11,
         game_id: `2027_11_${snf.away}_${snf.home}`,
         kickoff: new Date(k + 7 * D).toISOString(),
@@ -350,7 +350,7 @@ describe("changeNotificationText", () => {
     expect(changeNotificationText(rows, nowFlex - 20 * D)).toBeNull();
     expect(changeNotificationText([], nowFlex)).toBeNull();
     const venueOnly: ScheduleChange = {
-      ...(rows[0]!),
+      ...rows[0]!,
       kind: "venue",
       old_value: "BUF00",
       new_value: "LON00",

@@ -278,7 +278,7 @@ describe("seasonPhaseAt: total, monotone, in order — in every season shape", (
   it("an unknown season end bounds the postseason structurally (42 + 14 days)", () => {
     const regOnly = syntheticSeason({ season: 2026 }).filter((g) => g.game_type === "REG");
     const seasons = schedulesOf(regOnly);
-    const regEnd = ms((seasons[0]!).last_reg_end);
+    const regEnd = ms(seasons[0]!.last_reg_end);
     expect(seasonPhaseAt(regEnd + 1, seasons).phase).toBe("postseason");
     expect(seasonPhaseAt(regEnd + POSTSEASON_MAX_MS + POSTSEASON_TAIL_MS, seasons).phase).toBe(
       "postseason",

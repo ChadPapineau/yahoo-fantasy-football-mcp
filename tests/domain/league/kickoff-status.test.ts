@@ -420,8 +420,8 @@ describe("scheduleWarnings", () => {
       scheduleWarnings({
         changes: [],
         tentative: [
-          { ...(tentative[0]!), week: 16 },
-          { ...(tentative[0]!), season: 2025 },
+          { ...tentative[0]!, week: 16 },
+          { ...tentative[0]!, season: 2025 },
         ],
         season: 2026,
         weeks: [15],
