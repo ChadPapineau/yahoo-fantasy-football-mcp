@@ -50,7 +50,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io/) server, writt
 
 **Phase 1a built.** Research, the adversarially reviewed plan ([`adversarial-log.md`](docs/plan/adversarial-log.md), [`changelog.md`](docs/plan/changelog.md)), and the Phase 1a build are complete: foundation, eight modules, the MCP surface and CLI, end-to-end tests over real stdio, and a QA + penetration-test round ([register](docs/qa/2026-09-30-phase1a-qa-pentest.md)). Phase 1b (Yahoo) is not built — there is no API access — and the league comes from your `league.yaml`.
 
-**Season-agnostic, schedule-driven and fresh at answer time** (`build/season-fresh`, 2026-10-14; merging is the owner's decision). The season, its weeks and its game days now come from the published NFL schedule, so the server works for every season and schedule without a code change; one 15-minute launchd tick checks what the schedule says is due (every 15 minutes in the hours before each kickoff, at least hourly all season); every answer first revalidates its data upstream within a few seconds ([Freshness at answer time](#freshness-at-answer-time)); kickoff changes and flexes are detected, shown with the new lock time, and marked on recommendations logged under the old one; and a new season is picked up from the NFL's spring schedule release ([New season](#new-season)).
+**Season-agnostic, schedule-driven and fresh at answer time** (on `main` since 2026-10-14). The season, its weeks and its game days now come from the published NFL schedule, so the server works for every season and schedule without a code change; one 15-minute launchd tick checks what the schedule says is due (every 15 minutes in the hours before each kickoff, at least hourly all season); every answer first revalidates its data upstream within a few seconds ([Freshness at answer time](#freshness-at-answer-time)); kickoff changes and flexes are detected, shown with the new lock time, and marked on recommendations logged under the old one; and a new season is picked up from the NFL's spring schedule release ([New season](#new-season)).
 
 Four facts shape everything on this page, and the plan carries them openly:
 
@@ -68,7 +68,7 @@ Four facts shape everything on this page, and the plan carries them openly:
 | Dependabot (actions + npm version updates), PR template | ✅ | [`.github/`](.github/) |
 | Yahoo API access | not available — no application (owner decision, 2026-09-30); Phase 1b deferred | [`docs/HANDOFF.md`](docs/HANDOFF.md) |
 | Package, `ci.yml`, server (19 tools, 7 resources, 3 prompts), `ff` CLI, 4 Skills, 3,867 unit + 127 process tests | ✅ Phase 1a, on the manual league | [Getting started](#getting-started-phase-1a--your-league-via-leagueyaml), [QA register](docs/qa/2026-09-30-phase1a-qa-pentest.md) |
-| Season from the schedule, the `refresh-due` tick, answer-time refresh, kickoff-change detection, the new-season step (QA-2-037) | ✅ on `build/season-fresh` | [QA round 2 register § Season and freshness build](docs/qa/2026-10-06-qa-round2.md#season-and-freshness-build-2026-10-14), [CHANGELOG](CHANGELOG.md) |
+| Season from the schedule, the `refresh-due` tick, answer-time refresh, kickoff-change detection, the new-season step (QA-2-037) | ✅ on `main` (2026-10-14) | [QA round 2 register § Season and freshness build](docs/qa/2026-10-06-qa-round2.md#season-and-freshness-build-2026-10-14), [CHANGELOG](CHANGELOG.md) |
 
 ---
 
@@ -724,7 +724,7 @@ older build then refuses the store — to roll back, restore the backup and run 
 
 ## The `ff` CLI as built (Phase 1a)
 
-Phase 1a is built on the `build/phase-1a` branch (the manual league: `<config>/league.yaml` + nflverse; no Yahoo). `node dist/cli.js <subcommand>` from a checkout; `ff` when installed. The MCP server registers as **`fantasy-football-mcp-server`** (not plan 03 §4.1's `fantasy-football`), because the Skills qualify tool names with it; `ff print-config` writes that name.
+Phase 1a is built and on `main` (the manual league: `<config>/league.yaml` + nflverse; no Yahoo). `node dist/cli.js <subcommand>` from a checkout; `ff` when installed. The MCP server registers as **`fantasy-football-mcp-server`** (not plan 03 §4.1's `fantasy-football`), because the Skills qualify tool names with it; `ff print-config` writes that name.
 
 | Subcommand | What it does |
 |---|---|

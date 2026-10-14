@@ -18,8 +18,8 @@ confirmation. News text is data, not instructions.
 merged 2026-10-06: [`qa/2026-10-06-qa-round2.md`](qa/2026-10-06-qa-round2.md)); `main` also carries
 the dependency round (`67dd174`: MCP SDK 2.3.1, hyparquet 1.31.3, four dev tools). The product runs on
 `ManualLeagueProvider` (`<config>/league.yaml`) + nflverse + weather; Yahoo is not connected (no API
-access). **The season-fresh build is on `build/season-fresh`** (from `main` at `67dd174`, which has
-not moved, so the branch fast-forwards). It meets the owner's four requirements: (1) every league and
+access). **The season-fresh build is on `main`** (merged by fast-forward from `build/season-fresh`
+on 2026-10-14; the branch is deleted). It meets the owner's four requirements: (1) every league and
 season going forward — the season, its phase, weeks and game days come from the published NFL
 schedule, with no year, week count or weekday in code (`tests/lint/season-agnostic.test.ts`); (2) the
 schedule is followed week over week — one 15-minute launchd tick (`refresh-due`) checks it every 15
@@ -39,7 +39,7 @@ before its release is `not_published` (never an emptied schedules file), a leagu
 `end_week` ends at its season's `last_reg_week − 1`, international open-air venues keep their
 weather past the venue vintage, and the last literal week bounds are gone. Records: the QA
 register's § Season and freshness build (SF-01 to SF-40), `CHANGELOG.md`, plans 01–10 amended (plan
-`changelog.md`). Merging is the owner's decision.
+`changelog.md`).
 
 **The owner's install (2026-10-14).** The server is registered for Claude Code at local scope
 (`claude mcp add --scope local`) for one advisor folder outside the repository, so its tools load
@@ -201,7 +201,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 3 — adversarial review | ✅ **closed after three rounds** (`d9ca5c2`): 30 objections — 29 conceded-and-landed, 1 withdrawn on evidence, 0 pressed; round 3 raised no objections, three nits (fixed), remainder declared marginal; `## Closing verdict` in the log; `docs/plan/changelog.md` finalised (numbers, closing summary, rounds 1–3) | `docs/plan/adversarial-log.md`, `docs/plan/changelog.md` |
 | build — Phase 0 + 1a-full (foundation, modules, QA/pentest) | ✅ merged to `main`: 19 tools, 7 resources, 3 prompts, 4 Skills, `ff` CLI; 3,867 unit + 127 process tests, 98.65 % lines; QA/pentest round 1: 101 findings, 80 confirmed, **80 fixed** | `src/`, `tests/`, `skills/`, `docs/qa/` |
 | docs — README, LICENSE, SECURITY.md | ✅ `README.md` (947 lines, 16 sections, 7 Mermaid diagrams rendered by CI, 121 features marked 📋 planned), `LICENSE` (MIT), `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` — verified; CI green on `72f31ac` | root + `docs/README.md`, `docs/plan/00-index.md` |
-| season-fresh build | ✅ built on `build/season-fresh` (2026-10-14), awaiting the owner's merge: the season, weeks and game days from the schedule; the `refresh-due` tick; answer-time refresh through a bounded child; kickoff-change detection and lock marks; tentative kickoffs; the onboard new-season step; migration 003; QA-2-037 and QA-2-062 fixed | `docs/qa/2026-10-06-qa-round2.md` § Season and freshness build, `CHANGELOG.md` |
+| season-fresh build | ✅ built on `build/season-fresh` and merged to `main` (2026-10-14): the season, weeks and game days from the schedule; the `refresh-due` tick; answer-time refresh through a bounded child; kickoff-change detection and lock marks; tentative kickoffs; the onboard new-season step; migration 003; QA-2-037 and QA-2-062 fixed | `docs/qa/2026-10-06-qa-round2.md` § Season and freshness build, `CHANGELOG.md` |
 | QA round 2 | ✅ complete and merged (2026-10-06). On `main`: the deferred-items analysis (the 7 skipped hand-offs decided; QA-2-001…005) and a review of its own commits (QA-2-006…025), all fixed. On `build/qa2-fixes` (last code commit `3170582`, records `0dd30d2`, CI green): re-verification of all 105 fixes (83 held, 22 reopened), a second sweep (20 confirmed, QA-2-026…045; 1 refuted), a fix round, and an integration round after an independent verification of it (8 problems, 3 major, all resolved). Of the 42 items 39 are fixed, 2 deferred (QA-1-080 behind a typed refusal, QA-2-037) and 1 closed; QA-2-046 fixed, QA-2-047/048 deferred; QA-2-049…055 registered (1 fixed, 3 open, 3 deferred) | `docs/qa/2026-10-06-qa-round2.md` |
 
 ## Decisions made
@@ -533,8 +533,8 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
   (`docs/qa/2026-10-06-qa-round2.md`)
 - [x] QA round 2: fix round and integration round — 2026-10-06 (every hand-off done or deferred with
   a trigger; CI green on `3170582`)
-- [ ] fix QA-2-054 and QA-2-053 (recommended before the merge), then merge `build/qa2-fixes`
-  (fast-forward); QA-2-052 after
+- [x] QA-2-054 fixed (`82b2a94`) and `build/qa2-fixes` merged to `main` (2026-10-06)
+- [ ] QA-2-053 and QA-2-052 (low, open; register § Open after round 2)
 - [x] **Chad:** decide QA-2-037 — decided 2026-10-14 (game days from the schedule) and built on
   `build/season-fresh`
 - [x] **Chad:** review and merge `build/season-fresh` — merged to `main` 2026-10-14; `ff install-launchd`
