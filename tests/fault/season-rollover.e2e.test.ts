@@ -1,15 +1,17 @@
 // season-rollover.e2e.test.ts — a year in the life of an install, 2027–2030 (season-fresh spec §2,
-// §3.3, §4, §12 B3): synthetic schedules, published upstream from mid-May of their season, flow
-// through the REAL runner and publisher (a fake schedules source in front of them) whenever the tick's
-// own decision (`tickDecisionOf`, `refreshSeasons` of the schedule's phase) says so; at every clock —
+// §3.3, §4, §12 B3): synthetic schedules, published upstream from mid-May of their season, and the
+// per-season injuries, weekly rosters and player stats — each published upstream as nflverse does
+// (rosters from March, injuries a few days before the opener, stats once week 1 is played; before
+// that the file is a 404) — flow through the REAL runner, sources and publisher whenever the tick's own
+// decision (`tickDecisionOf`, `refreshSeasons` of the schedule's phase) says so; at every clock —
 // 15 Mar, 20 May, 20 Aug, every day from 1 Sep to two weeks after the opener, Wednesday of week 4,
 // 30 min before a Monday night game, Saturday of week 16, Christmas, Super Bowl Sunday and an April
-// off-season day — the served tools answer for the league file of the season in progress: D3 never
-// answers STALE_ONLY on this healthy install, a league file for the new season gets its week-1
-// opponents and kickoffs from the May release, and a league file left on the previous season is
-// flagged (G1 `league_matches: false`, the rollover warning in the analytics tools) once the new
-// season's preseason starts. Only the schedule is published (synthetic); the analytics tools are held
-// to "never STALE_ONLY" here, their data paths to tests/mcp/season-coverage.test.ts.
+// off-season day — the served tools answer for the league file of the season in progress: D3, D2 and
+// the analytics tools (E1, E2, E3, E5) never answer STALE_ONLY on this healthy install, a league file
+// for the new season gets its week-1 opponents and kickoffs from the May release and non-zero week-1
+// projections from May on, and a league file left on the previous season is flagged (G1
+// `league_matches: false`, the rollover warning in the analytics tools) once the new season's
+// preseason starts.
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -31,8 +33,11 @@ import { fsTempArea, runRefresh } from "../../src/sources/runner.js";
 import { venueRows } from "../../src/sources/venues.js";
 import { DS_GAMES, DS_VENUES } from "../../src/store/datasets/tables.js";
 import { storeFactory } from "../../src/store/index.js";
+import type { HttpGet } from "../../src/sources/source.js";
 import { syntheticSeasons } from "../helpers/season/synthetic.js";
 import { body, connect, makeWorld, ROOT, type World } from "../mcp/helpers/env.js";
+import { REL } from "../sources/nflverse/helpers/harness.js";
+import { rewrite } from "../sources/nflverse/helpers/rewrite.js";
 
 const D = 86_400_000;
 
@@ -66,6 +71,89 @@ function rawOf(g: NflGame): Record<string, unknown> {
 interface Upstream {
   readonly games: readonly NflGame[];
   now: number;
+}
+
+/** The per-season nflverse sources: their release tag, file, fixture stand-in and first day upstream. */
+const SEASON_SOURCES = [
+  {
+    id: "nflverse:roster_weekly" as const,
+    tag: "weekly_rosters",
+    file: (s: number) => `roster_weekly_${String(s)}.parquet`,
+    fixture: "weekly_rosters/roster_weekly_2026.excerpt.parquet",
+    // rosters from 1 March of their season
+    from: (_u: Upstream, s: number) => Date.parse(`${String(s)}-03-01T12:00:00Z`),
+  },
+  {
+    id: "nflverse:injuries" as const,
+    tag: "injuries",
+    file: (s: number) => `injuries_${String(s)}.parquet`,
+    fixture: "injuries/injuries_2026.parquet",
+    // the first practice reports, four days before the opener
+    from: (u: Upstream, s: number) => firstKickoffOf(u, s) - 4 * D,
+  },
+  {
+    id: "nflverse:stats_player_week" as const,
+    tag: "stats_player",
+    file: (s: number) => `stats_player_week_${String(s)}.parquet`,
+    fixture: "stats_player/stats_player_week_2026.parquet",
+    // once week 1 has been played
+    from: (u: Upstream, s: number) => lastWeekOneKickoffOf(u, s) + D,
+  },
+];
+
+const kickoffsOf = (u: Upstream, s: number, week?: number): number[] =>
+  u.games
+    .filter(
+      (g) =>
+        g.season === s &&
+        g.game_type === "REG" &&
+        g.kickoff !== null &&
+        (week === undefined || g.week === week),
+    )
+    .map((g) => Date.parse(g.kickoff ?? ""));
+const firstKickoffOf = (u: Upstream, s: number): number => Math.min(...kickoffsOf(u, s));
+const lastWeekOneKickoffOf = (u: Upstream, s: number): number => Math.max(...kickoffsOf(u, s, 1));
+
+/** The fixture file of a source relabelled as season `s` (cached: rewriting is the slow part). */
+const relabelled = new Map<string, Promise<Uint8Array>>();
+function bytesOf(fixture: string, s: number): Promise<Uint8Array> {
+  const key = `${fixture}|${String(s)}`;
+  let p = relabelled.get(key);
+  if (p === undefined) {
+    p = rewrite(fixture, { rows: (rs) => rs.map((r) => ({ ...r, season: s })) });
+    relabelled.set(key, p);
+  }
+  return p;
+}
+
+/**
+ * Upstream's release assets for the per-season sources at `u.now`: a season's file is served from
+ * its first day upstream (404 before), and each tag's timestamp.txt moves with every new season.
+ */
+function upstreamHttp(u: Upstream): HttpGet {
+  const seasons = [...new Set(u.games.map((g) => g.season))];
+  return async (url, opts) => {
+    const reply = (status: number, body: Uint8Array) => ({
+      status,
+      body,
+      headers: {},
+      final_url: "https://release-assets.githubusercontent.com/x",
+    });
+    if (opts.signal.aborted) throw new Error("aborted");
+    for (const src of SEASON_SOURCES) {
+      if (url === `${REL}/${src.tag}/timestamp.txt`) {
+        const live = seasons.map((s) => src.from(u, s)).filter((t) => t <= u.now);
+        const at = live.length === 0 ? Date.parse("2020-01-01T00:00:00Z") : Math.max(...live);
+        return reply(200, new TextEncoder().encode(new Date(at).toISOString().replace(".000", "")));
+      }
+      for (const s of seasons)
+        if (url === `${REL}/${src.tag}/${src.file(s)}`)
+          return src.from(u, s) <= u.now
+            ? reply(200, await bytesOf(src.fixture, s))
+            : reply(404, new Uint8Array(0));
+    }
+    return reply(404, new Uint8Array(0));
+  };
 }
 const publishedFrom = (season: number): number => Date.parse(`${String(season)}-05-15T12:00:00Z`);
 const releasedSeasons = (u: Upstream): number[] =>
@@ -113,57 +201,105 @@ function syntheticSource(u: Upstream): DataSource {
   };
 }
 
-/** The scheduled tick for schedules at the world's clock: refresh when (and as) it is due. */
+/** The scheduled tick at the world's clock: each source refreshed when (and as) it is due. */
 async function tick(w: World, u: Upstream): Promise<void> {
-  const now = w.clock.nowMs();
-  u.now = now;
-  w.store.reattachIfChanged();
-  const view = scheduleView(w.store.datasets.schedules, now);
-  const d = tickDecisionOf(
-    {
-      refreshLog: w.store.repos.refreshLog,
-      providerBackoff: w.store.repos.providerBackoff,
-      seasonChecks: w.store.repos.seasonChecks,
-      storeStats: () => w.store.stats(),
-    },
+  const ports = {
+    refreshLog: w.store.repos.refreshLog,
+    providerBackoff: w.store.repos.providerBackoff,
+    seasonChecks: w.store.repos.seasonChecks,
+    storeStats: () => w.store.stats(),
+  };
+  for (const id of [
     "nflverse:schedules",
-    view,
-    now,
-    0,
-  );
-  if (d?.due !== true) return;
-  const cache = w.config.cacheDir;
-  const publisher = storeFactory.openPublisher({
-    storePath: storePath(cache),
-    datasetDir: datasetDir(cache),
-    clock: w.clock,
-  });
-  try {
-    const r = await runRefresh(
-      {
-        source: syntheticSource(u),
-        seasons: refreshSeasons("nflverse:schedules", view.phase),
-        week: null,
-      },
-      {
-        http: () => Promise.reject(new Error("no network in the e2e")),
-        clock: w.clock,
-        rng: seededRng(1),
-        publisher,
-        refreshLog: w.store.repos.refreshLog,
-        schedules: w.store.datasets.schedules,
-        temp: fsTempArea(path.join(cache, "tmp")),
-        seasonChecks: w.store.repos.seasonChecks,
-        sleep: () => Promise.resolve(),
-      },
-    );
-    expect(["published", "unchanged", "skipped"], JSON.stringify(r).slice(0, 300)).toContain(
-      r.status,
-    );
-  } finally {
-    publisher.close();
+    "nflverse:injuries",
+    "nflverse:roster_weekly",
+    "nflverse:stats_player_week",
+  ] as const) {
+    const now = w.clock.nowMs();
+    u.now = now;
+    w.store.reattachIfChanged();
+    const view = scheduleView(w.store.datasets.schedules, now);
+    const d = tickDecisionOf(ports, id, view, now, 0);
+    if (d?.due !== true) continue;
+    const cache = w.config.cacheDir;
+    const publisher = storeFactory.openPublisher({
+      storePath: storePath(cache),
+      datasetDir: datasetDir(cache),
+      clock: w.clock,
+    });
+    try {
+      const r = await runRefresh(
+        {
+          source: id === "nflverse:schedules" ? syntheticSource(u) : NFLVERSE_SOURCES[id],
+          seasons: refreshSeasons(id, view.phase),
+          week: null,
+        },
+        {
+          http: upstreamHttp(u),
+          clock: w.clock,
+          rng: seededRng(1),
+          publisher,
+          refreshLog: w.store.repos.refreshLog,
+          schedules: w.store.datasets.schedules,
+          temp: fsTempArea(path.join(cache, "tmp")),
+          seasonChecks: w.store.repos.seasonChecks,
+          providerBackoff: w.store.repos.providerBackoff,
+          sleep: () => Promise.resolve(),
+        },
+      );
+      expect(
+        ["published", "unchanged", "skipped"],
+        `${id} ${new Date(now).toISOString()} ${JSON.stringify(r).slice(0, 300)}`,
+      ).toContain(r.status);
+    } finally {
+      publisher.close();
+    }
+    w.store.reattachIfChanged();
   }
-  w.store.reattachIfChanged();
+}
+
+/** The analytics and injury tools a user's turn calls, for the league file in force. */
+async function analyticsCalls(
+  c: Awaited<ReturnType<typeof connect>>,
+  at: string,
+  preseason: boolean,
+): Promise<void> {
+  const week = preseason ? { week: 1 } : {};
+  const calls: [string, Record<string, unknown>][] = [
+    ["ff_get_injuries", { ...week }],
+    [
+      "ff_project_players",
+      {
+        players: { player_keys: ["manual.p.00-0034857", "manual.p.00-0036900"] },
+        horizon: "week",
+        ...week,
+        n_sims: 1000,
+        seed: 1,
+      },
+    ],
+    ["ff_analyze_lineup", { ...week }],
+    ["ff_analyze_matchup", { ...week }],
+    ["ff_analyze_waivers", { positions: ["K"] }],
+  ];
+  for (const [name, args] of calls) {
+    const r = await c.client.callTool({ name, arguments: args });
+    const b = body(r) as {
+      error?: { code: string; message?: string };
+      data?: { projections?: { weeks: { points: { mean: number } }[] }[] };
+    };
+    // never STALE_ONLY on a healthy install, on any day (NOT_FOUND for a week without an opponent,
+    // a finished league's VALIDATION and the like are the tools' honest answers)
+    expect(b.error?.code, `${at} ${name}: ${JSON.stringify(b.error ?? {}).slice(0, 300)}`).not.toBe(
+      "STALE_ONLY",
+    );
+    // the new season's league file gets real week-1 projections from the May release on
+    if (name === "ff_project_players" && preseason) {
+      expect(r.isError, `${at}: ${JSON.stringify(b).slice(0, 300)}`).not.toBe(true);
+      const means = (b.data?.projections ?? []).flatMap((p) => p.weeks.map((x) => x.points.mean));
+      expect(means.length, at).toBeGreaterThan(0);
+      for (const m of means) expect(m, at).toBeGreaterThan(0);
+    }
+  }
 }
 
 /** A league file for `season` (the fixture league's teams and rules), mode 0600 in the world. */
@@ -227,7 +363,7 @@ afterAll(() => {
 
 for (const y of [2027, 2028, 2029, 2030]) {
   describe(`season ${String(y)}`, () => {
-    it("the tick keeps the schedule current; D3 and G1 answer at every clock; the rollover is flagged", async () => {
+    it("the tick keeps every source current; D3, D2, G1 and E1–E3, E5 answer (never STALE_ONLY) at every clock; the rollover is flagged", async () => {
       const games = syntheticSeasons([y - 2, y - 1, y, y + 1]);
       const u: Upstream = { games, now: 0 };
       // an install made in the previous season, its league file then the new season's from May
@@ -269,6 +405,11 @@ for (const y of [2027, 2028, 2029, 2030]) {
           expect(g1.isError).not.toBe(true);
           expect(gb.data.season.nfl_season).toBe(view.phase.season);
           expect(gb.data.season.league_matches, `${at} ${view.phase.phase}`).not.toBe(false);
+          await analyticsCalls(
+            c,
+            at,
+            leagueSeason === y && view.phase.season === y && view.phase.phase === "preseason",
+          );
         } finally {
           await c.close();
         }
