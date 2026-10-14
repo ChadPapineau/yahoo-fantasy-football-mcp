@@ -332,6 +332,15 @@ export function opponentLineup(
 
 // --- helpers -------------------------------------------------------------------------------------------
 
+/**
+ * The members of a lineup's totals in player-key order: a sum of floating-point means and variances
+ * depends on the order it is added in, and the order a caller lists its players in must never move
+ * a rounded total (QA-2-062).
+ */
+function membersOf(ps: readonly LineupPlayer[]): TotalMember[] {
+  return [...ps].sort((a, b) => cmpStr(a.player_key, b.player_key)).map(member);
+}
+
 function member(p: LineupPlayer): TotalMember {
   return {
     player_key: p.player_key,
@@ -1209,7 +1218,7 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
     );
     if (oppSide.stood_in.length > 0) assumptions.push(standInAssumption(oppSide.stood_in));
   }
-  const oppMembers = oppStarters.map(member);
+  const oppMembers = membersOf(oppStarters);
 
   const meanA = solve({
     slots,
@@ -1220,9 +1229,9 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
     force,
   });
   const meanStarters = startersOf(meanA, players, slots);
-  const meanM = lineupMoments(meanStarters.map(member));
+  const meanM = lineupMoments(membersOf(meanStarters));
   const moments = (st: readonly LineupPlayer[]): PairMoments => {
-    const mem = st.map(member);
+    const mem = membersOf(st);
     if (opponent !== null) return pairMoments(mem, oppMembers);
     const m = lineupMoments(mem);
     // no opponent: ΔP(win) is measured against an evenly matched opponent (the best mean lineup)
@@ -1452,22 +1461,25 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   // same-team covariances), each change into a seat that scores 0 now (empty, or held by a player who
   // will not score) by its entrant's own quantiles — as in `swaps` (rule 3): such a change cannot
   // lose points, so its p10 is never pushed below 0 by a symmetric approximation
-  const curMembers = curStarters.map(member);
+  const curMembers = membersOf(curStarters);
   const curM = lineupMoments(curMembers);
   const deltaOf = (
     starters: readonly LineupPlayer[],
     f: Flow,
   ): { value: number; p10: number; p90: number } => {
     // the outgoing player of such a change scores exactly 0: he adds nothing to the current side
-    const fills = f.pairs.filter(freesZeroSeat).map((pr) => pr.in);
-    const swappedMembers = starters.filter((p) => !fills.includes(p)).map(member);
+    const fills = f.pairs
+      .filter(freesZeroSeat)
+      .map((pr) => pr.in)
+      .sort((a, b) => cmpStr(a.player_key, b.player_key));
+    const swappedMembers = membersOf(starters.filter((p) => !fills.includes(p)));
     const swappedM = lineupMoments(swappedMembers);
     const covSC = lineupCov(swappedMembers, curMembers);
     const sdSwapped = Math.sqrt(Math.max(0, swappedM.v + curM.v - 2 * covSC));
     const dMuSwapped = swappedM.mu - curM.mu;
     const fillSum = (q: (d: Dist) => number): number => fills.reduce((x, p) => x + q(p.points), 0);
     return {
-      value: round(lineupMoments(starters.map(member)).mu - curM.mu),
+      value: round(lineupMoments(membersOf(starters)).mu - curM.mu),
       p10: round(dMuSwapped - Z90 * sdSwapped + fillSum((d) => d.p10)),
       p90: round(dMuSwapped + Z90 * sdSwapped + fillSum((d) => d.p90)),
     };
@@ -1541,7 +1553,7 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
     ),
   ];
 
-  const keptM = lineupMoments(keptStarters.map(member));
+  const keptM = lineupMoments(membersOf(keptStarters));
   const roleGames = keptStarters.map((p) => p.role_games ?? 0);
   const rec: Rec = {
     action: noMove

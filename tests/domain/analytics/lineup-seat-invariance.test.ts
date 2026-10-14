@@ -283,6 +283,71 @@ describe("QA-2-062 — the lineup decision never depends on a tie-break", () => 
     }
   });
 
+  it("the totals behind Δ are summed in one order: the input reversed rounds alike", () => {
+    // the property's shrunk case (superflex): Δ's p90 read 56.8423 one way and 56.8422 the input
+    // reversed — a floating-point sum taken in the caller's order
+    const q = (mean: number, w: number, shape: Shape, seat: Spec["seat"]): Spec => ({
+      pos: "QB",
+      alt: null,
+      mean,
+      w,
+      shape,
+      seat,
+      out: false,
+      locked: false,
+    });
+    const specs: Spec[] = [
+      q(1, 0.05, "symmetric", "bench"),
+      q(4, 0.07065222863986775, "skewed", "own"),
+      { ...q(1, 0.7832033480800921, "skewed", "own"), pos: "RB" },
+      ...Array.from({ length: 6 }, () => q(1, 0.05, "symmetric", "own")),
+      q(29, 0.9564445561470535, "symmetric", "own"),
+      q(1, 0.05, "symmetric", "own"),
+    ];
+    const table = TABLES[1];
+    const players = rosterOf(specs, table);
+    const run = (ps: readonly LineupPlayer[]) =>
+      analyzeLineup({
+        slots: table.slots,
+        players: ps,
+        opponent: null,
+        clock,
+        fills_in_swaps: true,
+      });
+    const id = (k: string): string => k;
+    const want = decision(run(players), players, id);
+    expect(decision(run([...players].reverse()), players, id)).toEqual(want);
+  });
+
+  it("a current lineup listing more starters in a slot than it has seats: decided alike in any order", () => {
+    // three WRs listed at WR (two seats) — a league file typed by hand — and two WR entrants on the
+    // bench: the solve's own seating is re-matched under the same rules, whatever the input order
+    const slots = slotsOf([
+      { name: "WR", count: 2 },
+      { name: "W/R/T", count: 1 },
+      { name: "BN", count: 5 },
+    ]);
+    const listed = [7, 5, 3].map((m) =>
+      player("WR", m, { slot: "WR", points: { ...dist(m, m * 0.05), p10: -1 } }),
+    );
+    const bench = [18, 12].map((m) => player("WR", m, { points: dist(m, m * 0.05) }));
+    const roster = [...listed, ...bench];
+    const runs = [
+      roster,
+      [...roster].reverse(),
+      [bench[1], listed[2], bench[0], listed[0], listed[1]],
+    ]
+      .map((players) => players.filter((p): p is LineupPlayer => p !== undefined))
+      .map((players) =>
+        analyzeLineup({ slots, players, opponent: null, clock, fills_in_swaps: true }),
+      );
+    const id = (k: string): string => k;
+    const [first] = runs;
+    if (first === undefined) throw new Error("no run");
+    const want = decision(first, roster, id);
+    for (const r of runs) expect(decision(r, roster, id)).toEqual(want);
+  });
+
   it("two WR entrants for a WR starter's seat and an empty flex: the pairing follows the players", () => {
     // equal gain either way (both changes are made); the strong WR's swap is decisive and the weak
     // one fills the flex, or the weak WR's swap with the strong one at the flex — whatever the
