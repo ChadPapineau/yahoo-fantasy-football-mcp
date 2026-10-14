@@ -41,22 +41,39 @@ weather past the venue vintage, and the last literal week bounds are gone. Recor
 register's § Season and freshness build (SF-01 to SF-40), `CHANGELOG.md`, plans 01–10 amended (plan
 `changelog.md`). Merging is the owner's decision.
 
+**The owner's install (2026-10-14).** The server is registered for Claude Code at local scope
+(`claude mcp add --scope local`) for one advisor folder outside the repository, so its tools load
+only in sessions started in that folder; the four Skills are linked into that folder's
+`.claude/skills`; the datasets are loaded (`ff refresh all`); the `refresh-due` tick and the weekly
+prune and backup jobs are installed (`ff install-launchd`); and an `ff` shortcut is on `PATH`. The
+league file is the one piece missing. Setting it up found QA-2-063 (`ff doctor` did not see a
+local-scope registration and said no client was configured), fixed on
+`build/doctor-scope-and-setup-docs`.
+
 Owner's next steps, in order:
 
-1. **Review and merge `build/season-fresh`** (fast-forward) once CI on its head is green — the `ci`
-   workflow is the full gate (lint, typecheck, test with the coverage gate, supply-chain, pack,
-   process, smoke, skills), plus `docs` and `secrets`. Open low items for a later pass, unchanged:
-   QA-2-052, QA-2-053 and QA-2-056 to QA-2-061 (register § Open after round 2).
-2. **Upgrade an install — one step, once:** `git pull && npm ci && npm run build`, then
-   **`ff install-launchd`**. It installs the `refresh-due` tick and removes the four retired
-   per-source jobs; until it runs the old jobs keep working and `ff doctor` row 11 says so. The store
-   migrates itself to version 3 on first use (backup taken first; no `ff refresh all` is needed —
-   `ds_schema` did not change). Rollback: CHANGELOG § Changed (restore `store.sqlite.bak-v2`, boot out
-   `io.github.fantasy-football-mcp.ff.refresh-due`, run the older build's `install-launchd`). Off
-   macOS: `ff refresh due` every 15 min with systemd or cron. Restart the clients after upgrading
-   (a server started before the upgrade turns its answer-time refresh off and says so).
-   A new install: README § Getting started (`print-config` → add to Claude, copy the Skills,
-   `ff refresh all`, `/onboard`, `ff install-launchd`).
+1. **Write the league file: run `/onboard`** in a Claude Code session started in the advisor folder
+   (the only place the tools load). The Skill asks for the scoring, roster slots and players and shows
+   the `league.yaml` to save as `~/.config/fantasy-football-mcp/league.yaml` (`chmod 600`; it never
+   goes into a repository). Then `ff doctor`: row 4 (league file) and row 23 (its season) should
+   read ok; row 2 reads ok, naming the local-scope entry and its folder, once item 2 is merged and
+   built.
+2. **Review and merge `build/doctor-scope-and-setup-docs`** (fast-forward) once CI on its head is
+   green — the `ci` workflow is the full gate (lint, typecheck, test with the coverage gate,
+   supply-chain, pack, process, smoke, skills), plus `docs` and `secrets`: QA-2-063 and these records.
+   Open low items for a later pass, unchanged: QA-2-052, QA-2-053 and QA-2-056 to QA-2-061 (register
+   § Open after round 2).
+   **Another install made before the season-fresh build — one step, once:** `git pull && npm ci &&
+   npm run build`, then **`ff install-launchd`**. It installs the `refresh-due` tick and removes the
+   four retired per-source jobs; until it runs the old jobs keep working and `ff doctor` row 11 says
+   so. The store migrates itself to version 3 on first use (backup taken first; no `ff refresh all`
+   is needed — `ds_schema` did not change). Rollback: CHANGELOG § Changed (restore
+   `store.sqlite.bak-v2`, boot out `io.github.fantasy-football-mcp.ff.refresh-due`, run the older
+   build's `install-launchd`). Off macOS: `ff refresh due` every 15 min with systemd or cron. Restart
+   the clients after upgrading (a server started before the upgrade turns its answer-time refresh off
+   and says so).
+   A new install: README § Getting started (`print-config` → add to Claude, at user scope or for one
+   folder with `--scope local`; copy the Skills, `ff refresh all`, `/onboard`, `ff install-launchd`).
 3. *(closed 2026-10-14, SF-34)* The league `end_week` default now comes from the league season's
    schedule (`last_reg_week − 1`), and its fallback's warning reaches every tool that reads the league.
 4. **Owner decisions, each with a recommendation** (register § Open after round 2 has the evidence
@@ -92,10 +109,13 @@ Owner's next steps, in order:
      §5.6's 100 MB is measured after item 14's smaller sample encoding.
    - **The contract-2 batch** needs no decision now (§ Decisions made, 2026-10-14): it fires on its
      own trigger.
-5. **A17, Claude Desktop half (about 10 minutes, mostly the app restart; steps in item 9).** The
-   Claude Code half is recorded under "Build facts" (2026-10-06: the model sees both copies). The
-   same manual step should note Claude Desktop's tool-call timeout (plan 01 A-13: answer-time refresh
-   assumes ≥ 15 s).
+5. *(closed 2026-10-14, the owner's decision)* **A17.** The Claude Code half is recorded under
+   "Build facts" (2026-10-06: both copies reach the model). Claude Desktop is not measured: Desktop
+   rewrites its MCP config from memory on quit (a test entry added while it ran was dropped on
+   restart), and the answer cannot change the design, because the server must fit the stricter
+   client's budget, which Claude Code already establishes. Plan 01 A-13 (Claude Desktop's tool-call
+   timeout ≥ 15 s) stays an assumption; a client with a shorter timeout uses
+   `FF_ON_DEMAND_REFRESH=background` (README § Freshness at answer time).
 6. **Then Phase 2** (usage data, waivers for all positions — with the E5 schema deferred from 1a,
    § Deferred designs — trades, injury cascades, news).
 
@@ -238,6 +258,7 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
 | 2026-10-14 | **Deferred as one batch: tool contract 1 → 2** — widen the tool-input week bound (`TOOL_INPUT_WEEK_MAX` 22) and add an optional `season` to `ff_analyze_retrospective` and `ff_list_recommendations`, with every Skill's metadata in the same push. Everything below the tool inputs is data-driven now. **Reopen trigger:** a published NFL schedule with a last week past 22 (`ff doctor` row 23 / G1 `schedule_week_bound` turns red), the first league-file rollover with logged records from the previous season (expected August 2027), or the first release — whichever comes first. Until then last season's review uses `FF_LEAGUE_FILE=<config>/league-<season>.yaml` | an input-schema change bumps `tool_contract` (2026-10-06 decision) and couples the registry with every `SKILL.md` and eval; batching makes one bump |
 | 2026-10-14 | **Season-agnostic rule** in `CONTRIBUTING.md`, enforced by `tests/lint/season-agnostic.test.ts`: no year literal or weekday rule in `src/` outside the vintage-stamped reference tables (`src/config/reference-vintage.ts`, `src/config/flex-rules.ts`) | the owner's requirement (1); reference data that must be written down warns once a season passes its vintage |
 | 2026-10-14 | **Dependency round adopted** (`67dd174`): MCP SDK server and client 2.3.1 (core 2.3.1; licence Apache-2.0 since 2.3.0, on the allow-list), hyparquet 1.31.3, four dev tools. **Deferred** to the next reviewed Dependabot group: hyparquet 1.31.4, typescript-eslint 8.71.2, zod 4.6.7 (zod needs the allow-list update and the one-copy rule); the `yaml@2.9.1` literal in the runtime-tree test and the SDK's `maxToolInputElements` wait for the next yaml bump and a wrapper that keeps coded errors | the same pins as Dependabot PR #7, with the allow-list regenerated by the documented procedure |
+| 2026-10-14 | **A17 closed without measuring Claude Desktop** (plan 10 A17): the Claude Code half stands (both copies of a result reach the model, 2026-10-06), and plan 07 §5.1 and C10 follow it | the owner's decision: Desktop rewrites its MCP config from memory on quit (a test entry added while it ran was dropped on restart), and the answer cannot change the design — the server must fit the stricter client's budget, which Claude Code already establishes. Reopen if Claude Code stops forwarding both copies (re-run `scripts/dev/a17-check.mjs`) or a Desktop-only install meets a budget problem |
 | 2026-10-14 | **Deferred:** stored-projection compaction (an owner decision against plan 10 T12; reopen at plan 01 §5.6's 100 MB measured after item 14); `FF_LEAGUE_KEYS` per season (Phase 1b; reopen when it starts) | neither blocks a season; both are recorded in the register's SF table |
 
 ## Stack facts (checked 2026-09-29; current pins 2026-10-14)
@@ -287,9 +308,10 @@ expired token. Details: `docs/research/03-yahoo-api.md` §A, §G.
   step gives:
   - Claude Code 2.1.238: structuredContent visible to the model: yes (2026-10-06,
     `scripts/dev/a17-check.mjs`). Every result that carries `structuredContent` reaches the model
-    twice (its text block holds the same JSON); the C10 list tools keep omitting it (plan 07 C1),
-    and plan 07 §5.1 is re-based once the Claude Desktop line is in.
-  - Claude Desktop: not recorded yet (manual).
+    twice (its text block holds the same JSON); the C10 list tools keep omitting it (plan 07 C1).
+  - Claude Desktop: not measured — A17 closed on the Claude Code half by the owner's decision
+    (2026-10-14; § Decisions made): the server must fit the stricter client's budget, which the
+    Claude Code line establishes.
 
 ## Deferred designs (recorded 2026-10-06, so they are not re-derived)
 
@@ -415,8 +437,10 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
    would rather pay for a consensus feed as a baseline/comparator, say so
    (`04` §C, `05` §16 item 12).
 
-9. **A17 needs Chad (about 10 minutes for both clients, most of it the Claude Desktop restart).**
-   The automated half is green: in fixture mode `ff_debug_echo`'s nonce is only in
+9. ~~**A17 needs Chad.**~~ **Closed 2026-10-14 (the owner's decision): Claude Desktop is not
+   measured** (§ Decisions made; Desktop rewrites its MCP config from memory on quit, so an entry
+   added while it runs is dropped — quit it first if this is ever run). The steps are kept for a
+   reopen. The automated half is green: in fixture mode `ff_debug_echo`'s nonce is only in
    `structuredContent`, and the C10 list tools omit it. The question only a real client answers:
    does Claude Code, and does Claude Desktop, show the model the `structuredContent` copy as well
    as the text (two copies per result → plan 07 §5.1's token budgets halve)? Record each answer
@@ -502,7 +526,8 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
 - [x] history rewrite for the machine-derived commit email (QA-1-095) — 2026-10-06
 - [x] the seven skipped round-1 hand-offs decided — 2026-10-06 (§ Decisions made)
 - [x] A17, Claude Code half — 2026-10-06 (Build facts: both copies reach the model)
-- [ ] **Chad:** A17, Claude Desktop half (item 9) — record its line under "Build facts"
+- [x] ~~**Chad:** A17, Claude Desktop half~~ — closed 2026-10-14 without measuring Desktop (the
+  owner's decision; § Decisions made)
 - [x] vulnerability alerts and Dependabot security updates enabled — 2026-10-06 (QA-2-019)
 - [x] QA round 2: per-fix re-verification and the second sweep — 2026-10-06
   (`docs/qa/2026-10-06-qa-round2.md`)
@@ -512,9 +537,12 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
   (fast-forward); QA-2-052 after
 - [x] **Chad:** decide QA-2-037 — decided 2026-10-14 (game days from the schedule) and built on
   `build/season-fresh`
-- [ ] **Chad:** review and merge `build/season-fresh`; then `ff install-launchd` once on each install
-- [ ] wire the league season's last regular week into `src/providers/manual/provider.ts` (▶ NEXT STEP
-  item 3)
+- [x] **Chad:** review and merge `build/season-fresh` — merged to `main` 2026-10-14; `ff install-launchd`
+  run on the owner's install the same day
+- [ ] **Chad:** run `/onboard` in the advisor folder to write `league.yaml` (▶ NEXT STEP item 1)
+- [ ] **Chad:** review and merge `build/doctor-scope-and-setup-docs` (QA-2-063; ▶ NEXT STEP item 2)
+- [x] wire the league season's last regular week into `src/providers/manual/provider.ts` — closed
+  2026-10-14 (SF-34; ▶ NEXT STEP item 3)
 - [ ] the contract-2 batch when its trigger fires (§ Decisions made, 2026-10-14)
 - [ ] **Chad:** QA-1-080 (with QA-2-050), QA-2-045 (TE premium),
   QA-2-047, QA-2-048, QA-2-051, QA-2-055 and item 12 when convenient (recommendations in ▶ NEXT STEP)
@@ -686,3 +714,12 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
   and QA records (`9a1fb72`). Open: the provider's `end_week` wiring (▶ NEXT STEP item 3), the fault
   row for a renamed column (needs a schema-broken parquet fixture), an end-to-end rollover with
   synthetic roster/stats/injury sources, and the contract-2 batch.
+- 2026-10-14 — **The owner's install, QA-2-063 and A17 closed** (`build/doctor-scope-and-setup-docs`,
+  from `main` at `c22b81d`). The owner's install was set up: the server registered for Claude Code at
+  local scope for one advisor folder outside the repository, the four Skills linked into that
+  folder's `.claude/skills`, the datasets loaded, the tick and the prune and backup jobs installed,
+  an `ff` shortcut on `PATH`; the league file is next (`/onboard`). `ff doctor` said no client was
+  configured although the server was registered and connected: QA-2-063, fixed test-first (rows 2
+  and 3 read user and local scope and name the scope and folder; row 13 counts the servers that load
+  beside ours; `print-config` and `uninstall` name `--scope local`), eleven mutants red (`9b25e8c`,
+  register `86db95d`). A17 closed on the Claude Code half by the owner's decision (§ Decisions made).

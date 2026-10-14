@@ -693,7 +693,13 @@ No Yahoo account, API key or password is involved anywhere. You need Node and ab
 3. **Add the server to Claude:** `node dist/cli.js print-config --client code` prints a `claude mcp add …`
    command (absolute paths, no secrets) — run it. For Claude Desktop, `--client desktop` prints the JSON to
    merge into `~/Library/Application Support/Claude/claude_desktop_config.json`, then restart Desktop.
-4. **Install the Skills:** copy each folder in `skills/` except `_shared` into `~/.claude/skills/`.
+   **To keep the tools out of your other projects,** register the server for one folder instead: run the
+   printed command in a folder you choose with `--scope local` in place of `--scope user`. The tools then
+   load only in Claude Code sessions started in that folder; Claude Code keeps the entry in
+   `~/.claude.json`, so nothing is written into the folder, and `ff doctor` row 2 names the scope and folder
+   it found.
+4. **Install the Skills:** copy each folder in `skills/` except `_shared` into `~/.claude/skills/` (with a
+   folder-scoped registration, into that folder's `.claude/skills/` instead).
 5. **Load the data:** `node dist/cli.js refresh all` (nflverse schedules, injuries, rosters, weekly stats,
    and weather — all free and keyless), then `node dist/cli.js doctor`.
 6. **Describe your league:** in Claude, say `/onboard`. The Skill asks for your scoring, roster slots and
