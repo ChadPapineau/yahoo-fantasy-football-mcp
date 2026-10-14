@@ -95,3 +95,23 @@ export function throwingScheduleReader(
     calls: () => calls,
   };
 }
+
+/** A schedules file that can be republished in place (same reader object, a new file version). */
+export function mutableScheduleReader(
+  games: readonly NflGame[],
+  o: ReaderOptions = {},
+): CountingScheduleReader & { publish(next: readonly NflGame[], o?: ReaderOptions): void } {
+  let current = scheduleReaderOf(games, o);
+  let calls = 0;
+  return {
+    games(season: number, weeks: readonly Week[]) {
+      calls++;
+      return current.games(season, weeks);
+    },
+    firstKickoff: (season: number, week: Week) => current.firstKickoff(season, week),
+    calls: () => calls,
+    publish(next: readonly NflGame[], no: ReaderOptions = {}) {
+      current = scheduleReaderOf(next, no);
+    },
+  };
+}

@@ -4,7 +4,12 @@
 // for "which season is it" everywhere — the schedule data — and a bootstrap rule (the September
 // switch) only while no schedule is loaded. Pure: time comes in as epoch ms.
 import type { DatasetSourceId } from "../../config/freshness.js";
-import { easternWallTimeMs, GAME_WINDOW_MS, isIsoDate } from "../../config/game-calendar.js";
+import {
+  easternWallTimeMs,
+  firstAfter,
+  GAME_WINDOW_MS,
+  isIsoDate,
+} from "../../config/game-calendar.js";
 import type { NflGame } from "../analytics/types.js";
 import type { IsoInstant, Week } from "./types.js";
 
@@ -88,11 +93,6 @@ export function gameInstantsMs(g: NflGame): { readonly lo: number; readonly hi: 
 }
 
 const sortedWeeks = (s: ReadonlySet<Week>): Week[] => [...s].sort((a, b) => a - b);
-const maxOf = (xs: Iterable<number>): number | null => {
-  let m: number | null = null;
-  for (const x of xs) if (m === null || x > m) m = x;
-  return m;
-};
 
 /** The facts of one season from its games (games of other seasons are ignored). */
 export function seasonSchedule(games: readonly NflGame[], season: number): SeasonSchedule {
@@ -128,7 +128,7 @@ export function seasonSchedule(games: readonly NflGame[], season: number): Seaso
       lastReg = lastReg === null ? at.hi : Math.max(lastReg, at.hi);
     } else {
       lastPost = lastPost === null ? at.hi : Math.max(lastPost, at.hi);
-      if (g.game_type === "SB") sbLast = sbLast === null ? at.hi : Math.max(sbLast, at.hi);
+      if (g.game_type === "SB") sbLast = at.hi;
     }
   }
   const lastRegEnd = lastReg === null ? null : lastReg + GAME_WINDOW_MS;
@@ -145,9 +145,9 @@ export function seasonSchedule(games: readonly NflGame[], season: number): Seaso
     season,
     first_kickoff: firstReg === null ? null : iso(firstReg),
     reg_weeks: Object.freeze(regWeeks),
-    last_reg_week: maxOf(regWeeks),
+    last_reg_week: regWeeks.at(-1) ?? null,
     post_weeks: Object.freeze(postWeeks),
-    last_week: maxOf([...regWeeks, ...postWeeks]),
+    last_week: sortedWeeks(new Set([...regWeeks, ...postWeeks])).at(-1) ?? null,
     last_reg_end: lastRegEnd === null ? null : iso(lastRegEnd),
     season_end: seasonEnd === null ? null : iso(seasonEnd),
     has_final: hasFinal,
@@ -218,10 +218,12 @@ function currentWeek(s: SeasonSchedule, postseason: boolean, nowMs: number): Wee
 }
 
 function nextKickoff(seasons: readonly SeasonSchedule[], nowMs: number): IsoInstant | null {
-  let best: number | null = null;
-  for (const s of seasons)
-    for (const k of s.kickoffs_ms ?? []) if (k > nowMs && (best === null || k < best)) best = k;
-  return best === null ? null : iso(best);
+  let best = Number.POSITIVE_INFINITY;
+  for (const s of seasons) {
+    const ks = s.kickoffs_ms ?? [];
+    best = Math.min(best, ks[firstAfter(ks, nowMs)] ?? Number.POSITIVE_INFINITY);
+  }
+  return Number.isFinite(best) ? iso(best) : null;
 }
 
 /**
