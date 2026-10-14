@@ -200,6 +200,7 @@ export function sourceStatuses(
   const ports = {
     refreshLog: rl,
     providerBackoff: store.repos.providerBackoff,
+    seasonChecks: store.repos.seasonChecks,
     storeStats: () => store.stats(),
   };
   return configuredSources(config).map((s) => {
@@ -227,7 +228,7 @@ export function sourceStatuses(
           hardLimitSeconds: cls.hardLimitSeconds,
           nowMs,
         });
-    const decision = tickDecisionOf(ports, s, view.calendar, nowMs, weatherHorizonHours(s));
+    const decision = tickDecisionOf(ports, s, view, nowMs, weatherHorizonHours(s));
     const at = decision === null ? null : decision.due ? nowMs : decision.next_at_ms;
     const backoff = store.repos.providerBackoff.get(providerOf(s));
     const backoffMs = backoff === null ? Number.NaN : Date.parse(backoff.until_at);

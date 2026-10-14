@@ -12,15 +12,16 @@ import {
   type DueSource,
   type SourceState,
 } from "../config/cadence.js";
-import type { GameCalendar } from "../config/game-calendar.js";
 import type { DatasetSourceId, StampInstants } from "../config/freshness.js";
 import type {
   BackoffProvider,
   ProviderBackoffRepository,
   RefreshLogRepository,
   RefreshLogRow,
+  SeasonCheckRepository,
   StoreStats,
 } from "../domain/analytics/types.js";
+import type { ScheduleView } from "../domain/league/calendar.js";
 import { humanAge } from "./envelope.js";
 import type { McpServices, RefreshReport, RefreshSourceReport } from "./services.js";
 
@@ -64,19 +65,30 @@ const msOrNull = (iso: string | null | undefined): number | null => {
 export interface SourceStatePorts {
   readonly refreshLog: Pick<RefreshLogRepository, "current" | "latest" | "consecutiveFailures">;
   readonly providerBackoff: Pick<ProviderBackoffRepository, "get">;
+  /** A run that found its seasons unpublished upstream writes only these (no refresh_log row). */
+  readonly seasonChecks: Pick<SeasonCheckRepository, "all">;
   readonly storeStats: () => StoreStats;
 }
 
+const maxOf = (xs: readonly (number | null)[]): number | null => {
+  const v = xs.filter((x): x is number => x !== null);
+  return v.length === 0 ? null : Math.max(...v);
+};
+
 /**
- * A source's refresh state (src/config/cadence.ts `SourceState`) from refresh_log, the attachment
- * and the provider backoff — the one reading the answer-time orchestrator, G1 and the tick share:
- * a current file the server has not attached at its version is `unreadable` (QA-1-038); the last
- * attempt counts every process's runs (the 14-minute floor holds across processes).
+ * A source's refresh state (src/config/cadence.ts `SourceState`) from refresh_log, season_check, the
+ * attachment and the provider backoff — the one reading the answer-time orchestrator, G1 and the tick
+ * share: a current file the server has not attached at its version is `unreadable` (QA-1-038); the
+ * last attempt counts every process's runs (the 14-minute floor holds across processes), including a
+ * run that found every season unpublished upstream, which writes season_check rows and no refresh_log
+ * row. When that run is the newest attempt and found `phaseSeason` (the season in progress, from the
+ * schedule) unpublished while the current file does not hold it, `notPublishedAtMs` is its instant.
  */
 export function sourceStateOf(
   ports: SourceStatePorts,
   id: DatasetSourceId,
   nowMs: number,
+  phaseSeason: number,
 ): { readonly state: SourceState; readonly current: RefreshLogRow | null } {
   const current = ports.refreshLog.current().find((r) => r.source === id) ?? null;
   const attached = ports.storeStats().attached.find((a) => a.source === id);
@@ -87,16 +99,25 @@ export function sourceStateOf(
       : current.file_version === null || attached?.file_version !== current.file_version
         ? "unreadable"
         : "ok";
-  const attempts = [msOrNull(latest?.started_at), msOrNull(current?.checked_at)].filter(
-    (x): x is number => x !== null,
-  );
+  const logAttempt = maxOf([msOrNull(latest?.started_at), msOrNull(current?.checked_at)]);
+  const checks = ports.seasonChecks.all().filter((c) => c.source === id);
+  const checkAttempt = maxOf(checks.map((c) => msOrNull(c.checked_at)));
+  const phaseCheck = checks.find((c) => c.season === phaseSeason) ?? null;
+  const unpublishedAt =
+    phaseCheck?.status === "not_published" ? msOrNull(phaseCheck.checked_at) : null;
   const backoff = msOrNull(ports.providerBackoff.get(providerOf(id))?.until_at);
   return {
     current,
     state: {
       file,
       basis: current === null ? null : basisOf(current),
-      lastAttemptMs: attempts.length === 0 ? null : Math.max(...attempts),
+      lastAttemptMs: maxOf([logAttempt, checkAttempt]),
+      notPublishedAtMs:
+        unpublishedAt !== null &&
+        (logAttempt === null || unpublishedAt > logAttempt) &&
+        current?.seasons.includes(phaseSeason) !== true
+          ? unpublishedAt
+          : null,
       consecutiveFailures: ports.refreshLog.consecutiveFailures(id),
       backoffUntilMs: backoff !== null && backoff > nowMs ? backoff : null,
     },
@@ -107,17 +128,17 @@ export function sourceStateOf(
 export function tickDecisionOf(
   ports: SourceStatePorts,
   id: DatasetSourceId,
-  cal: GameCalendar,
+  view: Pick<ScheduleView, "calendar" | "phase">,
   nowMs: number,
   weatherHorizonHours: number,
 ): DueDecision | null {
   const due = dueSourceOf(id);
   if (due === null) return null;
-  const { state, current } = sourceStateOf(ports, id, nowMs);
+  const { state, current } = sourceStateOf(ports, id, nowMs, view.phase.season);
   return dueDecision({
     source: due,
     nowMs,
-    cal,
+    cal: view.calendar,
     state,
     ...(due === "weather"
       ? {

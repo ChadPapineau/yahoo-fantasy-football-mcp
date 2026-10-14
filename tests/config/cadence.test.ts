@@ -36,6 +36,8 @@ import {
   scheduleCalendar,
   type GameCalendar,
 } from "../../src/config/game-calendar.js";
+import { gameCalendarFromGames } from "../../src/domain/league/calendar.js";
+import { SYNTHETIC_SEASONS, syntheticSeason } from "../helpers/season/synthetic.js";
 
 const MIN = 60_000;
 const H = 60 * MIN;
@@ -617,6 +619,150 @@ describe("onDemandDecision", () => {
         },
       ),
       { numRuns: 500 },
+    );
+  });
+});
+
+describe("a season upstream has not published yet (the last attempt found nothing to publish)", () => {
+  // The run of such a source writes no refresh_log row (QA-1-037), only season_check rows: the source
+  // waits its calendar phase's cadence from that attempt — never the TTL guard on another season's
+  // file, never a repair every tick, never an answer held on it — over any season and any phase.
+  const NFL: readonly Exclude<DueSource, "weather">[] = [
+    "nflverse:schedules",
+    "nflverse:injuries",
+    "nflverse:roster_weekly",
+    "nflverse:stats_player_week",
+  ];
+  const seasonCals = SYNTHETIC_SEASONS.map((season, i) =>
+    gameCalendarFromGames(
+      syntheticSeason({
+        season,
+        regWeeks: ([18, 19, 20] as const)[i % 3] ?? 18,
+        opener: (["wed", "thu", "fri"] as const)[i % 3] ?? "thu",
+        seed: i,
+      }),
+      `np-${String(season)}`,
+    ),
+  );
+
+  it("the tick: not_published until the phase cadence has passed, then due; never a repair, never the TTL guard", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: seasonCals.length - 1 }),
+        fc.constantFrom(...NFL),
+        fc.constantFrom<SourceState["file"]>("ok", "never_loaded", "unreadable"),
+        // anywhere from four months before the first kickoff to two weeks after the last one
+        fc.integer({ min: 0, max: 10_000 }),
+        fc.integer({ min: 0, max: 2 }),
+        (ci, source, file, frac, failures) => {
+          const c = seasonCals[ci]!;
+          const first = c.kickoffs[0]!;
+          const last = c.kickoffs.at(-1)!;
+          const np = first - 120 * D + Math.floor(((last - first + 134 * D) * frac) / 10_000);
+          // the old file (another season's) was last checked days ago: its TTL guard would say due
+          const state: SourceState = {
+            file,
+            basis: file === "ok" ? stamp(np - 9 * D) : null,
+            lastAttemptMs: np,
+            notPublishedAtMs: np,
+            consecutiveFailures: failures,
+            backoffUntilMs: null,
+          };
+          for (let t = np; t <= np + 7 * H; t += TICK_MS) {
+            const d = dueDecision({ source, nowMs: t, cal: c, state });
+            const interval = cadenceIntervalMs(source, c, t);
+            const floor = Math.max(
+              np + MIN_RELEASE_GAP_MS,
+              np + failureBackoffMs(failures),
+              np + interval - TICK_SLACK_MS,
+            );
+            if (t < floor) {
+              expect(d.due, `${source} ${new Date(t).toISOString()}`).toBe(false);
+              expect(["not_published", "min_gap", "failure_backoff"]).toContain(d.reason);
+              expect(d.next_at_ms).not.toBeNull();
+              expect(d.next_at_ms!).toBeGreaterThan(t);
+            } else {
+              expect(d.due, `${source} ${new Date(t).toISOString()}`).toBe(true);
+              expect(d.reason).not.toBe("ttl_guard");
+            }
+          }
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it("the tick: next_at names the phase cadence's instant; a provider backoff still wins", () => {
+    for (const c of seasonCals) {
+      const np = c.kickoffs[0]! - 60 * D; // the off-season before the opener: the 6-hour cadence
+      const st = ok(np - 9 * D, { lastAttemptMs: np, notPublishedAtMs: np });
+      for (const source of NFL) {
+        const interval = cadenceIntervalMs(source, c, np + 20 * MIN);
+        expect(dueDecision({ source, nowMs: np + 20 * MIN, cal: c, state: st })).toEqual({
+          source,
+          due: false,
+          reason: "not_published",
+          next_at_ms: np + interval - TICK_SLACK_MS,
+        });
+        const until = np + interval + H;
+        expect(
+          dueDecision({
+            source,
+            nowMs: np + interval,
+            cal: c,
+            state: { ...st, backoffUntilMs: until },
+          }).reason,
+        ).toBe("provider_backoff");
+      }
+    }
+  });
+
+  it("answer time: nothing within the phase cadence, then a background check — never a wait", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: seasonCals.length - 1 }),
+        fc.constantFrom(...NFL),
+        fc.constantFrom<SourceState["file"]>("ok", "never_loaded", "unreadable"),
+        fc.integer({ min: 0, max: 10_000 }),
+        fc.boolean(),
+        fc.boolean(),
+        (ci, source, file, frac, required, expired) => {
+          const c = seasonCals[ci]!;
+          const first = c.kickoffs[0]!;
+          const last = c.kickoffs.at(-1)!;
+          const np = first - 120 * D + Math.floor(((last - first + 134 * D) * frac) / 10_000);
+          const state: SourceState = {
+            file,
+            basis: file === "ok" ? stamp(np - 9 * D) : null,
+            lastAttemptMs: np,
+            notPublishedAtMs: np,
+            consecutiveFailures: 0,
+            backoffUntilMs: null,
+          };
+          for (let t = np; t <= np + 7 * H; t += 5 * MIN) {
+            const a = onDemandDecision({ source, nowMs: t, cal: c, state, required, expired });
+            expect(a.kind, `${source} ${new Date(t).toISOString()}`).not.toBe("wait");
+            const until = Math.max(
+              np + MIN_RELEASE_GAP_MS,
+              np + cadenceIntervalMs(source, c, t) - TICK_SLACK_MS,
+            );
+            if (t < until) expect(a).toEqual({ kind: "none", reason: "not_published" });
+            else expect(a.kind).toBe("background");
+          }
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it("without a not_published attempt nothing changes (the field absent or null)", () => {
+    const now = K - 5 * D;
+    const st = ok(now - 7 * H, { lastAttemptMs: now - 20 * MIN });
+    expect(due({ nowMs: now, state: { ...st, notPublishedAtMs: null } })).toEqual(
+      due({ nowMs: now, state: st }),
+    );
+    expect(due({ nowMs: now, state: { ...st, file: "never_loaded", basis: null } }).reason).toBe(
+      "repair",
     );
   });
 });

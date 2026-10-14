@@ -263,6 +263,7 @@ export function buildServices(args: {
     {
       refreshLog: repos.refreshLog,
       providerBackoff: repos.providerBackoff,
+      seasonChecks: repos.seasonChecks,
       runLocks: repos.runLocks,
       storeStats: () => store.stats(),
       scheduleView: view,

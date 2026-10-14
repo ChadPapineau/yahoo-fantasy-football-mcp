@@ -4,6 +4,8 @@
 // fetches and writes nothing; a held tick lock exits 0 with zero requests; a second schedules
 // release with a flexed kickoff (or Week 18 set) is diffed into schedule_change rows and ONE
 // collapsed notification; the --json shape; the schedules seasons include S+1.
+import { chmodSync, copyFileSync, cpSync, rmSync } from "node:fs";
+import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { EXIT } from "../../src/cli/exit.js";
@@ -19,6 +21,7 @@ import { rewrite } from "../sources/nflverse/helpers/rewrite.js";
 import {
   fakeExec,
   fixtureEnv,
+  FIXTURE_LEAGUE,
   FIXTURES,
   makeIo,
   sandbox,
@@ -36,12 +39,15 @@ const MIN = 60_000;
 const GAMES = `${REL}/schedules/games.parquet`;
 const SCHEDULES_TS = `${REL}/schedules/timestamp.txt`;
 
-/** A counting transport over the fixture tree; `over` replaces a URL's bytes. */
-function spy(over: ReadonlyMap<string, Uint8Array | string> = new Map()): {
+/** A counting transport over the fixture tree (or `root`); `over` replaces a URL's bytes. */
+function spy(
+  over: ReadonlyMap<string, Uint8Array | string> = new Map(),
+  root: string = FIXTURES,
+): {
   fetch: FetchLike;
   calls: string[];
 } {
-  const base = fixtureFetch(FIXTURES);
+  const base = fixtureFetch(root);
   const calls: string[] = [];
   return {
     calls,
@@ -68,22 +74,29 @@ async function tick(
     env?: Record<string, string>;
     platform?: NodeJS.Platform;
     exec?: TestIo["exec"];
+    /**
+     * Serve this copy of the fixture tree and refresh the seasons the schedule's phase names
+     * (no FF_FIXTURE_DIR: the league file is a private copy of the placeholder league).
+     */
+    upstream?: string;
   } = {},
 ): Promise<Tick> {
+  const base = o.upstream === undefined ? fixtureEnv() : { FF_LEAGUE_FILE: privateLeague(s) };
   const io = makeIo(s, {
-    env: { ...fixtureEnv(), FF_WEATHER_SOURCE: "off", ...(o.env ?? {}) },
+    env: { ...base, FF_WEATHER_SOURCE: "off", ...(o.env ?? {}) },
     clock,
     ...(o.platform === undefined ? {} : { platform: o.platform }),
     ...(o.exec === undefined ? {} : { exec: o.exec }),
   });
   const { config, log } = await loadRuntime(io);
-  const t = spy(o.over);
+  const t = spy(o.over, o.upstream);
   const code = await refresh(
     io,
     config,
     log,
     {
-      targets: ["due"],
+      targets: o.targets ?? ["due"],
+      ...(o.seasons === undefined ? {} : { seasons: o.seasons }),
       force: false,
       notify: o.notify ?? false,
       json: o.json ?? false,
@@ -96,6 +109,22 @@ async function tick(
     new AbortController().signal,
   );
   return { code, io, calls: t.calls, out: io.out.text };
+}
+
+/** A private (0600) copy of the placeholder league in the sandbox (outside fixture mode). */
+function privateLeague(s: Sandbox): string {
+  const league = path.join(s.dir, "league.yaml");
+  copyFileSync(FIXTURE_LEAGUE, league);
+  chmodSync(league, 0o600);
+  return league;
+}
+
+/** A copy of the fixture tree without `remove` (relative paths): an upstream missing those files. */
+function upstreamWithout(s: Sandbox, ...remove: string[]): string {
+  const root = path.join(s.dir, "upstream");
+  cpSync(FIXTURES, root, { recursive: true });
+  for (const r of remove) rmSync(path.join(root, r));
+  return root;
 }
 
 const db = (s: Sandbox): DatabaseSync =>
@@ -308,6 +337,57 @@ describe("a schedules release that moves kickoffs", () => {
     expect(moved).toHaveLength(8);
     expect(fx.calls.filter((c) => c.file === OSASCRIPT)).toEqual([]);
   }, 90_000);
+});
+
+describe("a season upstream has not published yet (injuries [S] from the May release to its first report)", () => {
+  // The run of such a season writes no refresh_log row, only season_check rows. Before 2026-10-14
+  // nothing the floor read saw it: the tick re-polled the season every quarter-hour (timestamp.txt
+  // plus a 404, ~190 GitHub requests a day for months) and every answer reading injuries spawned a
+  // child that polled it again.
+  const INJ = (u: string): boolean => u.includes("/injuries/");
+
+  it("a tick a minute later makes no injuries request; the next poll is the phase cadence later", async () => {
+    sb = sandbox();
+    const upstream = upstreamWithout(sb, "nflverse/injuries/injuries_2026.parquet");
+    const clock = fixedClock("2026-06-01T12:00:00.000Z");
+    const manual = (targets: string[], seasons: string) =>
+      tick(sb!, clock, { upstream, targets, seasons });
+    expect((await manual(["nflverse:schedules"], "2025,2026")).code).toBe(EXIT.OK);
+    expect((await manual(["nflverse:injuries"], "2025")).code).toBe(EXIT.OK);
+
+    clock.set("2026-09-05T12:00:00.000Z");
+    // (the fixture tree has no 2025 stats file, so that source fails here: not what this test is about)
+    const t1 = await tick(sb, clock, { upstream });
+    expect(t1.out).toMatch(/nflverse:injuries\s+skipped\s+not_published/);
+    expect(t1.calls.filter(INJ).length).toBeGreaterThan(0);
+
+    clock.set("2026-09-05T12:01:00.000Z");
+    const t2 = await tick(sb, clock, { upstream });
+    expect(t2.calls.filter(INJ)).toEqual([]);
+    expect(t2.out).toMatch(/nflverse:injuries\s+not_due min_gap/);
+    clock.set("2026-09-05T12:02:00.000Z");
+    const dry = await tick(sb, clock, { upstream, dryRun: true });
+    expect(dry.out).toMatch(/nflverse:injuries\s+not_due min_gap/);
+
+    // past the 14-minute floor the season is still not re-polled: the next check is the phase
+    // cadence after the attempt (2 h around games, 6 h otherwise), and the tick then polls it
+    clock.set("2026-09-05T12:16:00.000Z");
+    const t3 = await tick(sb, clock, { upstream });
+    expect(t3.calls.filter(INJ)).toEqual([]);
+    clock.set("2026-09-05T12:17:00.000Z");
+    const plan = JSON.parse(
+      (await tick(sb, clock, { upstream, dryRun: true, json: true })).out,
+    ) as { decisions: { source: string; due: boolean; reason: string; next_at: string | null }[] };
+    const inj = plan.decisions.find((d) => d.source === "nflverse:injuries");
+    expect(inj?.due).toBe(false);
+    expect(inj?.reason).toBe("not_published");
+    const next = Date.parse(inj?.next_at ?? "");
+    expect(next - Date.parse("2026-09-05T12:00:00.000Z")).toBeGreaterThanOrEqual(118 * MIN);
+    clock.set(Math.ceil(next / (15 * MIN)) * 15 * MIN);
+    const t4 = await tick(sb, clock, { upstream });
+    expect(t4.calls.filter(INJ).length).toBeGreaterThan(0);
+    expect(t4.out).toMatch(/nflverse:injuries\s+skipped\s+not_published/);
+  }, 120_000);
 });
 
 describe("the seasons each source asks for come from the schedule's phase (outside fixture mode)", () => {

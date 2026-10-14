@@ -123,10 +123,11 @@ async function tick(w: World, u: Upstream): Promise<void> {
     {
       refreshLog: w.store.repos.refreshLog,
       providerBackoff: w.store.repos.providerBackoff,
+      seasonChecks: w.store.repos.seasonChecks,
       storeStats: () => w.store.stats(),
     },
     "nflverse:schedules",
-    view.calendar,
+    view,
     now,
     0,
   );

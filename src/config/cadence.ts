@@ -3,7 +3,9 @@
 // `onDemandDecision`. Both read the game calendar (kickoff-relative windows from the schedule data,
 // src/config/game-calendar.ts), the source's refresh_log state and the provider backoff, and never
 // touch the network, the clock or the store themselves. The 14-minute floor between two attempts for
-// one release is enforced across processes because `lastAttemptMs` comes from refresh_log.
+// one release is enforced across processes because `lastAttemptMs` comes from the store (refresh_log
+// and season_check — a run that found its season unpublished writes only the latter), and a season
+// upstream has not published yet is checked once per phase cadence, never every tick.
 import {
   anyKickoffIn,
   firstAfter,
@@ -105,8 +107,17 @@ export interface SourceState {
   readonly file: "ok" | "never_loaded" | "unreadable";
   /** The current file's instants (refresh_log current row), null when never loaded. */
   readonly basis: StampInstants | null;
-  /** max(latest refresh_log started_at for the source, any outcome; basis checked_at). */
+  /**
+   * The newest attempt by any process: the latest refresh_log started_at (any outcome), a later
+   * "unchanged" check of the current file, and the newest season_check of the source.
+   */
   readonly lastAttemptMs: number | null;
+  /**
+   * When the newest attempt found the season in progress not published upstream yet (a
+   * `not_published` run: season_check rows only, no refresh_log row — QA-1-037) and the current file
+   * does not hold that season: that attempt's instant. Null (or absent) otherwise.
+   */
+  readonly notPublishedAtMs?: number | null;
   readonly consecutiveFailures: number;
   /** provider_backoff until (Retry-After / 429), null when none. */
   readonly backoffUntilMs: number | null;
@@ -138,7 +149,9 @@ export type DueReason =
   | "cadence"
   | "not_due"
   | "no_games"
-  | "same_bucket";
+  | "same_bucket"
+  /** The newest attempt found the season unpublished upstream: waiting the phase cadence. */
+  | "not_published";
 
 /** The tick's decision for one source. */
 export interface DueDecision {
@@ -210,13 +223,45 @@ export function cadenceIntervalMs(
 }
 
 /**
+ * What holds an attempt back now, from the last attempt by any process: the 14-minute floor
+ * (`min_gap`), then a failure streak's backoff (`failureBackoffMs(n)`); null when nothing does.
+ */
+function floorOf(
+  state: SourceState,
+  nowMs: number,
+): { readonly reason: "min_gap" | "failure_backoff"; readonly until: number } | null {
+  const last = state.lastAttemptMs;
+  if (last === null) return null;
+  if (nowMs - last < MIN_RELEASE_GAP_MS)
+    return { reason: "min_gap", until: last + MIN_RELEASE_GAP_MS };
+  const backoff = failureBackoffMs(state.consecutiveFailures);
+  if (backoff > 0 && nowMs < last + backoff)
+    return { reason: "failure_backoff", until: last + backoff };
+  return null;
+}
+
+/**
+ * When a source whose newest attempt found its season unpublished upstream may be checked again: the
+ * tightest calendar phase's cadence from that attempt (less the tick tolerance). Upstream publishes a
+ * new season about once a year, so neither the TTL guard (judged on another season's file) nor a
+ * repair every tick can do better; null when the source is not in that state.
+ */
+function notPublishedUntil(i: DueInput): number | null {
+  const np = i.state.notPublishedAtMs ?? null;
+  if (np === null || i.source === "weather") return null;
+  return np + cadenceIntervalMs(i.source, i.cal, i.nowMs) - TICK_SLACK_MS;
+}
+
+/**
  * The tick's decision (§4.2), in order: provider backoff (a Retry-After is honoured even for a
- * repair, as at answer time); a never-loaded or unreadable file is due (`repair`); an attempt less
- * than 14 min ago blocks (`min_gap`, counting every process's attempts); a failure streak waits
- * `failureBackoffMs(n)` from the last attempt; then the TTL guard (due when the next tick could find
- * a judged class stale) and the cadence of the tightest calendar phase. Weather replaces the last two
- * with its hourly rule: due only while an outdoor kickoff lies in [now − 1 h, now + horizon] and the
- * newest row is from an older hour bucket.
+ * repair, as at answer time); a never-loaded or unreadable file is due (`repair`) — unless the newest
+ * attempt found the season unpublished upstream; an attempt less than 14 min ago blocks (`min_gap`,
+ * counting every process's attempts); a failure streak waits `failureBackoffMs(n)` from the last
+ * attempt; a season upstream has not published waits the phase cadence from that attempt
+ * (`not_published`); then the TTL guard (due when the next tick could find a judged class stale)
+ * and the cadence of the tightest calendar phase. Weather replaces the last two with its hourly rule:
+ * due only while an outdoor kickoff lies in [now − 1 h, now + horizon] and the newest row is from an
+ * older hour bucket.
  */
 export function dueDecision(i: DueInput): DueDecision {
   const { source, nowMs, cal, state } = i;
@@ -227,12 +272,16 @@ export function dueDecision(i: DueInput): DueDecision {
     return d(false, "no_games", weatherNextAt(cal, nowMs, weatherOf(i)));
   if (state.backoffUntilMs !== null && nowMs < state.backoffUntilMs)
     return d(false, "provider_backoff", state.backoffUntilMs);
+  const unpublishedUntil = notPublishedUntil(i);
+  if (unpublishedUntil !== null) {
+    const held = floorOf(state, nowMs);
+    if (held !== null) return d(false, held.reason, held.until);
+    if (nowMs < unpublishedUntil) return d(false, "not_published", unpublishedUntil);
+    return d(true, state.file !== "ok" || state.basis === null ? "repair" : "cadence", null);
+  }
   if (state.file !== "ok" || state.basis === null) return d(true, "repair", null);
-  if (state.lastAttemptMs !== null && nowMs - state.lastAttemptMs < MIN_RELEASE_GAP_MS)
-    return d(false, "min_gap", state.lastAttemptMs + MIN_RELEASE_GAP_MS);
-  const backoff = failureBackoffMs(state.consecutiveFailures);
-  if (backoff > 0 && state.lastAttemptMs !== null && nowMs < state.lastAttemptMs + backoff)
-    return d(false, "failure_backoff", state.lastAttemptMs + backoff);
+  const held = floorOf(state, nowMs);
+  if (held !== null) return d(false, held.reason, held.until);
 
   if (source === "weather") {
     const w = weatherOf(i);
@@ -301,7 +350,7 @@ export interface OnDemandInput extends DueInput {
 export type OnDemandAction =
   | {
       readonly kind: "none";
-      readonly reason: "fresh_enough" | "min_gap" | "same_bucket" | "no_games";
+      readonly reason: "fresh_enough" | "min_gap" | "same_bucket" | "no_games" | "not_published";
     }
   | {
       readonly kind: "skip";
@@ -317,7 +366,9 @@ export type OnDemandAction =
  * an offline machine answers at once instead of waiting on a child that will fail); a fast source
  * last attempted ≥ 15 min ago waits up to `waitFastMs`; weather waits once per hour bucket while an
  * outdoor kickoff is in its window; a slow source last attempted ≥ 6 h ago (stats in a post-game
- * window: ≥ 1 h) is revalidated in the background; otherwise nothing.
+ * window: ≥ 1 h) is revalidated in the background; otherwise nothing. A source whose newest attempt
+ * found its season unpublished upstream is never waited on: nothing until the tick's phase cadence
+ * from that attempt has passed, then a background check.
  */
 export function onDemandDecision(i: OnDemandInput): OnDemandAction {
   const { source, nowMs, cal, state } = i;
@@ -327,12 +378,18 @@ export function onDemandDecision(i: OnDemandInput): OnDemandAction {
   if (backoff > 0 && state.lastAttemptMs !== null && nowMs < state.lastAttemptMs + backoff)
     return { kind: "skip", reason: "failure_backoff", until_ms: state.lastAttemptMs + backoff };
 
+  const since =
+    state.lastAttemptMs === null ? Number.POSITIVE_INFINITY : nowMs - state.lastAttemptMs;
+  const unpublishedUntil = notPublishedUntil(i);
+  if (unpublishedUntil !== null)
+    return since < MIN_RELEASE_GAP_MS || nowMs < unpublishedUntil
+      ? { kind: "none", reason: "not_published" }
+      : { kind: "background", reason: "revalidate" };
+
   const broken = state.file !== "ok" || state.basis === null || i.expired;
   if (broken && i.required)
     return { kind: "wait", reason: "repair", budget_ms: ON_DEMAND.waitRepairMs };
 
-  const since =
-    state.lastAttemptMs === null ? Number.POSITIVE_INFINITY : nowMs - state.lastAttemptMs;
   if (source === "weather") {
     const w = weatherOf(i);
     if (!weatherHasGames(cal, nowMs, w)) return { kind: "none", reason: "no_games" };

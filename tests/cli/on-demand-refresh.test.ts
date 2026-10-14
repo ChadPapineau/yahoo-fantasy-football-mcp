@@ -13,6 +13,7 @@ import type {
   BackoffProvider,
   ProviderBackoffRow,
   RefreshLogRow,
+  SeasonCheckRow,
   StoreStats,
 } from "../../src/domain/analytics/types.js";
 import { systemClock } from "../../src/domain/clock.js";
@@ -32,6 +33,8 @@ const MIN = 60_000;
 /** Sunday 2026-11-29 15:00 UTC (10:00 ET): a 13:00 ET kickoff is 3 h away — a game-day window. */
 const T0 = Date.parse("2026-11-29T15:00:00.000Z");
 const KICKOFF = Date.parse("2026-11-29T18:00:00.000Z");
+/** The season in progress the fake schedule view names. */
+const SEASON = 2026;
 const iso = (ms: number): string => new Date(ms).toISOString();
 
 // --- fakes ----------------------------------------------------------------------------------------------
@@ -146,6 +149,8 @@ function json(...results: Record<string, unknown>[]): string {
 
 interface Rig {
   log: FakeLog;
+  /** season_check rows (what a not_published run writes instead of a refresh_log row). */
+  checks: Map<string, SeasonCheckRow>;
   locks: Map<DatasetSourceId, { pid: number; acquired_at: string }>;
   backoff: Map<BackoffProvider, ProviderBackoffRow>;
   spawner: ReturnType<typeof fakeSpawner>;
@@ -156,6 +161,7 @@ interface Rig {
 
 function rig(): Rig {
   const log = new FakeLog();
+  const checks = new Map<string, SeasonCheckRow>();
   const locks = new Map<DatasetSourceId, { pid: number; acquired_at: string }>();
   const backoff = new Map<BackoffProvider, ProviderBackoffRow>();
   const spawner = fakeSpawner();
@@ -173,6 +179,7 @@ function rig(): Rig {
   });
   const r: Rig = {
     log,
+    checks,
     locks,
     backoff,
     spawner,
@@ -182,6 +189,7 @@ function rig(): Rig {
       const ports: OnDemandPorts = {
         refreshLog: log,
         providerBackoff: { get: (p) => backoff.get(p) ?? null },
+        seasonChecks: { all: () => [...checks.values()] },
         runLocks: { held: (s) => locks.get(s) ?? null },
         storeStats: (): StoreStats => ({
           path: "x",
@@ -199,7 +207,8 @@ function rig(): Rig {
             attached_at: c.finished_at,
           })),
         }),
-        scheduleView: () => ({ calendar: r.calendar }) as unknown as ScheduleView,
+        scheduleView: () =>
+          ({ calendar: r.calendar, phase: { season: SEASON } }) as unknown as ScheduleView,
       };
       return createOnDemandRefresher(
         {
@@ -365,6 +374,54 @@ describe("caps", () => {
     expect(t.spawner.children).toHaveLength(21);
     t.spawner.children[20]!.exit(1, "");
     await again;
+  });
+});
+
+describe("a season upstream has not published yet", () => {
+  it("after a not_published child, answers reading the source spawn nothing for the phase cadence; the cap stays free", async () => {
+    // injuries holds last season only; its season in progress is not published upstream yet. The
+    // real child writes a season_check row (no refresh_log row) and answers skipped/not_published.
+    const i0 = t.log.rows.findIndex((c) => c.source === "nflverse:injuries");
+    t.log.rows.splice(i0, 1, { ...t.log.rows[i0]!, seasons: [SEASON - 1] });
+    const r = t.make();
+    const first = r.ensureFresh(["nflverse:injuries"], { requestId: RID(0) });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(t.spawner.children).toHaveLength(1);
+    t.checks.set(`nflverse:injuries|${String(SEASON)}`, {
+      source: "nflverse:injuries",
+      season: SEASON,
+      checked_at: iso(Date.now() - 200),
+      status: "not_published",
+    });
+    t.spawner.children[0]!.exit(
+      0,
+      json({
+        source: "nflverse:injuries",
+        status: "skipped",
+        reason: "not_published",
+        until: null,
+      }),
+    );
+    expect(row(await first, "nflverse:injuries")).toMatchObject({
+      outcome: "skipped",
+      code: "not_published",
+    });
+    // a busy conversation: a call a minute for two hours (the game-day window's 2-hour cadence)
+    for (let i = 1; i <= 110; i++) {
+      await vi.advanceTimersByTimeAsync(MIN);
+      expect(
+        await r.ensureFresh(["nflverse:injuries"], { requestId: RID(i) }),
+        String(i),
+      ).toBeNull();
+    }
+    expect(t.spawner.children).toHaveLength(1);
+    // the schedules revalidation is not starved by the spawn cap
+    const sched = r.ensureFresh(["nflverse:schedules"], { requestId: RID(200) });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(t.spawner.children).toHaveLength(2);
+    t.log.check("nflverse:schedules", Date.now());
+    t.spawner.children[1]!.exit(0, json({ source: "nflverse:schedules", status: "unchanged" }));
+    expect(row(await sched, "nflverse:schedules")?.outcome).toBe("revalidated");
   });
 });
 
@@ -587,6 +644,7 @@ function createOnDemandRefresherThrowing(): OnDemandRefresher {
     {
       refreshLog: t.log,
       providerBackoff: { get: () => null },
+      seasonChecks: { all: () => [] },
       runLocks: { held: () => null },
       storeStats: () => ({
         path: "x",
@@ -604,7 +662,8 @@ function createOnDemandRefresherThrowing(): OnDemandRefresher {
           attached_at: c.finished_at,
         })),
       }),
-      scheduleView: () => ({ calendar: t.calendar }) as unknown as ScheduleView,
+      scheduleView: () =>
+        ({ calendar: t.calendar, phase: { season: SEASON } }) as unknown as ScheduleView,
     },
   );
 }

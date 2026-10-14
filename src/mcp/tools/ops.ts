@@ -102,7 +102,6 @@ export function sourceRows(ctx: StatusCtx): SourceRow[] {
   const attached = new Map(
     ctx.services.storeStats().attached.map((a) => [a.source, a.file_version]),
   );
-  const cal = ctx.view.calendar;
   return statusSources(ctx.options).map((id) => {
     const ok = current.get(id);
     const latest = ctx.services.refreshLog.latest(id);
@@ -111,7 +110,7 @@ export function sourceRows(ctx: StatusCtx): SourceRow[] {
     const decision = tickDecisionOf(
       ctx.services,
       id,
-      cal,
+      ctx.view,
       ctx.nowMs,
       ctx.options.weatherHorizonHours ?? DEFAULT_WEATHER_HORIZON_HOURS,
     );
@@ -168,7 +167,12 @@ export function sourceRows(ctx: StatusCtx): SourceRow[] {
         consecutive_failures: failures,
         ...timing,
       };
-    const st = stampState(freshnessClass(info.freshness), basisOf(ok), ctx.nowMs, cal);
+    const st = stampState(
+      freshnessClass(info.freshness),
+      basisOf(ok),
+      ctx.nowMs,
+      ctx.view.calendar,
+    );
     const servable = ok.file_version !== null && attached.get(id) === ok.file_version;
     return {
       id,

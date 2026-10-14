@@ -5,7 +5,11 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import type { DatasetSourceId } from "../../src/config/freshness.js";
-import type { RefreshLogRow, StoreStats } from "../../src/domain/analytics/types.js";
+import type {
+  RefreshLogRow,
+  SeasonCheckRow,
+  StoreStats,
+} from "../../src/domain/analytics/types.js";
 import {
   RESTART_CLIENT_WARNING,
   SPAWN_FAILED_WARNING,
@@ -200,9 +204,15 @@ describe("sourceStateOf (the orchestrator, G1 and the tick read a source alike)"
     const backoff = { get: () => null };
     expect(
       sourceStateOf(
-        { refreshLog: logOf([]), providerBackoff: backoff, storeStats: stats([]) },
+        {
+          refreshLog: logOf([]),
+          providerBackoff: backoff,
+          seasonChecks: { all: () => [] },
+          storeStats: stats([]),
+        },
         "nflverse:injuries",
         NOW,
+        2027,
       ).state.file,
     ).toBe("never_loaded");
     const rows = [row("nflverse:injuries", 3_600_000), row("nflverse:injuries", 60_000, false)];
@@ -210,10 +220,12 @@ describe("sourceStateOf (the orchestrator, G1 and the tick read a source alike)"
       {
         refreshLog: logOf(rows),
         providerBackoff: backoff,
+        seasonChecks: { all: () => [] },
         storeStats: stats([["nflverse:injuries", "v0"]]),
       },
       "nflverse:injuries",
       NOW,
+      2027,
     );
     expect(un.state.file).toBe("unreadable");
     // the failed run a minute ago is the last attempt (the 14-minute floor counts it)
@@ -233,13 +245,83 @@ describe("sourceStateOf (the orchestrator, G1 and the tick read a source alike)"
                 }
               : null,
         },
+        seasonChecks: { all: () => [] },
         storeStats: stats([["nflverse:injuries", "v1"]]),
       },
       "nflverse:injuries",
       NOW,
+      2027,
     );
     expect(ok.state.file).toBe("ok");
     expect(ok.state.backoffUntilMs).toBe(NOW + 600_000);
+  });
+  it("a season check is an attempt; the phase season not published since the last refresh_log attempt is `notPublishedAtMs`", () => {
+    // a not_published run writes no refresh_log row, only season_check rows: without counting them
+    // the 14-minute floor and the cadence never saw the attempt (the tick re-polled every 15 min)
+    const backoff = { get: () => null };
+    for (const S of [2026, 2027, 2028, 2029, 2030]) {
+      const fileOf = (seasons: number[]): RefreshLogRow => ({
+        ...row("nflverse:injuries", 9 * 86_400_000),
+        seasons,
+      });
+      const at = (agoMs: number): string => iso(NOW - agoMs);
+      const state = (
+        rows: RefreshLogRow[],
+        checks: SeasonCheckRow[],
+        season = S,
+      ): ReturnType<typeof sourceStateOf>["state"] =>
+        sourceStateOf(
+          {
+            refreshLog: logOf(rows),
+            providerBackoff: backoff,
+            seasonChecks: { all: () => checks },
+            storeStats: stats(rows.length === 0 ? [] : [["nflverse:injuries", "v1"]]),
+          },
+          "nflverse:injuries",
+          NOW,
+          season,
+        ).state;
+      const np = (
+        season: number,
+        agoMs: number,
+        source: DatasetSourceId = "nflverse:injuries",
+      ) => ({
+        source,
+        season,
+        checked_at: at(agoMs),
+        status: "not_published" as const,
+      });
+      const old = [fileOf([S - 1])];
+      // the old season's file, the phase season not published a minute ago
+      const s1 = state(old, [np(S, 60_000)]);
+      expect(s1.lastAttemptMs, String(S)).toBe(NOW - 60_000);
+      expect(s1.notPublishedAtMs, String(S)).toBe(NOW - 60_000);
+      // never loaded at all: the same
+      const s0 = state([], [np(S, 60_000)]);
+      expect(s0.file).toBe("never_loaded");
+      expect(s0.notPublishedAtMs).toBe(NOW - 60_000);
+      // another source's or another season's check is no not_published state for this one
+      expect(
+        state(old, [np(S, 60_000, "nflverse:stats_player_week")]).lastAttemptMs,
+      ).toBeLessThanOrEqual(NOW - 9 * 86_400_000);
+      const other = state(old, [np(S + 1, 60_000)]);
+      expect(other.lastAttemptMs).toBe(NOW - 60_000); // still an attempt (the floor counts it)
+      expect(other.notPublishedAtMs).toBeNull();
+      // the phase season published since, or a refresh_log attempt at or after the check (a run that
+      // published or re-checked the other seasons at the same start): no not_published state
+      expect(state(old, [{ ...np(S, 60_000), status: "published" }]).notPublishedAtMs).toBeNull();
+      const mixed = {
+        ...fileOf([S - 1]),
+        started_at: at(60_000),
+        finished_at: at(30_000),
+        checked_at: at(30_000),
+      };
+      expect(state([mixed], [np(S, 60_000)]).notPublishedAtMs).toBeNull();
+      const failedAfter = { ...row("nflverse:injuries", 10_000, false) };
+      expect(state([...old, failedAfter], [np(S, 60_000)]).notPublishedAtMs).toBeNull();
+      // the file holds the phase season (upstream withdrew it): judged as before
+      expect(state([fileOf([S - 1, S])], [np(S, 60_000)]).notPublishedAtMs).toBeNull();
+    }
   });
   it("providers and due sources", () => {
     expect(providerOf("weather:nws")).toBe("weather:nws");

@@ -391,6 +391,7 @@ function portsOf(store: Store): SourceStatePorts {
   return {
     refreshLog: store.repos.refreshLog,
     providerBackoff: store.repos.providerBackoff,
+    seasonChecks: store.repos.seasonChecks,
     storeStats: () => store.stats(),
   };
 }
@@ -406,7 +407,7 @@ export function decideDue(
   const id = datasetSourceOf(source, config);
   if (id === null) return { source, due: false, reason: "not_due", next_at_ms: null };
   return (
-    tickDecisionOf(portsOf(store), id, view.calendar, nowMs, horizonHoursOf(id)) ?? {
+    tickDecisionOf(portsOf(store), id, view, nowMs, horizonHoursOf(id)) ?? {
       source,
       due: false,
       reason: "not_due",
@@ -427,7 +428,7 @@ function onDemandGate(
     if (source === null) return { run: true };
     const nowMs = clock.nowMs();
     const view = viewNow();
-    const { state, current } = sourceStateOf(portsOf(store), id, nowMs);
+    const { state, current } = sourceStateOf(portsOf(store), id, nowMs, view.phase.season);
     let expired = false;
     if (state.basis !== null)
       try {

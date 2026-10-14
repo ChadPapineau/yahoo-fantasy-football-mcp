@@ -1,7 +1,10 @@
 // cadence-politeness.test.ts — the refresh policy as a whole (season-fresh spec §4.2, §6, §12 B1):
 // (1) politeness — for any history of tick and answer-time decisions from up to three processes
-// sharing one refresh_log, two attempts for one source are never less than 14 min apart unless one is
-// a repair; (2) freshness — a healthy 15-minute tick (launchd jitter and run time included) keeps
+// sharing one store (refresh_log and season_check, read through the production `sourceStateOf`), two
+// attempts for one source are never less than 14 min apart unless one is a repair, whatever each
+// attempt found — a release, a failure, or a season upstream has not published yet, which writes no
+// refresh_log row; and such a season is polled at most once per cadence interval and never waited on
+// at answer time; (2) freshness — a healthy 15-minute tick (launchd jitter and run time included) keeps
 // every judged class fresh at every tick over synthetic seasons 2026–2030 of 18, 19 and 20 regular
 // weeks, with Wednesday/Friday openers, Thanksgiving, Christmas, Saturday and international games, a
 // Week-18 placeholder later set, and a flexed kickoff discovered by the tick itself.
@@ -13,6 +16,8 @@ import {
   ON_DEMAND,
   SOURCE_CLASSES,
   TICK_MS,
+  TICK_SLACK_MS,
+  cadenceIntervalMs,
   dueDecision,
   onDemandDecision,
   type DueSource,
@@ -22,10 +27,13 @@ import {
   freshnessClass,
   isExpired,
   stampState,
+  type DatasetSourceId,
   type StampInstants,
 } from "../../src/config/freshness.js";
 import { easternClockOf, type GameCalendar } from "../../src/config/game-calendar.js";
 import { gameCalendarFromGames } from "../../src/domain/league/calendar.js";
+import { sourceStateOf } from "../../src/mcp/refresh.js";
+import { RefreshSim } from "../helpers/season/refresh-sim.js";
 import {
   SYNTHETIC_SEASONS,
   etIso,
@@ -78,6 +86,11 @@ function seasonCal(season: number): GameCalendar {
   return c;
 }
 
+/** The dataset source a due source is stored as (weather: the configured provider's). */
+const idOf = (s: DueSource): DatasetSourceId => (s === "weather" ? "weather:open_meteo" : s);
+/** The season in progress the simulated calendar's phase names (its own season). */
+const PHASE_SEASON = (cal: GameCalendar): number => new Date(cal.kickoffs[0] ?? 0).getUTCFullYear();
+
 describe("politeness: the 14-minute floor holds across processes", () => {
   const arbEvent = fc.record({
     // mostly minutes apart (a busy conversation), sometimes hours
@@ -88,7 +101,10 @@ describe("politeness: the 14-minute floor holds across processes", () => {
     proc: fc.integer({ min: 0, max: 2 }),
     kind: fc.constantFrom("tick", "on_demand"),
     source: fc.constantFrom(...DUE_SOURCES),
-    ok: fc.boolean(),
+    // what the attempt found: a release (new or unchanged), a failure, or (a new season before its
+    // first data) nothing published — which writes no refresh_log row, only season_check rows
+    outcome: fc.constantFrom("published", "unchanged", "failed", "not_published"),
+    runS: fc.integer({ min: 0, max: 120 }),
     required: fc.boolean(),
   });
   const arbStart = fc.record({
@@ -96,9 +112,8 @@ describe("politeness: the 14-minute floor holds across processes", () => {
     // start up to two days before some kickoff of the season (pregame and game-day windows)
     kickoffIndex: fc.nat(),
     leadMin: fc.integer({ min: 0, max: 48 * 60 }),
-    file: fc.constantFrom<Log["file"]>("ok", "never_loaded", "unreadable"),
+    file: fc.constantFrom<SourceState["file"]>("ok", "never_loaded"),
     basisAgoMin: fc.integer({ min: 0, max: 10 * 24 * 60 }),
-    failures: fc.integer({ min: 0, max: 4 }),
   });
 
   it("two attempts for one source are never < 14 min apart unless one is a repair", () => {
@@ -108,23 +123,22 @@ describe("politeness: the 14-minute floor holds across processes", () => {
         fc.array(arbEvent, { minLength: 1, maxLength: 120 }),
         (start, events) => {
           const cal = seasonCal(start.season);
+          const S = PHASE_SEASON(cal);
           const ks = cal.kickoffs;
           let now = (ks[start.kickoffIndex % ks.length] ?? 0) - start.leadMin * MIN;
-          const logs = new Map<DueSource, Log>();
-          for (const s of DUE_SOURCES)
-            logs.set(s, {
-              file: start.file,
-              basisMs: start.file === "ok" ? now - start.basisAgoMin * MIN : null,
-              lastAttemptMs: start.file === "ok" ? now - start.basisAgoMin * MIN : null,
-              failures: start.failures,
-              lastBucketMs: null,
-            });
+          const sim = new RefreshSim();
+          if (start.file === "ok")
+            for (const s of DUE_SOURCES) {
+              const at = now - start.basisAgoMin * MIN;
+              sim.published(idOf(s), at, at, [S - 1]);
+            }
+          const buckets = new Map<DueSource, number | null>();
           const attempts = new Map<DueSource, { at: number; repair: boolean }[]>();
           for (const e of events) {
             now += e.dtS * 1000;
-            const log = logs.get(e.source)!;
-            const state = stateOf(log);
-            const weather = { lastBucketMs: log.lastBucketMs, horizonHours: 48 };
+            const id = idOf(e.source);
+            const { state } = sourceStateOf(sim.ports, id, now, S);
+            const weather = { lastBucketMs: buckets.get(e.source) ?? null, horizonHours: 48 };
             let attempt = false;
             let repair = false;
             if (e.kind === "tick") {
@@ -133,10 +147,10 @@ describe("politeness: the 14-minute floor holds across processes", () => {
               repair = d.reason === "repair";
             } else {
               const expired =
-                log.basisMs !== null &&
+                state.basis !== null &&
                 isExpired(
                   freshnessClass(SOURCE_CLASSES[e.source][0] ?? "weather"),
-                  stampOf(log.basisMs),
+                  state.basis,
                   now,
                 );
               const a = onDemandDecision({
@@ -158,14 +172,74 @@ describe("politeness: the 14-minute floor holds across processes", () => {
               expect(prev.repair || repair, `${e.source} ${String(now - prev.at)} ms`).toBe(true);
             list.push({ at: now, repair });
             attempts.set(e.source, list);
-            // the run lock + refresh_log row are written at the start of the attempt
-            log.lastAttemptMs = now;
-            if (e.ok) {
-              log.file = "ok";
-              log.basisMs = now;
-              log.failures = 0;
-              log.lastBucketMs = Math.floor(now / H) * H;
-            } else log.failures += 1;
+            const end = now + e.runS * 1000;
+            const outcome =
+              e.source === "weather" && e.outcome === "not_published" ? "failed" : e.outcome;
+            if (outcome === "published") {
+              sim.published(id, now, end, [S - 1]);
+              buckets.set(e.source, Math.floor(now / H) * H);
+            } else if (outcome === "unchanged") {
+              sim.unchanged(id, now, end, [S - 1]);
+              buckets.set(e.source, Math.floor(now / H) * H);
+            } else if (outcome === "failed") sim.failed(id, now, end);
+            else sim.notPublished(id, now, [S]);
+          }
+        },
+      ),
+      { numRuns: 300 },
+    );
+  });
+
+  it("a season upstream has not published yet is polled at most once per cadence interval, never waited on", () => {
+    // injuries [S] from the May schedule release to the season's first report; rosters [S] at a
+    // regular season's start; any season, any phase, three processes, ticks and answers mixed
+    const NFL = DUE_SOURCES.filter((s): s is Exclude<DueSource, "weather"> => s !== "weather");
+    fc.assert(
+      fc.property(
+        arbStart,
+        fc.constantFrom(...NFL),
+        fc.array(arbEvent, { minLength: 1, maxLength: 150 }),
+        (start, source, events) => {
+          const cal = seasonCal(start.season);
+          const S = PHASE_SEASON(cal);
+          const ks = cal.kickoffs;
+          let now = (ks[start.kickoffIndex % ks.length] ?? 0) - start.leadMin * MIN;
+          const sim = new RefreshSim();
+          const at0 = now - start.basisAgoMin * MIN;
+          if (start.file === "ok") sim.published(source, at0, at0, [S - 1]);
+          const runs: number[] = [];
+          for (const e of events) {
+            now += e.dtS * 1000;
+            const { state } = sourceStateOf(sim.ports, source, now, S);
+            const expired =
+              state.basis !== null &&
+              isExpired(freshnessClass(SOURCE_CLASSES[source][0]!), state.basis, now);
+            let attempt: boolean;
+            if (e.kind === "tick") attempt = dueDecision({ source, nowMs: now, cal, state }).due;
+            else {
+              const a = onDemandDecision({
+                source,
+                nowMs: now,
+                cal,
+                state,
+                required: e.required,
+                expired,
+              });
+              // once a run found the season unpublished, no answer waits on it again
+              if (runs.length > 0) expect(a.kind, "an answer waited").not.toBe("wait");
+              attempt = a.kind === "wait" || a.kind === "background";
+            }
+            if (!attempt) continue;
+            const prev = runs.at(-1);
+            if (prev !== undefined) {
+              const gap = now - prev;
+              expect(gap).toBeGreaterThanOrEqual(MIN_RELEASE_GAP_MS);
+              expect(gap, `${source} ${new Date(now).toISOString()}`).toBeGreaterThanOrEqual(
+                cadenceIntervalMs(source, cal, now) - TICK_SLACK_MS,
+              );
+            }
+            runs.push(now);
+            sim.notPublished(source, now, [S]);
           }
         },
       ),

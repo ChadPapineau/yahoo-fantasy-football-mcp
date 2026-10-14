@@ -30,6 +30,7 @@ import type {
   RefreshLogRepository,
   RefreshLogRow,
   RunLockReader,
+  SeasonCheckRepository,
   StoreStats,
 } from "../domain/analytics/types.js";
 import type { Clock } from "../domain/clock.js";
@@ -101,6 +102,8 @@ export interface OnDemandRefresher {
 export interface OnDemandPorts {
   readonly refreshLog: Pick<RefreshLogRepository, "current" | "latest" | "consecutiveFailures">;
   readonly providerBackoff: Pick<ProviderBackoffRepository, "get">;
+  /** A run that found its seasons unpublished upstream writes only these (the floor counts them). */
+  readonly seasonChecks: Pick<SeasonCheckRepository, "all">;
   readonly runLocks: RunLockReader;
   readonly storeStats: () => StoreStats;
   readonly scheduleView: (nowMs: number) => ScheduleView;
@@ -373,7 +376,7 @@ export function createOnDemandRefresher(
   const judge = (due: DueSource, nowMs: number, view: ScheduleView): Judged | null => {
     const id = datasetIdOf(due, o.weatherSource);
     if (id === null) return null;
-    const { state: s, current } = sourceStateOf(ports, id, nowMs);
+    const { state: s, current } = sourceStateOf(ports, id, nowMs, view.phase.season);
     const cls = freshnessClass(SOURCE_REGISTRY[id].freshness);
     const expired = s.basis !== null && isExpired(cls, s.basis, nowMs);
     const horizonHours = weatherHorizonHours(o.weatherSource);
