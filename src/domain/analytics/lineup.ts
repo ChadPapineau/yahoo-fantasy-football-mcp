@@ -18,7 +18,7 @@ import type {
 } from "../league/types.js";
 import type { Dist, DistBasis } from "../scoring/types.js";
 import { at } from "../scoring/numeric.js";
-import { FORBIDDEN, solveAssignment } from "./assignment.js";
+import { FORBIDDEN, solveAssignment, solveAssignmentLex } from "./assignment.js";
 import { INACTIVES_LEAD_MS, LIMITS, LINEUP, Z90 } from "./constants.js";
 import { AnalyticsError } from "./errors.js";
 import { newestAsOf } from "./inputs.js";
@@ -680,21 +680,305 @@ function changesOf(flow: Flow, force: ReadonlySet<PlayerKey>): Change[] {
   return out;
 }
 
-/** A forbidden cell of the re-match below: past any sum of point gains, far below FORBIDDEN. */
-const REMATCH_FORBIDDEN = 1e6;
-/** Ties keep the solve's matching (no churn in `swaps` when nothing is gained). */
-const REMATCH_STAY = 1e-7;
+// --- which entrant takes which freed seat (QA-1-020/040, QA-2-038, QA-2-062) ---------------------------
+//
+// The solve fixes WHICH players start. How the current lineup becomes that one — which entrant takes
+// which freed seat, which starters change slots to make room, and so which starter each entrant
+// replaces — is a free choice among seatings of the same total, and each change is priced and decided
+// on its own pairing (rule 1; a seat that scores 0 by the entrant's quantiles, a swap by the normal
+// approximation). So that choice decides which changes are made and Δ's interval. It is made from the
+// players and their Dists alone, never from how the solve broke ties (the input order, or a row that
+// differs only for a player who will not play): among the seatings that keep the most starters in
+// their slots, the changes are chosen to (1) gain the most in the changes that are made, then (2) have
+// the highest worst cases (the made changes' interval p10s, summed), then (3) the first in a fixed
+// order — entrants by player key, each replacing the lowest starter key it can (a seat that scores 0
+// first), then seat order. The exactness of (1)–(2) is in integer units (micro-points; 1e-4 points
+// for the rounded interval ends), so equal totals are ties, never rounding noise.
+
+/** Most seatings searched for the best changes; past it the best found so far (in a fixed order). */
+const MAX_SEATINGS = 256;
+
+/** Points in integer micro-points: per-player sums stay exact, so equal totals tie exactly. */
+const micro = (x: number): number => Math.round(x * 1e6);
+
+/** A rounded interval end (4 decimals) in integer units. */
+const q4 = (x: number): number => Math.round(x * 1e4);
+
+/** The end of a change: the starter it benches, or "" for a seat that scores 0 now (rule 3). */
+const endId = (out: LineupPlayer | null): string =>
+  out === null || scoresZero(out.points) ? "" : out.player_key;
+
+const byKey = (a: LineupPlayer, b: LineupPlayer): number => cmpStr(a.player_key, b.player_key);
 
 /**
- * The best lineup's changes, re-matched so that deciding each on its own keeps the most points
- * (rule 1; the round-2 verification of QA-1-020/040). The solve fixes WHICH players start; which
- * entrant takes which freed seat is a free choice among lineups of the same total — two bench RBs
- * for an empty RB seat and the flex, say. Each change is decided on its own interval, so that choice
- * decides what is made: the stronger entrant held behind a coin flip while the weaker one fills a
- * seat that scores 0 keeps fewer points than the other way round, and the solve's own pick between
- * equal totals is arbitrary. The freed seats — each entrant's seat with the chain of slot moves
- * behind it and the starter at its end (or none) — are re-matched to the entrants by an exact
- * assignment that maximises what the made changes gain; ties keep the solve's matching.
+ * The lexicographic cost of `e` taking a seat of `slot` whose change benches `out` (null: an empty
+ * seat): [−gain, −worst case] when the change is made, [0, 0] when held; null when `e` cannot sit there.
+ */
+function changeCost(
+  e: LineupPlayer,
+  slot: RosterSlot | undefined,
+  out: LineupPlayer | null,
+  force: ReadonlySet<PlayerKey>,
+): number[] | null {
+  if (slot === undefined || !canOccupy(slot, { positions: e.positions, status: e.status }))
+    return null;
+  const pr = { out, in: e };
+  const { de, interval } = pairDelta(pr);
+  const made = verdictOf(freesZeroSeat(pr), de, interval, force.has(e.player_key)) === "made";
+  return made ? [micro(out?.points.mean ?? 0) - micro(e.points.mean), -q4(interval[0])] : [0, 0];
+}
+
+/** The cost of benching `l` with nobody taking his seat (a leaver chain), as `changeCost`. */
+function benchCost(l: LineupPlayer | null): number[] {
+  if (l === null) return [0, 0];
+  const pts = l.points;
+  const interval: readonly [number, number] = [round(-pts.p90), round(-pts.p10)];
+  const made = verdictOf(false, -pts.mean, interval, false) === "made";
+  return made ? [micro(pts.mean), -q4(interval[0])] : [0, 0];
+}
+
+/** Lexicographic order of [gain, worst, signature…] results: higher totals, then the first signature. */
+function better(
+  x: { readonly gain: number; readonly worst: number; readonly sig: readonly string[] },
+  y: { readonly gain: number; readonly worst: number; readonly sig: readonly string[] },
+): boolean {
+  if (x.gain !== y.gain) return x.gain > y.gain;
+  if (x.worst !== y.worst) return x.worst > y.worst;
+  for (let i = 0; i < Math.min(x.sig.length, y.sig.length); i++) {
+    const c = cmpStr(at(x.sig, i), at(y.sig, i));
+    if (c !== 0) return c < 0;
+  }
+  return false;
+}
+
+/** One seat a change can start from: the entrant takes `unit`; the chain behind it ends at `out`. */
+interface Head {
+  readonly unit: number;
+  readonly slot: RosterSlot;
+  readonly movers: readonly LineupPlayer[];
+  readonly out: LineupPlayer | null;
+  /** The chain must be taken (a starter moved out of this seat). */
+  readonly forced: boolean;
+}
+
+/** A seating's best changes: entrant → head, the totals, and the order-fixing signature. */
+interface Choice {
+  readonly heads: ReadonlyMap<LineupPlayer, Head>;
+  readonly claim: ReadonlyMap<LineupPlayer, number>;
+  readonly gain: number;
+  readonly worst: number;
+  readonly sig: readonly string[];
+}
+
+/**
+ * The changes from the current lineup to the best one (`rec`'s starters), chosen as the section
+ * comment says, with the recommended seating that realises them. Falls back to the solve's own
+ * seating, re-matched the same way, when the current lineup does not fit the slots (more starters
+ * in a slot than it has seats).
+ */
+function seatChanges(
+  cur: Assignment,
+  rec: Assignment,
+  curStarters: readonly LineupPlayer[],
+  recStarters: readonly LineupPlayer[],
+  slots: RosterSlots,
+  force: ReadonlySet<PlayerKey>,
+  nowMs: number,
+): { flow: Flow; a: Assignment } {
+  const solved = () =>
+    rematch(slotFlow(cur, rec, curStarters, recStarters, slots), rec, slots, force);
+  const units = startInstances(slots);
+  // each current starter in a seat of his slot, in key order
+  const occ: (LineupPlayer | null)[] = units.map(() => null);
+  const own = new Map<LineupPlayer, number>();
+  for (const p of [...curStarters].sort(byKey)) {
+    const k = units.findIndex(
+      (u, i) => u.slot.name === slotIn(cur, p.player_key) && occ[i] === null,
+    );
+    if (k < 0) return solved();
+    occ[k] = p;
+    own.set(p, k);
+  }
+  const fits = (p: LineupPlayer, i: number): boolean =>
+    canOccupy(at(units, i).slot, { positions: p.positions, status: p.status });
+  const locked = (p: LineupPlayer): boolean => isLocked(p.lock_at, nowMs);
+  const recSet = new Set(recStarters);
+  const stayers = recStarters.filter((p) => own.has(p)).sort(byKey);
+  const entrants = recStarters.filter((p) => !own.has(p)).sort(byKey);
+  const ownOf = (p: LineupPlayer): number => own.get(p) ?? -1;
+  const mayStay = (p: LineupPlayer): boolean => locked(p) || fits(p, ownOf(p));
+
+  // the fewest starters who must change seats (the solve keeps the most in their slots)
+  const fewest = (() => {
+    const rows = [...stayers, ...entrants];
+    const cost = rows.map((p) =>
+      units.map((_, i) => {
+        if (own.has(p) && i === ownOf(p)) return mayStay(p) ? 0 : FORBIDDEN;
+        if (own.has(p) && locked(p)) return FORBIDDEN;
+        return fits(p, i) ? (own.has(p) ? 1 : 0) : FORBIDDEN;
+      }),
+    );
+    if (rows.length === 0) return 0;
+    const ans = solveAssignment(cost);
+    let n = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const c = at(at(cost, i), at(ans, i));
+      if (c >= FORBIDDEN) return null;
+      n += c;
+    }
+    return n;
+  })();
+  if (fewest === null) return solved();
+
+  /** The best changes when exactly `movers` change seats as `claim` says (null: none fits). */
+  const evaluate = (claim: ReadonlyMap<LineupPlayer, number>): Choice | null => {
+    const held = new Set<number>();
+    for (const p of stayers) if (!claim.has(p)) held.add(ownOf(p));
+    const claimed = new Set(claim.values());
+    const heads: Head[] = [];
+    for (let i = 0; i < units.length; i++) {
+      if (held.has(i) || claimed.has(i)) continue;
+      const movers: LineupPlayer[] = [];
+      let u = i;
+      let o = at(occ, u);
+      while (o !== null && claim.has(o)) {
+        if (movers.length > claim.size) return null; // a cycle: never the fewest moves
+        movers.push(o);
+        u = claim.get(o) ?? -1;
+        o = at(occ, u);
+      }
+      if (o !== null && recSet.has(o)) return null; // a starter who stays: not a seat to take
+      heads.push({ unit: i, slot: at(units, i).slot, movers, out: o, forced: movers.length > 0 });
+    }
+    if (heads.length < entrants.length) return null;
+    // a fixed order: the starter benched (a seat that scores 0 first), then seat order
+    heads.sort(
+      (x, y) =>
+        cmpStr(endId(x.out), endId(y.out)) ||
+        slotOrder(slots, x.slot.name) - slotOrder(slots, y.slot.name) ||
+        cmpStr(
+          x.movers.map((m) => m.player_key).join(","),
+          y.movers.map((m) => m.player_key).join(","),
+        ) ||
+        x.unit - y.unit,
+    );
+    const dummies = heads.length - entrants.length;
+    const cost: (number[] | null)[][] = [
+      ...entrants.map((e) => heads.map((h) => changeCost(e, h.slot, h.out, force))),
+      ...Array.from({ length: dummies }, () =>
+        heads.map((h) => (h.forced ? null : benchCost(h.out))),
+      ),
+    ];
+    const ans = solveAssignmentLex(cost);
+    if (ans === null) return null;
+    let gain = 0;
+    let worst = 0;
+    cost.forEach((row, i) => {
+      const c = at(row, at(ans, i));
+      gain -= c?.[0] ?? 0;
+      worst -= c?.[1] ?? 0;
+    });
+    const pick = new Map(entrants.map((e, i) => [e, at(heads, at(ans, i))]));
+    return {
+      heads: pick,
+      claim: new Map(claim), // the search reuses its map
+      gain,
+      worst,
+      sig: entrants.map((e) => endId(pick.get(e)?.out ?? null)),
+    };
+  };
+
+  // every seating with the fewest moves, in a fixed order: who moves (key order), then where
+  const found: { best: Choice | null } = { best: null };
+  let seen = 0;
+  const free = stayers.filter((p) => !locked(p));
+  const must = free.filter((p) => !mayStay(p));
+  const search = (from: number, movers: LineupPlayer[]): void => {
+    if (seen >= MAX_SEATINGS) return;
+    if (movers.length === fewest) {
+      place(0, movers, new Map());
+      return;
+    }
+    for (let i = from; i < free.length; i++) {
+      const p = at(free, i);
+      // a stayer who cannot stay is in every set; skipping him ends the branch
+      search(i + 1, [...movers, p]);
+      if (must.includes(p)) return;
+    }
+  };
+  const place = (
+    k: number,
+    movers: readonly LineupPlayer[],
+    claim: Map<LineupPlayer, number>,
+  ): void => {
+    if (seen >= MAX_SEATINGS) return;
+    if (k === movers.length) {
+      seen++;
+      const c = evaluate(claim);
+      if (c !== null && (found.best === null || better(c, found.best))) found.best = c;
+      return;
+    }
+    const m = at(movers, k);
+    const stay = new Set(stayers.filter((p) => !movers.includes(p)).map(ownOf));
+    const taken = new Set(claim.values());
+    const tried = new Set<string>();
+    for (let i = 0; i < units.length; i++) {
+      if (stay.has(i) || taken.has(i) || i === ownOf(m) || !fits(m, i)) continue;
+      if (at(units, i).slot.name === slotIn(cur, m.player_key)) continue; // a seat of his own slot
+      // seats alike for every change (same slot, nobody or a player who scores 0 in it) tried once
+      const o = at(occ, i);
+      const like =
+        o === null || (!movers.includes(o) && scoresZero(o.points))
+          ? `0:${at(units, i).slot.name}`
+          : String(i);
+      if (tried.has(like)) continue;
+      tried.add(like);
+      claim.set(m, i);
+      place(k + 1, movers, claim);
+      claim.delete(m);
+    }
+  };
+  search(0, []);
+  const chosen = found.best;
+  if (chosen === null) return solved();
+
+  // the recommended seating and the flow it gives
+  const next = new Map(rec);
+  for (const p of stayers)
+    next.set(p.player_key, at(units, chosen.claim.get(p) ?? ownOf(p)).slot.name);
+  for (const [e, h] of chosen.heads) next.set(e.player_key, h.slot.name);
+  const pairs: FlowPair[] = [...chosen.heads]
+    .map(([e, h]): FlowPair => ({ out: h.out, in: e, slot: h.slot.name, movers: h.movers }))
+    .sort(
+      (x, y) =>
+        slotOrder(slots, x.slot) - slotOrder(slots, y.slot) ||
+        cmpStr(x.in.player_key, y.in.player_key),
+    );
+  const reached = new Set(pairs.flatMap((p) => (p.out === null ? [] : [p.out])));
+  const leavers = curStarters.filter((p) => !recSet.has(p));
+  const unpairedLeavers = leavers.filter((l) => !reached.has(l)).sort(byKey);
+  const slotMovers = recStarters.filter(
+    (p) => own.has(p) && slotIn(cur, p.player_key) !== slotIn(next, p.player_key),
+  );
+  const core = pairs.length + unpairedLeavers.length;
+  return {
+    flow: {
+      pairs,
+      entrants: pairs.map((p) => p.in),
+      leavers,
+      unpairedLeavers,
+      leaverChains: unpairedLeavers.map((leaver) => ({ leaver, movers: [] })),
+      slotMovers,
+      changes: core > 0 ? core : slotMovers.length,
+    },
+    a: next,
+  };
+}
+
+/**
+ * The solve's own seating re-matched (when the current lineup does not fit the slots): the freed
+ * seats — each entrant's seat with the chain of slot moves behind it and the starter at its end (or
+ * none) — are re-matched to the entrants as `seatChanges` chooses.
  */
 function rematch(
   flow: Flow,
@@ -704,26 +988,24 @@ function rematch(
 ): { flow: Flow; a: Assignment } {
   const heads = flow.pairs;
   if (heads.length < 2) return { flow, a };
-  const cost = heads.map((own, i) =>
-    heads.map((h, j) => {
-      const slot = slotOf(slots, h.slot);
-      if (
-        slot === undefined ||
-        !canOccupy(slot, { positions: own.in.positions, status: own.in.status })
-      )
-        return REMATCH_FORBIDDEN;
-      const pr = { out: h.out, in: own.in };
-      const { de, interval } = pairDelta(pr);
-      const made =
-        verdictOf(freesZeroSeat(pr), de, interval, force.has(own.in.player_key)) === "made";
-      return -(made ? de : 0) - (i === j ? REMATCH_STAY : 0);
-    }),
+  const entrants = heads.map((h) => h.in).sort(byKey);
+  const seats = [...heads].sort(
+    (x, y) =>
+      cmpStr(endId(x.out), endId(y.out)) ||
+      slotOrder(slots, x.slot) - slotOrder(slots, y.slot) ||
+      cmpStr(
+        x.movers.map((m) => m.player_key).join(","),
+        y.movers.map((m) => m.player_key).join(","),
+      ),
   );
-  const ans = solveAssignment(cost);
-  if (ans.every((j, i) => j === i)) return { flow, a };
+  const ans = solveAssignmentLex(
+    entrants.map((e) => seats.map((h) => changeCost(e, slotOf(slots, h.slot), h.out, force))),
+  );
+  if (ans === null) return { flow, a };
+  const seatOf = new Map(entrants.map((e, i) => [e, at(seats, at(ans, i))]));
   const next = new Map(a);
-  const pairs = heads.map((own, i): FlowPair => {
-    const h = at(heads, at(ans, i));
+  const pairs = heads.map((own): FlowPair => {
+    const h = seatOf.get(own.in) ?? own;
     next.set(own.in.player_key, h.slot);
     return { in: own.in, slot: h.slot, out: h.out, movers: h.movers };
   });
@@ -1060,13 +1342,17 @@ export function analyzeLineup(req: LineupRequest): LineupRecommendation {
   const curStarters = curEval.starters;
   const recStarters = chosen.starters;
   const recKeys = new Set(recStarters.map((p) => p.player_key));
-  // which entrant takes which freed seat: the matching whose changes, each decided on its own, keep
-  // the most points (the same starters, so the same total and P(win) as the solve's own seating)
-  const { flow, a: recA } = rematch(
-    slotFlow(curA, chosen.a, curStarters, recStarters, slots),
+  // which entrant takes which freed seat: chosen from the players alone so that the changes, each
+  // decided on its own, keep the most points (the same starters, so the same total and P(win) as the
+  // solve's own seating; QA-2-062)
+  const { flow, a: recA } = seatChanges(
+    curA,
     chosen.a,
+    curStarters,
+    recStarters,
     slots,
     force,
+    nowMs,
   );
   const pairs = flow.pairs;
   const byKey = new Map(players.map((p) => [p.player_key, p]));

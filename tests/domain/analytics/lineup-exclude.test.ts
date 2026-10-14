@@ -53,6 +53,150 @@ function skewed(mean: number, p90: number, pZero: number): Dist {
   };
 }
 
+/** One rostered player of the exclude ≡ status O property. */
+interface ExcludeSpec {
+  readonly pos: "QB" | "WR" | "RB" | "TE";
+  readonly mean: number;
+  readonly w: number;
+  readonly shape: "symmetric" | "skewed" | "negative" | "bye";
+  readonly pZero: number;
+  readonly start: boolean;
+  readonly out: boolean;
+}
+
+const EXCLUDE_SPECS: fc.Arbitrary<ExcludeSpec[]> = fc.array(
+  fc.record({
+    pos: fc.constantFrom("QB", "WR", "RB", "TE"),
+    mean: fc.integer({ min: 1, max: 30 }),
+    w: fc.double({ min: 0.05, max: 1.2, noNaN: true }),
+    shape: fc.constantFrom("symmetric", "skewed", "negative", "bye"),
+    pZero: fc.constantFrom(0.1, 0.27, 0.4),
+    start: fc.boolean(),
+    out: fc.boolean(),
+  }),
+  { minLength: 2, maxLength: 12 },
+);
+
+/**
+ * The property: an excluded player is never started while a replacement who can score exists, every
+ * change that benches him is priced against 0, and the same roster with him written as `status: O`
+ * decides alike — Δ (value and p10–p90), no_move and the starters.
+ */
+/** The property's roster: each spec's player, a starter in his own position while seats last. */
+function playersOf(specs: readonly ExcludeSpec[]): LineupPlayer[] {
+  const cap: Record<string, number> = { QB: 1, WR: 2, RB: 2, TE: 1 };
+  const taken = new Map<string, number>();
+  return specs.map((s, i) => {
+    const ok = s.start && (taken.get(s.pos) ?? 0) < (cap[s.pos] ?? 0);
+    if (ok) taken.set(s.pos, (taken.get(s.pos) ?? 0) + 1);
+    // distinct projections: between equal ones the solve's pick is arbitrary, and the two
+    // runs below may pick differently without either being wrong
+    const mean = s.mean + i * 0.0173;
+    const points: Dist =
+      s.shape === "skewed"
+        ? skewed(mean, mean * (1 + s.w * 2), s.pZero)
+        : s.shape === "negative"
+          ? { ...dist(mean, mean * s.w), p10: -1 }
+          : s.shape === "bye"
+            ? zeroDist("position_cv")
+            : dist(mean, mean * s.w);
+    return player(s.pos, mean, {
+      slot: ok ? s.pos : "BN",
+      points,
+      p_active: s.shape === "bye" ? 0 : 1,
+    });
+  });
+}
+
+function excludedLikeStatusO(specs: readonly ExcludeSpec[]): void {
+  const players = playersOf(specs);
+  const ex = new Set(players.filter((_, i) => specs[i]?.out === true).map((p) => p.player_key));
+  const r = analyzeLineup({
+    slots: LEAGUE_SLOTS,
+    players,
+    opponent: null,
+    exclude: [...ex],
+    clock,
+    fills_in_swaps: true,
+  });
+  const byKey = new Map(players.map((p) => [p.player_key, p]));
+  const recStarts = new Set(startersOf(r.rec.lineup));
+  const sits = new Set(r.rec.subjects.filter((s) => s.role === "sit").map((s) => s.player_key));
+  // never started by the recommendation, nor by what is logged and scored
+  for (const k of ex) {
+    expect(startersOf(r.recommended_lineup)).not.toContain(k);
+    expect(recStarts.has(k)).toBe(false);
+  }
+  for (const s of r.swaps) {
+    if (s.out === null || !ex.has(s.out)) continue;
+    const inn = byKey.get(s.in);
+    if (inn === undefined) throw new Error("unknown entrant");
+    // priced against 0: the entrant's own projection and quantiles, never a loss
+    expect(s.delta_e).toBeCloseTo(inn.points.mean, 3);
+    expect(s.interval[0]).toBeCloseTo(inn.points.p10, 2);
+    expect(s.interval[1]).toBeCloseTo(inn.points.p90, 2);
+    // a replacement who can score benches him in what is logged and scored
+    if (inn.points.mean > 0) {
+      expect(recStarts.has(s.in)).toBe(true);
+      expect(sits.has(s.out)).toBe(true);
+    }
+  }
+  // an excluded starter with an unused bench player who could take his seat and score is
+  // always benched for someone (the solve fills his seat; the change is made)
+  for (const k of ex) {
+    const x = byKey.get(k);
+    if (x === undefined || !STARTING(x.slot)) continue;
+    const slot = slotByName(LEAGUE_SLOTS, x.slot);
+    if (slot === null) throw new Error("unknown slot");
+    const free = players.some(
+      (y) =>
+        !ex.has(y.player_key) &&
+        !recStarts.has(y.player_key) &&
+        y.points.mean > 0 &&
+        canOccupy(slot, { positions: y.positions, status: y.status }),
+    );
+    if (free) expect(sits.has(k), `${k} is benched`).toBe(true);
+  }
+  // a move is never priced at the excluded players' projections: a made change straddles 0
+  // only when it fills a seat that scores 0 with an entrant whose p10 is below 0
+  const negativeFill = r.swaps.some(
+    (s) =>
+      s.interval[0] < 0 &&
+      recStarts.has(s.in) &&
+      (s.out === null || ex.has(s.out) || byKey.get(s.out)?.points.p90 === 0),
+  );
+  if (!r.rec.no_move && !negativeFill)
+    expect(r.rec.delta_vs_next.p10 < 0 && r.rec.delta_vs_next.p90 > 0).toBe(false);
+  // the zero-points equivalent (status O) decides the same (restored: QA-2-038 / be1eb6b)
+  const o = analyzeLineup({
+    slots: LEAGUE_SLOTS,
+    players: players.map((p) => (ex.has(p.player_key) ? asOut(p) : p)),
+    opponent: null,
+    clock,
+    fills_in_swaps: true,
+  });
+  // the Δ exactly, its p10–p90 included: which entrant takes which freed seat is chosen from the
+  // players alone (QA-2-062), never from how the solve happened to seat equal-total arrangements
+  // (a seat filled is priced by quantiles, a swap by the normal approximation)
+  expect(o.rec.delta_vs_next).toEqual(r.rec.delta_vs_next);
+  const straddling = (x: typeof r) => x.rec.delta_vs_next.p10 < 0 && x.rec.delta_vs_next.p90 > 0;
+  expect(straddling(o)).toBe(straddling(r));
+  expect(o.rec.no_move).toBe(r.rec.no_move);
+  // the same starters, logged and scored — up to players of equal projection, whom the solve
+  // may pick either way — in any order and seat: a status O player can keep a seat an
+  // excluded one cannot, so an entrant may take another seat he can fill; a sit may differ
+  // the same way (listed nowhere, his seat named as scoring 0)
+  const meansOf = (rows: readonly { player_key: string | null }[] | null) =>
+    (rows ?? [])
+      .map((x) => byKey.get(String(x.player_key))?.points.mean ?? Number.NaN)
+      .sort((a, b) => a - b);
+  const startsOf = (x: typeof r) => x.rec.subjects.filter((s) => s.role === "start");
+  expect(meansOf(o.rec.lineup)).toEqual(meansOf(r.rec.lineup));
+  expect(meansOf(startsOf(o))).toEqual(meansOf(startsOf(r)));
+  expect(o.rec.point_estimate).toBe(r.rec.point_estimate);
+  expect(recTextsFit(r.rec)).toBe(true);
+}
+
 describe("QA-2-038 — an excluded starter scores 0", () => {
   it("a starter excluded for a weaker bench player: the swap gains the bench player's points", () => {
     const rb1 = player("RB", 20.6, { slot: "RB", points: dist(20.6, 9) });
@@ -299,138 +443,58 @@ describe("QA-2-038 — an excluded starter scores 0", () => {
     expect(startersOf(r.rec.lineup)).toEqual([backup.player_key]);
   });
 
-  it("property: never started while a replacement who can score exists; exclude ≡ status O", () => {
-    const POS = ["QB", "WR", "RB", "TE"] as const;
-    const cap: Record<string, number> = { QB: 1, WR: 2, RB: 2, TE: 1 };
-    const shape = fc.constantFrom("symmetric", "skewed", "negative", "bye");
-    fc.assert(
-      fc.property(
-        fc.array(
-          fc.record({
-            pos: fc.constantFrom(...POS),
-            mean: fc.integer({ min: 1, max: 30 }),
-            w: fc.double({ min: 0.05, max: 1.2, noNaN: true }),
-            shape,
-            pZero: fc.constantFrom(0.1, 0.27, 0.4),
-            start: fc.boolean(),
-            out: fc.boolean(),
-          }),
-          { minLength: 2, maxLength: 12 },
-        ),
-        (specs) => {
-          const taken = new Map<string, number>();
-          const players = specs.map((s, i) => {
-            const ok = s.start && (taken.get(s.pos) ?? 0) < (cap[s.pos] ?? 0);
-            if (ok) taken.set(s.pos, (taken.get(s.pos) ?? 0) + 1);
-            // distinct projections: between equal ones the solve's pick is arbitrary, and the two
-            // runs below may pick differently without either being wrong
-            const mean = s.mean + i * 0.0173;
-            const points: Dist =
-              s.shape === "skewed"
-                ? skewed(mean, mean * (1 + s.w * 2), s.pZero)
-                : s.shape === "negative"
-                  ? { ...dist(mean, mean * s.w), p10: -1 }
-                  : s.shape === "bye"
-                    ? zeroDist("position_cv")
-                    : dist(mean, mean * s.w);
-            return player(s.pos, mean, {
-              slot: ok ? s.pos : "BN",
-              points,
-              p_active: s.shape === "bye" ? 0 : 1,
-            });
-          });
-          const ex = new Set(
-            players.filter((_, i) => specs[i]?.out === true).map((p) => p.player_key),
-          );
-          const r = analyzeLineup({
-            slots: LEAGUE_SLOTS,
-            players,
-            opponent: null,
-            exclude: [...ex],
-            clock,
-            fills_in_swaps: true,
-          });
-          const byKey = new Map(players.map((p) => [p.player_key, p]));
-          const recStarts = new Set(startersOf(r.rec.lineup));
-          const sits = new Set(
-            r.rec.subjects.filter((s) => s.role === "sit").map((s) => s.player_key),
-          );
-          // never started by the recommendation, nor by what is logged and scored
-          for (const k of ex) {
-            expect(startersOf(r.recommended_lineup)).not.toContain(k);
-            expect(recStarts.has(k)).toBe(false);
-          }
-          for (const s of r.swaps) {
-            if (s.out === null || !ex.has(s.out)) continue;
-            const inn = byKey.get(s.in);
-            if (inn === undefined) throw new Error("unknown entrant");
-            // priced against 0: the entrant's own projection and quantiles, never a loss
-            expect(s.delta_e).toBeCloseTo(inn.points.mean, 3);
-            expect(s.interval[0]).toBeCloseTo(inn.points.p10, 2);
-            expect(s.interval[1]).toBeCloseTo(inn.points.p90, 2);
-            // a replacement who can score benches him in what is logged and scored
-            if (inn.points.mean > 0) {
-              expect(recStarts.has(s.in)).toBe(true);
-              expect(sits.has(s.out)).toBe(true);
-            }
-          }
-          // an excluded starter with an unused bench player who could take his seat and score is
-          // always benched for someone (the solve fills his seat; the change is made)
-          for (const k of ex) {
-            const x = byKey.get(k);
-            if (x === undefined || !STARTING(x.slot)) continue;
-            const slot = slotByName(LEAGUE_SLOTS, x.slot);
-            if (slot === null) throw new Error("unknown slot");
-            const free = players.some(
-              (y) =>
-                !ex.has(y.player_key) &&
-                !recStarts.has(y.player_key) &&
-                y.points.mean > 0 &&
-                canOccupy(slot, { positions: y.positions, status: y.status }),
-            );
-            if (free) expect(sits.has(k), `${k} is benched`).toBe(true);
-          }
-          // a move is never priced at the excluded players' projections: a made change straddles 0
-          // only when it fills a seat that scores 0 with an entrant whose p10 is below 0
-          const negativeFill = r.swaps.some(
-            (s) =>
-              s.interval[0] < 0 &&
-              recStarts.has(s.in) &&
-              (s.out === null || ex.has(s.out) || byKey.get(s.out)?.points.p90 === 0),
-          );
-          if (!r.rec.no_move && !negativeFill)
-            expect(r.rec.delta_vs_next.p10 < 0 && r.rec.delta_vs_next.p90 > 0).toBe(false);
-          // the zero-points equivalent (status O) decides the same (restored: QA-2-038 / be1eb6b)
-          const o = analyzeLineup({
-            slots: LEAGUE_SLOTS,
-            players: players.map((p) => (ex.has(p.player_key) ? asOut(p) : p)),
-            opponent: null,
-            clock,
-            fills_in_swaps: true,
-          });
-          // (the Δ's value exactly; its p10–p90 up to how the solve seats equal-total arrangements —
-          // a seat filled is priced by quantiles, a swap by the normal approximation)
-          expect(o.rec.delta_vs_next.value).toBeCloseTo(r.rec.delta_vs_next.value, 3);
-          const straddling = (x: typeof r) =>
-            x.rec.delta_vs_next.p10 < 0 && x.rec.delta_vs_next.p90 > 0;
-          expect(straddling(o)).toBe(straddling(r));
-          expect(o.rec.no_move).toBe(r.rec.no_move);
-          // the same starters, logged and scored — up to players of equal projection, whom the solve
-          // may pick either way — in any order and seat: a status O player can keep a seat an
-          // excluded one cannot, so an entrant may take another seat he can fill; a sit may differ
-          // the same way (listed nowhere, his seat named as scoring 0)
-          const meansOf = (rows: readonly { player_key: string | null }[] | null) =>
-            (rows ?? [])
-              .map((x) => byKey.get(String(x.player_key))?.points.mean ?? Number.NaN)
-              .sort((a, b) => a - b);
-          const startsOf = (x: typeof r) => x.rec.subjects.filter((s) => s.role === "start");
-          expect(meansOf(o.rec.lineup)).toEqual(meansOf(r.rec.lineup));
-          expect(meansOf(startsOf(o))).toEqual(meansOf(startsOf(r)));
-          expect(o.rec.point_estimate).toBe(r.rec.point_estimate);
-          expect(recTextsFit(r.rec)).toBe(true);
-        },
-      ),
-      { numRuns: 400 },
+  it("equal-total pairings decide alike: the property's shrunk counterexample (QA-2-062)", () => {
+    // one WR starter (7, p10 below 0); on the bench WR 18 and WR 7 (p10 below 0), WR 12, two
+    // 1-point QBs and an excluded 1-point WR. Every pairing of the three WR entrants with the
+    // starter's seat and the empty WR and W/R/T seats makes all four changes and gains the same,
+    // but a seat that scores 0 is priced by the entrant's quantiles and a swap by the normal
+    // approximation: the solve's arbitrary pairing gave Δ p10 11.65 excluded, −0.13 as status O
+    const specs: ExcludeSpec[] = [
+      { pos: "WR", mean: 7, w: 0.05, shape: "negative", pZero: 0.1, start: true, out: false },
+      { pos: "WR", mean: 1, w: 0.05, shape: "symmetric", pZero: 0.1, start: false, out: true },
+      { pos: "WR", mean: 18, w: 0.05, shape: "negative", pZero: 0.1, start: false, out: false },
+      { pos: "WR", mean: 12, w: 0.05, shape: "symmetric", pZero: 0.1, start: false, out: false },
+      { pos: "WR", mean: 7, w: 0.05, shape: "negative", pZero: 0.1, start: false, out: false },
+      { pos: "QB", mean: 1, w: 0.05, shape: "symmetric", pZero: 0.1, start: false, out: false },
+      { pos: "QB", mean: 1, w: 0.05, shape: "symmetric", pZero: 0.1, start: false, out: false },
+    ];
+    excludedLikeStatusO(specs);
+    const roster = playersOf(specs);
+    const [starter, excluded, wr18, wr12, wr7] = roster;
+    if (!starter || !excluded || !wr18 || !wr12 || !wr7) throw new Error("roster");
+    // excluded; written as status O; excluded with the input order reversed
+    const runs = [
+      { players: roster, exclude: [excluded.player_key] },
+      { players: roster.map((p) => (p === excluded ? asOut(p) : p)), exclude: [] },
+      { players: [...roster].reverse(), exclude: [excluded.player_key] },
+    ].map((x) =>
+      analyzeLineup({ slots: LEAGUE_SLOTS, opponent: null, clock, fills_in_swaps: true, ...x }),
     );
+    for (const r of runs) {
+      // the starter's seat goes to WR 18: of the equal-gain pairings, the one whose made changes
+      // have the higher worst cases (0.15 + 11.45 − 1, against 0.82 − 1 − 1 with WR 12 there)
+      expect(r.swaps.find((s) => s.out === starter.player_key)?.in).toBe(wr18.player_key);
+      expect(r.rec.delta_vs_next).toEqual(runs[0]?.rec.delta_vs_next);
+      expect(r.rec.delta_vs_next.p10).toBeGreaterThan(0);
+      expect(startersOf(r.rec.lineup).sort()).toEqual(
+        startersOf(runs[0]?.rec.lineup ?? null).sort(),
+      );
+      expect([r.no_move, r.rec.action]).toEqual([false, "make 4 lineup changes"]);
+    }
+    expect(startersOf(runs[0]?.rec.lineup ?? null)).toEqual(
+      expect.arrayContaining([wr18.player_key, wr12.player_key, wr7.player_key]),
+    );
+  });
+
+  it("property: never started while a replacement who can score exists; exclude ≡ status O", () => {
+    fc.assert(fc.property(EXCLUDE_SPECS, excludedLikeStatusO), { numRuns: 400 });
+  });
+
+  it("property, replayed on the recorded counterexample (fc seed 784013146, path 150)", () => {
+    fc.assert(fc.property(EXCLUDE_SPECS, excludedLikeStatusO), {
+      seed: 784013146,
+      path: "150",
+      endOnFailure: true,
+    });
   });
 });
