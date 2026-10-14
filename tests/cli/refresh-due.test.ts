@@ -454,13 +454,83 @@ describe("the seasons each source asks for come from the schedule's phase (outsi
     );
     expect(code, io.out.text + io.err.text).toBe(EXIT.OK);
     const doc = JSON.parse(io.out.text) as { results: { source: string; file_version: string }[] };
-    // 2027 is not in the file yet: asked for, not held (the version names what was asked)
+    // 2027 is not in games.parquet yet: asked for, recorded as not published upstream, left out
+    // (the version names what the file holds)
     expect(doc.results.find((r) => r.source === "nflverse:schedules")?.file_version).toMatch(
-      /_2025-2026-2027$/,
+      /_2025-2026$/,
     );
+    expect(
+      rows(sb, "SELECT season, status FROM season_check WHERE source = 'nflverse:schedules'"),
+    ).toEqual([
+      { season: 2025, status: "published" },
+      { season: 2026, status: "published" },
+      { season: 2027, status: "not_published" },
+    ]);
     expect(doc.results.find((r) => r.source === "nflverse:injuries")?.file_version).toMatch(
       /_2026$/,
     );
+  }, 60_000);
+});
+
+describe("a manual --seasons run (the hint a tool gives for a season the file does not hold)", () => {
+  // `ff refresh nflverse:schedules --seasons 2027` before 2027's release used to publish a schedules
+  // file with no game, dropping every season: the calendar fell back to no_kickoffs and the phase to
+  // its bootstrap rule until the next tick. A manual --seasons run now adds to what the file holds,
+  // never drops it, and a season upstream has not published is recorded, never published empty.
+  it("--seasons S+1: exit 0, the file keeps S−1 and S, the calendar stays the schedule's, S+1 is recorded", async () => {
+    sb = sandbox();
+    const upstream = upstreamWithout(sb);
+    const clock = fixedClock("2026-10-01T12:00:00.000Z");
+    expect((await tick(sb, clock, { upstream, targets: ["nflverse:schedules"] })).code).toBe(
+      EXIT.OK,
+    );
+    clock.advance(20 * MIN);
+    const t = await tick(sb, clock, {
+      upstream,
+      targets: ["nflverse:schedules"],
+      seasons: "2027",
+      json: true,
+    });
+    expect(t.code, t.out + t.io.err.text).toBe(EXIT.OK);
+    const doc = JSON.parse(t.out) as { results: { status: string }[] };
+    expect(["unchanged", "skipped"]).toContain(doc.results[0]?.status);
+    const cur = rows<{ seasons_json: string }>(
+      sb,
+      "SELECT seasons_json FROM refresh_log WHERE source = 'nflverse:schedules' AND ok = 1 ORDER BY id DESC LIMIT 1",
+    );
+    expect(JSON.parse(cur[0]?.seasons_json ?? "[]")).toEqual([2025, 2026]);
+    expect(
+      rows(
+        sb,
+        "SELECT status FROM season_check WHERE source = 'nflverse:schedules' AND season = 2027",
+      ),
+    ).toEqual([{ status: "not_published" }]);
+    // the schedule the decisions read is intact: a dry run still judges from its calendar
+    const dry = await tick(sb, clock, { upstream, dryRun: true, json: true });
+    const plan = JSON.parse(dry.out) as { decisions: { source: string; reason: string }[] };
+    expect(plan.decisions.find((d) => d.source === "nflverse:schedules")?.reason).not.toBe(
+      "repair",
+    );
+  }, 60_000);
+
+  it("--seasons of a past season adds it to the file, never drops the season in progress", async () => {
+    sb = sandbox();
+    const upstream = upstreamWithout(sb);
+    const clock = fixedClock("2026-10-01T12:00:00.000Z");
+    await tick(sb, clock, { upstream, targets: ["nflverse:schedules", "nflverse:injuries"] });
+    clock.advance(20 * MIN);
+    const t = await tick(sb, clock, {
+      upstream,
+      targets: ["nflverse:injuries"],
+      seasons: "2025",
+      json: true,
+    });
+    expect(t.code, t.out + t.io.err.text).toBe(EXIT.OK);
+    const cur = rows<{ seasons_json: string }>(
+      sb,
+      "SELECT seasons_json FROM refresh_log WHERE source = 'nflverse:injuries' AND ok = 1 ORDER BY id DESC LIMIT 1",
+    );
+    expect(JSON.parse(cur[0]?.seasons_json ?? "[]")).toEqual([2025, 2026]);
   }, 60_000);
 });
 

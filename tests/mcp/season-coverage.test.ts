@@ -130,6 +130,10 @@ describe("coverage at the tool layer, any season 2026–2040 and any phase", () 
   });
 
   it("a check older than the hard limit is no evidence: the season is missing, and the hint names it", () => {
+    // `--seasons` only for a season upstream is known to have (one before the season in progress);
+    // for the season in progress or a later one, a plain refresh — it checks upstream and records a
+    // season not published yet (the next answer then says so) — never `--seasons` (that run once
+    // published a schedules file with no game)
     fc.assert(
       fc.property(arb, ({ season, phase, now }) => {
         const ctx = ctxAt(now, { season, phase }, [
@@ -143,10 +147,65 @@ describe("coverage at the tool layer, any season 2026–2040 and any phase", () 
         const sched = { rows: [], stamp: stamp("nflverse:schedules", [season - 1], now - H) };
         const e = errOf(() => requiredSource(ctx, "nflverse:schedules", sched, false, season));
         expect(e?.message).toBe("Only data older than its hard limit is available.");
-        expect(e?.hint).toContain(`--seasons ${String(season)}`);
+        expect(e?.hint).toContain(String(season));
+        expect(e?.hint).toContain("`ff refresh nflverse:schedules`");
+        expect(e?.hint).not.toMatch(/--seasons/);
+        for (const later of [season + 1, season + 2]) {
+          const next = errOf(() => requiredSource(ctx, "nflverse:schedules", sched, false, later));
+          expect(next?.hint).not.toMatch(/--seasons/);
+        }
+        const past = errOf(() =>
+          requiredSource(
+            ctx,
+            "nflverse:schedules",
+            { rows: [], stamp: stamp("nflverse:schedules", [season], now - H) },
+            false,
+            season - 2,
+          ),
+        );
+        expect(past?.hint).toContain(`--seasons ${String(season - 2)}`);
       }),
       { numRuns: 100 },
     );
+  });
+
+  it("draft prep: next season's league file in the off-season, before its schedule's release (2026–2030)", () => {
+    for (const S of [2026, 2027, 2028, 2029, 2030]) {
+      const now = Date.parse(`${String(S + 1)}-03-15T16:00:00.000Z`);
+      const sched = { rows: [], stamp: stamp("nflverse:schedules", [S - 1, S], now - H) };
+      // before any refresh has asked upstream for S+1: a plain refresh, never `--seasons`
+      const before = errOf(() =>
+        requiredSource(
+          ctxAt(now, { season: S, phase: "offseason" }),
+          "nflverse:schedules",
+          sched,
+          false,
+          S + 1,
+        ),
+      );
+      expect(before?.hint, String(S)).toContain("`ff refresh nflverse:schedules`");
+      expect(before?.hint).not.toMatch(/--seasons/);
+      // once a refresh found S+1 unpublished: season_not_published, not retryable, no refresh asked
+      const after = errOf(() =>
+        requiredSource(
+          ctxAt(now, { season: S, phase: "offseason" }, [
+            {
+              source: "nflverse:schedules",
+              season: S + 1,
+              checked_at: iso(now - H),
+              status: "not_published",
+            },
+          ]),
+          "nflverse:schedules",
+          sched,
+          false,
+          S + 1,
+        ),
+      );
+      expect(after?.message).toBe(STALE_ONLY_VARIANTS.season_not_published.message);
+      expect(after?.retryable).toBe(false);
+      expect(after?.hint).not.toMatch(/ff refresh/);
+    }
   });
 
   it("a finished season's data never expires (complete); the season in progress does", () => {

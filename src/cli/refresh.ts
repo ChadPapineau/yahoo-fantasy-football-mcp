@@ -727,14 +727,29 @@ interface RunContext {
   readonly transport: FetchLike | undefined;
 }
 
-/** The seasons a source refreshes: --seasons, else fixture mode's manifest, else the phase's. */
+/**
+ * The seasons a source refreshes: fixture mode's manifest, else the phase's; a manual `--seasons`
+ * ADDS to the seasons the current file holds — a publish replaces the whole file, so naming one
+ * season never drops the others (a `--seasons <next season>` before its release once left a
+ * schedules file with no game).
+ */
 function seasonsOf(
   ctx: RunContext,
   source: DataSource,
   phase: SeasonPhase,
   fixture: ReadonlyMap<string, readonly number[]>,
 ): readonly number[] {
-  return ctx.seasonsOverride ?? fixture.get(source.id) ?? refreshSeasons(source.id, phase);
+  if (ctx.seasonsOverride === null)
+    return fixture.get(source.id) ?? refreshSeasons(source.id, phase);
+  let held: readonly number[] = [];
+  try {
+    held =
+      ctx.store.repos.refreshLog.current().find((r) => r.source === source.id && r.ok)?.seasons ??
+      [];
+  } catch {
+    held = [];
+  }
+  return [...new Set([...held, ...ctx.seasonsOverride])].sort((a, b) => a - b);
 }
 
 /** Runs one source with the run lock, a gate, the season checks and the backoff store. */

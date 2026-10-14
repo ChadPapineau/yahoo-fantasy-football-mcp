@@ -16,6 +16,7 @@ import type { DataSource } from "../source.js";
 import { REFERENCE_VINTAGES } from "../../config/reference-vintage.js";
 import { resolveVenueId, venueById, venueRows } from "../venues.js";
 import { eachRow, makeNflverseSource } from "./base.js";
+import { NflverseSourceError } from "./release.js";
 import { TableLoader, asInt, asReal, buildRow } from "./rows.js";
 
 type Raw = Readonly<Record<string, unknown>>;
@@ -137,6 +138,7 @@ export const schedulesSource: DataSource = makeNflverseSource({
     const venues = new TableLoader(into, DS_VENUES);
     let unknownVenue = 0;
     let noKickoff = 0;
+    let added = 0;
     const checked: VenueCheckRow[] = [];
     await eachRow("nflverse:schedules", files, (raw, file) => {
       // games.parquet holds every season: rows outside the file's season are the documented
@@ -144,10 +146,18 @@ export const schedulesSource: DataSource = makeNflverseSource({
       if (file.season !== null && asInt(raw.season) !== file.season) return;
       const row = gameRow(raw);
       if (!games.add(row)) return;
+      added++;
       if (row.venue_id === null) unknownVenue++;
       if (row.kickoff_utc === null) noKickoff++;
       checked.push(row);
     });
+    // a schedules file without a game would replace the calendar every decision reads with the
+    // no-kickoff fallback: refused, so the previous file stays
+    if (added === 0)
+      throw new NflverseSourceError(
+        "schema",
+        "nflverse:schedules: no games for the requested seasons; the previous file is kept",
+      );
     for (const v of venueRows()) venues.add(v);
     const warnings: string[] = [];
     if (unknownVenue > 0) {

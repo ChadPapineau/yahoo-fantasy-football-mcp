@@ -79,6 +79,24 @@ export async function parquetRows(path: string): Promise<number | null> {
   }
 }
 
+/**
+ * The seasons a one-file source's download holds (its `season` column, read alone); null when the
+ * file cannot be read that way (the schema assertion then reports it).
+ */
+export async function seasonsIn(path: string): Promise<ReadonlySet<number> | null> {
+  try {
+    const out = new Set<number>();
+    for await (const group of readRowGroups(await openParquet(path), ["season"]))
+      for (const r of group) {
+        const s = Number(r.season);
+        if (Number.isInteger(s)) out.add(s);
+      }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
 /** sha256 of the sorted `table.column TYPE` list (PublishStats.columns_hash). */
 export function columnsHash(tables: readonly DatasetTableSpec[]): string {
   const cols = tables.flatMap((t) => t.columns.map((c) => `${t.name}.${c.name} ${c.type}`)).sort();
@@ -250,14 +268,21 @@ export function makeNflverseSource(def: NflverseSourceDef): DataSource {
           }
         } else {
           // One upstream file holds every season: one download, one copy per season so each
-          // TempFile carries the season its rows are filtered to at publish.
+          // TempFile carries the season its rows are filtered to at publish. A season the file
+          // does not hold yet (the next season before its schedule's release) is "not published"
+          // — reported, never copied as an empty season (QA-1-033; season-fresh §3.3).
           const all = await downloadAsset(
             ctx,
             releaseUrl(def.tag, def.file.all),
             join(dir, "all.parquet"),
             null,
           );
+          const held = await seasonsIn(all.path);
           for (const s of seasons) {
+            if (held !== null && !held.has(s) && ctx.notPublished && mayBeUnpublished(s, ctx)) {
+              ctx.notPublished(s);
+              continue;
+            }
             const dest = join(dir, `${String(s)}.parquet`);
             await copyFile(all.path, dest, constants.COPYFILE_EXCL);
             out.push({ path: dest, bytes: all.bytes, season: s });

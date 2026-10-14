@@ -148,9 +148,20 @@ export function datasetUnreadableHint(source: DatasetSourceId): string {
   return `Run \`ff refresh ${source}\` in a terminal, then retry.`;
 }
 
-/** The hint when the file holds other seasons but not the one asked for (and no check says why). */
-export function seasonMissingHint(source: DatasetSourceId, season: number): string {
-  return `No ${String(season)} data of ${source} is loaded: run \`ff refresh ${source} --seasons ${String(season)}\` in a terminal, then retry.`;
+/**
+ * The hint when the file holds other seasons but not the one asked for (and no check says why).
+ * `--seasons` only for a season upstream is known to have (one before the season in progress); for
+ * that season or a later one a plain refresh, which asks upstream and records a season it has not
+ * published yet — the next answer then says so instead of asking for a refresh again.
+ */
+export function seasonMissingHint(
+  source: DatasetSourceId,
+  season: number,
+  phaseSeason: number,
+): string {
+  return season < phaseSeason
+    ? `No ${String(season)} data of ${source} is loaded: run \`ff refresh ${source} --seasons ${String(season)}\` in a terminal, then retry.`
+    : `No ${String(season)} data of ${source} is loaded, and upstream may not have published it yet: run \`ff refresh ${source}\` in a terminal (it checks), then retry.`;
 }
 
 /** The note an optional source's unpublished season adds (season-fresh §3.3). */
@@ -253,7 +264,9 @@ export function requiredSource<T>(
     throw staleOnly(
       ctx,
       source,
-      new FfError("STALE_ONLY", { hint: seasonMissingHint(source, season) }),
+      new FfError("STALE_ONLY", {
+        hint: seasonMissingHint(source, season, ctx.view.phase.season),
+      }),
     );
   return coveredInput(ctx, r.stamp, cov, allowStale);
 }
