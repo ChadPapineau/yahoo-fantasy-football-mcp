@@ -214,36 +214,69 @@ describe("lockCheck", () => {
     expect(lockCheck(rec, week, [row("garbage")]).detected_at).toBe("garbage");
   });
 
-  it("a week move: the old week's games no longer hold the deadline", () => {
-    const before = syntheticSeason({ season: 2027, seed: 2 });
-    const snf = sundayNight(before, 8);
-    const after = moveToWeek(
-      before,
-      snf.game_id,
-      10,
-      new Date(ms(snf.kickoff) + 14 * D).toISOString(),
-    );
-    const rec = {
-      season: 2027,
-      week: 8,
-      latest_execution_time: snf.kickoff,
-      recorded_at: new Date(ms(snf.kickoff) - 5 * D).toISOString(),
-      subject_teams: new Set<NflTeam>([snf.away, snf.home]),
-    };
-    expect(
-      lockCheck(
-        rec,
-        after.filter((g) => g.week === 8),
-        [],
-      ).status,
-    ).toBe("unknown"); // the teams no longer play week 8
-    expect(
-      lockCheck(
-        { ...rec, subject_teams: null },
-        after.filter((g) => g.week === 8),
-        [],
-      ).status,
-    ).toBe("moved");
+  it("a week move, with the rows the diff really writes (both under the NEW week): moved, new lock", () => {
+    // diffSchedules labels a week move's `week` row (8→10) and its `kickoff` row with the game's new
+    // week, so a filter on the rec's week alone never saw them and the old-week rec read `unknown`
+    for (const season of SYNTHETIC_SEASONS)
+      for (const [from, to] of [
+        [8, 10],
+        [5, 7],
+        [12, 13],
+      ] as const) {
+        const before = syntheticSeason({ season, seed: season + from });
+        const snf = sundayNight(before, from);
+        const newK = new Date(ms(snf.kickoff) + (to - from) * 7 * D).toISOString();
+        const after = moveToWeek(before, snf.game_id, to, newK);
+        const now = ms(snf.kickoff) - 3 * D;
+        const detected = new Date(now).toISOString();
+        const changes = diffSchedules(before, after, {
+          nowMs: now,
+          detectedAt: detected,
+          releaseUpdatedAt: null,
+        });
+        expect(changes.map((c) => [c.kind, c.week]).sort()).toEqual(
+          [
+            ["kickoff", to],
+            ["week", to],
+          ].sort(),
+        );
+        const rec = {
+          season,
+          week: from,
+          latest_execution_time: snf.kickoff,
+          recorded_at: new Date(now - 2 * D).toISOString(),
+          subject_teams: new Set<NflTeam>([snf.away]),
+        };
+        const label = `${String(season)} ${String(from)}→${String(to)}`;
+        const weekGames = after.filter((g) => g.week === from);
+        expect(lockCheck(rec, weekGames, changes), label).toEqual({
+          status: "moved",
+          old_lock: new Date(ms(snf.kickoff)).toISOString(),
+          new_lock: new Date(ms(newK)).toISOString(),
+          detected_at: detected,
+        });
+        // teams unknown (a weekly-lock league): moved too, the same new lock
+        expect(lockCheck({ ...rec, subject_teams: null }, weekGames, changes).status, label).toBe(
+          "moved",
+        );
+        // a rec of the NEW week whose deadline is another game is not touched by the move rows
+        const other = after.find((g) => g.week === to && g.game_id !== snf.game_id)!;
+        expect(
+          lockCheck(
+            {
+              ...rec,
+              week: to,
+              latest_execution_time: other.kickoff,
+              subject_teams: new Set<NflTeam>([other.away]),
+            },
+            after.filter((g) => g.week === to),
+            changes,
+          ).status,
+          label,
+        ).toBe("current");
+        // without the change rows, the old week's games no longer hold the subject teams: unknown
+        expect(lockCheck(rec, weekGames, []).status, label).toBe("unknown");
+      }
   });
 
   it("unknown: no deadline, no games, or none of the subject teams playing that week", () => {

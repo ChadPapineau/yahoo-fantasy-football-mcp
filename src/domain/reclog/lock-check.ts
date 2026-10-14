@@ -24,6 +24,9 @@ const msOf = (v: string | null): number | null => {
   return Number.isFinite(ms) ? ms : null;
 };
 const isoOf = (ms: number): IsoInstant => new Date(ms).toISOString();
+/** A `week` change's value as a week number (null when it is not one). */
+const msWeek = (v: string | null): number | null =>
+  v !== null && /^[0-9]{1,2}$/.test(v) ? Number(v) : null;
 
 /** The most recently detected of `rows` (rows with an unreadable instant rank last), or null. */
 function newestDetected(rows: readonly ScheduleChange[]): ScheduleChange | null {
@@ -49,8 +52,8 @@ const UNKNOWN: LockCheck = Object.freeze({
 /**
  * The lock mark of one recommendation (§5.4): `unknown` when it has no deadline or the week has no
  * games (for its subject teams, when known); `moved` when a kickoff/gameday/week/removed change of
- * its season-week (of a game of its subject teams, when known) has the rec's deadline as its old
- * value, or when the deadline matches no current kickoff of the week's games involving the
+ * its season-week — or of a game moved out of that week (its `week` row's old value) — of a game of
+ * its subject teams, when known, has the rec's deadline as its old value, or when the deadline matches no current kickoff of the week's games involving the
  * rec's subject teams (all games when the teams are unknown — pass null for a weekly-lock league,
  * whose deadline is the week's first kickoff); else `current`.
  */
@@ -72,8 +75,18 @@ export function lockCheck(
   const teams = rec.subject_teams;
   const involves = (x: { readonly away: NflTeam; readonly home: NflTeam }): boolean =>
     teams === null || teams.has(x.away) || teams.has(x.home);
+  // a week move's rows (`week` and `kickoff`) carry the game's NEW week: a game moved out of the
+  // rec's week is matched through its `week` row's old value, and all its rows come with it
+  const movedOut = new Set(
+    changes
+      .filter(
+        (c) => c.season === rec.season && c.kind === "week" && msWeek(c.old_value) === rec.week,
+      )
+      .map((c) => c.game_id),
+  );
   const ofWeek = changes.filter(
-    (c) => c.season === rec.season && c.week === rec.week && involves(c),
+    (c) =>
+      c.season === rec.season && (c.week === rec.week || movedOut.has(c.game_id)) && involves(c),
   );
   const hit = newestDetected(
     ofWeek.filter((c) => MOVE_KINDS.has(c.kind) && msOf(c.old_value) === deadline),
