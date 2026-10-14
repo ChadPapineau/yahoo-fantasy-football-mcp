@@ -671,3 +671,46 @@ describe("nflverse ids and key lengths live in the leaf layer (critics C-19b, C-
     expect(MANUAL_KEY_RE.player.test(`manual.p.${slug32}a`)).toBe(false);
   });
 });
+
+describe("FF_ON_DEMAND_REFRESH (season-fresh spec §8.6: answer-time refresh)", () => {
+  const fixtureEnv = (extra: Record<string, string> = {}) => {
+    const fixtures = path.join(ROOT, "fixtures");
+    return {
+      FF_FIXTURE_DIR: fixtures,
+      FF_LEAGUE_FILE: path.join(fixtures, "manual", "league.yaml"),
+      ...extra,
+    };
+  };
+
+  it("defaults to wait outside fixture mode and to off in fixture mode", () => {
+    const c = loadConfig(input());
+    expect(c.onDemandRefresh).toBe("wait");
+    expect(c.origins.FF_ON_DEMAND_REFRESH).toBe("default");
+    expect(loadConfig(input(fixtureEnv())).onDemandRefresh).toBe("off");
+  });
+
+  it("an explicit value wins in either mode, from the environment or config.json", () => {
+    for (const v of ["wait", "background", "off"] as const) {
+      expect(loadConfig(input({ FF_ON_DEMAND_REFRESH: v })).onDemandRefresh).toBe(v);
+      expect(loadConfig(input(fixtureEnv({ FF_ON_DEMAND_REFRESH: v }))).onDemandRefresh).toBe(v);
+      const fromFile = loadConfig(input({}, { FF_ON_DEMAND_REFRESH: v }));
+      expect(fromFile.onDemandRefresh).toBe(v);
+      expect(fromFile.origins.FF_ON_DEMAND_REFRESH).toBe("file");
+    }
+  });
+
+  it("any other value is a ConfigError naming the key, never echoing the value", () => {
+    for (const bad of ["WAIT", "on", "1", FAKE_SECRET])
+      expect(issuesOf(() => loadConfig(input({ FF_ON_DEMAND_REFRESH: bad })))).toEqual([
+        { key: "FF_ON_DEMAND_REFRESH", reason: "invalid" },
+      ]);
+  });
+
+  it("is documented in the key table and .env.example", () => {
+    const spec = CONFIG_KEY_SPECS.find((s) => s.key === "FF_ON_DEMAND_REFRESH");
+    expect(spec).toMatchObject({ secret: false, fileSettable: true, status: "now" });
+    expect(readFileSync(path.join(ROOT, ".env.example"), "utf8")).toMatch(
+      /^# FF_ON_DEMAND_REFRESH=wait$/m,
+    );
+  });
+});
