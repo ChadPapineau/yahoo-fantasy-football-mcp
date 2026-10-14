@@ -49,7 +49,12 @@ yahoo-fantasy-football-mcp/
 │   ├── config/
 │   │   ├── schema.ts            # zod schema of every env/config key (README table generated from it)
 │   │   ├── paths.ts             # XDG resolution, absolute-path assertions
-│   │   └── freshness.ts         # TTL / hard-limit constants (plan 01 §5.4)
+│   │   ├── freshness.ts         # TTL / hard-limit constants (plan 01 §5.4); TTL judged under a GameCalendar
+│   │   ├── game-calendar.ts     # kickoff-relative windows from the schedule (hot window, phases; zone-independent) — 2026-10-14
+│   │   ├── cadence.ts           # the refresh policy: dueDecision (the tick), onDemandDecision (answer time) — 2026-10-14
+│   │   ├── weeks.ts             # WEEK_INDEX_MAX (structural 30), TOOL_INPUT_WEEK_MAX (contract-1 input 22) — 2026-10-14
+│   │   ├── flex-rules.ts        # NFL flex notice periods, vintage-stamped — 2026-10-14
+│   │   └── reference-vintage.ts # the one registry of reference tables' verified_through_season — 2026-10-14
 │   ├── mcp/                     # MCP surface only
 │   │   ├── server.ts            # McpServer construction, serveStdio
 │   │   ├── registry.ts          # the one ordered tool/resource/prompt list
@@ -61,12 +66,13 @@ yahoo-fantasy-football-mcp/
 │   │   ├── resources/
 │   │   └── prompts/
 │   ├── domain/                  # pure
-│   │   ├── league/              # league model, slots, rules predicates
+│   │   ├── league/              # league model, slots, rules predicates; season.ts (season facts + phase from the schedule),
+│   │   │                        # calendar.ts (ScheduleView), coverage.ts, schedule-changes.ts, kickoff-status.ts, status-blocks.ts (2026-10-14)
 │   │   ├── scoring/             # engine (05 §15) + stat canonical names
 │   │   ├── analytics/           # projections, start/sit, waivers … (plans 07–08)
 │   │   ├── crosswalk/           # matcher (04 §D), overrides loader
 │   │   ├── gate/                # PreparedWrite, ticket, precondition, channels (plan 02 §4)
-│   │   └── reclog/              # recommendation log (05 §12)
+│   │   └── reclog/              # recommendation log (05 §12); lock-check.ts (a logged call's lock mark, 2026-10-14)
 │   ├── providers/
 │   │   ├── platform.ts          # FantasyPlatform interface (plan 01 §8)
 │   │   └── yahoo/
@@ -89,7 +95,7 @@ yahoo-fantasy-football-mcp/
 │   │   └── odds/                # the-odds-api (optional)
 │   ├── store/
 │   │   ├── db.ts                # DatabaseSync open, pragmas, busy_timeout; ATTACH/re-attach of ds/<source>.sqlite (read-only)
-│   │   ├── migrations/          # 001_init.ts …
+│   │   ├── migrations/          # 001_initial.ts, 002_reclog_dedup_scope.ts, 003_season_fresh.ts (2026-10-14)
 │   │   └── repos/               # one repository per table family
 │   ├── auth/
 │   │   ├── oauth.ts             # authorization-code client (oob + listener)
@@ -100,7 +106,8 @@ yahoo-fantasy-football-mcp/
 │   │   └── client.ts            # fetch wrapper: host allow-list, timeouts, limiter hook, redaction
 │   └── cli/
 │       ├── log.ts               # stderr JSON logger + redaction
-│       ├── serve.ts · auth.ts · status.ts · doctor.ts · smoke.ts · refresh.ts
+│       ├── serve.ts · auth.ts · status.ts · doctor.ts · smoke.ts · refresh.ts (incl. `refresh due`, the tick)
+│       ├── on-demand-refresh.ts # the answer-time refresh orchestrator: bounded, single-flight child spawns (2026-10-14)
 │       ├── confirm.ts · snapshot.ts · print-config.ts · install-launchd.ts · uninstall.ts
 │       └── launchd/             # plist templates (absolute paths filled at install)
 ├── tests/                       # mirrors src/ (unit), plus:
@@ -134,17 +141,17 @@ yahoo-fantasy-football-mcp/
 
 **Runtime dependencies (the allow-list; adding one needs a row here with reason and rejected alternative):**
 
-| Package | Pinned at (build, 2026-09-30) | Why | Rejected alternative |
+| Package | Pinned at (build 2026-09-30; dependency round 2026-10-14) | Why | Rejected alternative |
 |---|---|---|---|
-| `@modelcontextprotocol/server` | **2.2.0** [V-npm] | the SDK (plan 01 D2); brings `@modelcontextprotocol/core` 2.2.0 and `zod ^4.2.0` as its own deps [V-npm] | v1 `@modelcontextprotocol/sdk` 1.31.0 (fallback, plan 01 D2) |
+| `@modelcontextprotocol/server` | **2.3.1** [V-npm; was 2.2.0 at build — `80fdbbf`, the same pins as Dependabot PR #7] | the SDK (plan 01 D2); brings `@modelcontextprotocol/core` 2.3.1 and `zod ^4.2.0` as its own deps [V-lockfile]. Licence **Apache-2.0** since 2.3.0 (was MIT) — on the licence allow-list (§4.1), and the package is not redistributed (it is installed from the registry). What changed for this server: `prompts/get` without `arguments` is validated as `{}`, so `ff.start_sit` and `ff.retro` answer a client that omits it (`ff.stream` still refuses — `tests/mcp/prompts.test.ts`); unchanged: both protocol eras, `structuredContent`, `instructions`, `server/discover`, input validation before the handler, one server per connection (`serve` passes `serveStdio` a factory), and the `registerTool` + `deferValidation` + `wrapHandler` pattern that keeps coded errors | v1 `@modelcontextprotocol/sdk` 1.31.0 (fallback, plan 01 D2) |
 | `zod` | **4.6.5** — the version the SDK's `^4.2.0` resolves to, so exactly one `zod` is installed (lockfile-checked by `tests/lint/package.test.ts`) | tool schemas (SDK accepts Zod v4 via `zod/v4` [V-sdk]); config schema | valibot (a second schema library for no gain) |
 | `fast-xml-parser` | **deferred to Phase 1b (not installed)** *(build decision 2026-09-30: no Yahoo API application, so nothing parses XML — HANDOFF decisions)* | Yahoo XML (plan 01 D3), only when Phase 1b is built. Entity expansion is **on** by default (`processEntities: true`, verified 2026-09-30 — plan 02 §5); `xml.ts` disables it explicitly. **Pin-time rule, applied when 1b lands:** prefer the smaller tree — 4.x carries one runtime dependency (`strnum`); 5.11.2 carries six (`strnum`, `is-unsafe`, `xml-naming`, `fast-xml-builder`, `@nodable/entities`, `path-expression-matcher`) [V-npm 2026-09-30, log §1.0] — pin 4.x unless 5.x has a feature this code needs, **and** the pinned line has had a release in the last 6 months or is the maintainer's declared LTS; otherwise the current line, recording its tree count here *(round 1 OBJ-14; maintenance criterion round 2, OBJ-30)* | `@rgrove/parse-xml` (no object mapping); `sax` (unmaintained) |
-| `hyparquet` | **1.31.2** [V-npm: pure JS, MIT, zero deps, no install scripts] | nflverse/ffopportunity parquet (plan 01 D7); reads snappy natively, which is what nflverse writes (plan 01 D7, round 1 OBJ-20) — no `hyparquet-compressors`. Its published manifest carries a `prepare` script, which npm never runs for a registry tarball; `check:no-scripts` reports it as a warning and fails it for any non-registry source | `parquetjs` (native/thrift deps); DuckDB (native) |
+| `hyparquet` | **1.31.3** [V-npm: pure JS, MIT, zero deps, no install scripts; was 1.31.2 at build] | nflverse/ffopportunity parquet (plan 01 D7); reads snappy natively, which is what nflverse writes (plan 01 D7, round 1 OBJ-20) — no `hyparquet-compressors`. Its published manifest carries a `prepare` script, which npm never runs for a registry tarball; `check:no-scripts` reports it as a warning and fails it for any non-registry source | `parquetjs` (native/thrift deps); DuckDB (native) |
 | `yaml` | **2.9.1** [V-npm 2026-09-30: ISC, zero dependencies, no install scripts] *(added at build, 2026-09-30)* | the hand-edited `<config>/league.yaml` that `ManualLeagueProvider` reads (league settings + roster, outside the repo — HANDOFF decisions, plan 10 X1) | JSON (no comments, error-prone by hand); a hand-rolled YAML subset parser (a parser is attack surface) |
 
-That is it: **four direct runtime packages** (`@modelcontextprotocol/server`, `zod`, `hyparquet`, `yaml`) — and the **allow-list is the full transitive tree with its count** *(round 1, OBJ-14)*. `npm ls --omit=dev --all` prints **5 packages** at the build pin: `@modelcontextprotocol/server@2.2.0` → `@modelcontextprotocol/core@2.2.0` → `zod@4.6.5` (deduped with the direct `zod`), `hyparquet@1.31.2`, `yaml@2.9.1`. The names and the count live in `scripts/ci/runtime-allowlist.json`, which `npm run check:runtime-tree` (CI `supply-chain`, §4.1) compares at every depth, together with registry provenance and sha512 integrity for every runtime lockfile entry. Phase 1b adds `fast-xml-parser` and its dependencies (2 packages at 4.x, 7 at 5.x) under the pin-time rule above, updating the allow-list in the same commit. Everything else is Node built-ins: `node:sqlite`, `fetch`, `node:crypto`, `node:zlib`, `node:util.parseArgs`, `node:fs/promises`, `node:child_process` (for `osascript`, `openssl`, `lsof`, `launchctl` — all invoked with argument arrays, never a shell string).
+That is it: **four direct runtime packages** (`@modelcontextprotocol/server`, `zod`, `hyparquet`, `yaml`) — and the **allow-list is the full transitive tree with its count** *(round 1, OBJ-14)*. `npm ls --omit=dev --all` prints **5 packages** at the current pins (2026-10-14): `@modelcontextprotocol/server@2.3.1` → `@modelcontextprotocol/core@2.3.1` → `zod@4.6.5` (deduped with the direct `zod`), `hyparquet@1.31.3`, `yaml@2.9.1` — the same names and count as at the build pins (2.2.0, 1.31.2). The names and the count live in `scripts/ci/runtime-allowlist.json`, which `npm run check:runtime-tree` (CI `supply-chain`, §4.1) compares at every depth, together with registry provenance and sha512 integrity for every runtime lockfile entry. Phase 1b adds `fast-xml-parser` and its dependencies (2 packages at 4.x, 7 at 5.x) under the pin-time rule above, updating the allow-list in the same commit. Everything else is Node built-ins: `node:sqlite`, `fetch`, `node:crypto`, `node:zlib`, `node:util.parseArgs`, `node:fs/promises`, `node:child_process` (for `osascript`, `openssl`, `lsof`, `launchctl`, and — since 2026-10-14 — the answer-time `ff refresh --on-demand` child spawned from `src/cli/on-demand-refresh.ts` — all invoked with argument arrays, never a shell string; ESLint bans `node:child_process` in `src/mcp` and `src/domain`).
 
-**Dev dependencies:** `typescript`, `vitest` + `@vitest/coverage-v8`, `fast-check`, `eslint` + `typescript-eslint` + `eslint-plugin-import-x` (boundaries), `prettier`, `tsx`, `@types/node`, and **`@modelcontextprotocol/client` 2.2.0 exact** *(added round 1, OBJ-23 c)* — test-only, for `InMemoryTransport.createLinkedPair()` in the in-process client↔server tests (plan 05 §4.3) and the Skills Lane 1 dry run (plan 09 §5.1 items 3 and 7); it brings `jose`, `cross-spawn`, `eventsource`, `pkce-challenge`, `eventsource-parser` and `core` [V-npm 2026-09-30, log §1.0] into the **dev** tree only — never in `files`, never in the runtime allow-list, and `npm audit --omit=dev` does not see it (the full `npm audit` reports it). Run via `npx` with pinned versions in CI only: `@modelcontextprotocol/inspector`, `@mermaid-js/mermaid-cli` (+ its `puppeteer` peer, §4.2).
+**Dev dependencies:** `typescript`, `vitest` + `@vitest/coverage-v8`, `fast-check`, `eslint` + `typescript-eslint` + `eslint-plugin-import-x` (boundaries), `prettier`, `tsx`, `@types/node`, and **`@modelcontextprotocol/client` 2.3.1 exact** *(added round 1, OBJ-23 c; 2.2.0 until 2026-10-14)* — test-only, for `InMemoryTransport.createLinkedPair()` in the in-process client↔server tests (plan 05 §4.3) and the Skills Lane 1 dry run (plan 09 §5.1 items 3 and 7); it brings `jose`, `cross-spawn`, `eventsource`, `pkce-challenge`, `eventsource-parser` and `core` [V-npm 2026-09-30, log §1.0] into the **dev** tree only — never in `files`, never in the runtime allow-list, and `npm audit --omit=dev` does not see it (the full `npm audit` reports it). Run via `npx` with pinned versions in CI only: `@modelcontextprotocol/inspector`, `@mermaid-js/mermaid-cli` (+ its `puppeteer` peer, §4.2).
 
 `package.json` essentials: `"type": "module"`, `"bin": { "ff": "dist/cli.js" }`, `"engines": { "node": ">=24.15" }` (round 1, OBJ-09), `"files": ["dist", "skills", "README.md", "LICENSE", "CHANGELOG.md"]` plus `".claude-plugin"` and `".mcp.json"` when D3 = yes (T3, round 1) (fixtures and tests never ship), scripts: `build`, `typecheck`, `lint`, `format:check`, `test`, `test:coverage`, `test:process`, `smoke` (Inspector CLI), `eval` (manual, tokens), `check:commits`, `check:licenses`, `check:no-scripts`, `check:mermaid`, `check:skills`, `check:docs` (generated README table current), `pack:scan`.
 
