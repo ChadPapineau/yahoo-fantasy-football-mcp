@@ -23,6 +23,12 @@ export interface ReferenceVintage {
   readonly grace_seasons: number;
   readonly source: string;
   readonly checked_on: string;
+  /**
+   * The seasons each part of the table was estimated from, `[first, last]`, when the table is a set
+   * of base rates (the newest `last` is `verified_through_season`). Season years live here, never
+   * in the code that uses the rates (tests/lint/season-agnostic.test.ts).
+   */
+  readonly basis_seasons?: Readonly<Record<string, readonly [number, number]>>;
 }
 
 /** The registry. */
@@ -47,6 +53,14 @@ export const REFERENCE_VINTAGES: Readonly<Record<ReferenceId, ReferenceVintage>>
     grace_seasons: 3,
     source: "research 05 base rates through 2025 (src/domain/analytics/constants.ts)",
     checked_on: "2026-09-30",
+    basis_seasons: Object.freeze({
+      /** Position CVs of weekly fantasy points (half-PPR 2015–2021). */
+      position_cv: Object.freeze([2015, 2021] as const),
+      /** P(active) by final-report designation (2017–2023). */
+      p_active: Object.freeze([2017, 2023] as const),
+      /** Same-team weekly correlations (2022–2025). */
+      correlation: Object.freeze([2022, 2025] as const),
+    }),
   }),
 });
 

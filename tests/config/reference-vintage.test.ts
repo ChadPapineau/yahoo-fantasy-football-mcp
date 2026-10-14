@@ -22,6 +22,22 @@ describe("reference vintages", () => {
     expect(REFERENCE_VINTAGES.analytics_base_rates.grace_seasons).toBe(3);
   });
 
+  it("a base-rate table's newest basis season is its verified_through_season", () => {
+    for (const id of REFERENCE_IDS) {
+      const v = REFERENCE_VINTAGES[id];
+      if (v.basis_seasons === undefined) continue;
+      const spans = Object.values(v.basis_seasons);
+      expect(spans.length).toBeGreaterThan(0);
+      for (const [first, last] of spans) expect(first).toBeLessThanOrEqual(last);
+      expect(Math.max(...spans.map((s) => s[1]))).toBe(v.verified_through_season);
+    }
+    expect(Object.keys(REFERENCE_VINTAGES.analytics_base_rates.basis_seasons ?? {})).toEqual([
+      "position_cv",
+      "p_active",
+      "correlation",
+    ]);
+  });
+
   it("pastVintage names exactly the tables whose vintage + grace the season has passed", () => {
     fc.assert(
       fc.property(fc.integer({ min: 2000, max: 2100 }), (season) => {
