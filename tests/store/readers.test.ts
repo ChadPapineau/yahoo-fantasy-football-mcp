@@ -5,6 +5,7 @@
 // parameters staying data, and stamps carrying the release instant and check time.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SOURCE_REGISTRY } from "../../src/config/freshness.js";
+import { ALL_WEEK_INDEXES, WEEK_INDEX_MAX } from "../../src/config/weeks.js";
 import type { DatasetPublisher, Store } from "../../src/store/types.js";
 import {
   GAME_BUF_MIA,
@@ -96,6 +97,7 @@ describe("with the fixture datasets published", () => {
       freshness_class: SOURCE_REGISTRY["nflverse:schedules"].freshness,
       fetched_at: t.clock.nowIso(),
       checked_at: t.clock.nowIso(),
+      seasons: [2025, 2026], // the seasons the file holds (its refresh_log row)
     });
     expect(r.rows.map((g) => g.game_id)).toEqual([GAME_DET_GB, GAME_BUF_MIA]); // by kickoff
     const buf = r.rows.find((g) => g.game_id === GAME_BUF_MIA);
@@ -103,6 +105,8 @@ describe("with the fixture datasets published", () => {
       game_id: GAME_BUF_MIA,
       season: SEASON,
       week: 1,
+      game_type: "REG",
+      gameday: "2026-09-13",
       kickoff: "2026-09-13T17:00:00.000Z",
       away: "BUF",
       home: "MIA",
@@ -135,6 +139,26 @@ describe("with the fixture datasets published", () => {
     expect(s.datasets.schedules.games(2025, [1]).rows.map((g) => g.game_id)).toEqual([
       "2025_01_BUF_NYJ",
     ]);
+  });
+
+  it("every game row carries game_type and the Eastern gameday (never undefined)", () => {
+    for (const season of [2025, SEASON]) {
+      const rows = s.datasets.schedules.games(season, ALL_WEEK_INDEXES).rows;
+      expect(rows.length, String(season)).toBeGreaterThan(0);
+      for (const g of rows) {
+        expect(g.game_type, g.game_id).toMatch(/^(REG|WC|DIV|CON|SB)$/);
+        expect(g.gameday, g.game_id).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      }
+    }
+  });
+
+  it("the week bound is the structural WEEK_INDEX_MAX, never a season length", () => {
+    // a 20-week regular season's postseason reaches week 24: every index up to the bound is a read
+    expect(() => s.datasets.schedules.games(SEASON, [WEEK_INDEX_MAX])).not.toThrow();
+    expect(s.datasets.schedules.firstKickoff(SEASON, WEEK_INDEX_MAX)).toBeNull();
+    expect(() => s.datasets.injuries.reports(SEASON, WEEK_INDEX_MAX, null)).not.toThrow();
+    expect(() => s.datasets.schedules.games(SEASON, [WEEK_INDEX_MAX + 1])).toThrow(RangeError);
+    expect(() => s.datasets.schedules.games(SEASON, [0])).toThrow(RangeError);
   });
 
   it("ScheduleReader.firstKickoff", () => {
@@ -275,7 +299,7 @@ describe("with the fixture datasets published", () => {
     ).toThrow(RangeError);
     expect(() => s.datasets.schedules.games(SEASON, [0])).toThrow(RangeError);
     expect(() => s.datasets.schedules.games(Number.NaN, [1])).toThrow(RangeError);
-    expect(() => s.datasets.schedules.firstKickoff(SEASON, 23)).toThrow(RangeError);
+    expect(() => s.datasets.schedules.firstKickoff(SEASON, WEEK_INDEX_MAX + 1)).toThrow(RangeError);
     expect(() => s.datasets.schedules.games(SEASON, "1" as never)).toThrow(RangeError);
     expect(() => s.datasets.playerWeeks.lines("x" as never, SEASON, [1])).toThrow(RangeError);
   });

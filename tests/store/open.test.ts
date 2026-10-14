@@ -11,6 +11,7 @@ import { MIGRATION_001_SQL } from "../../src/store/migrations/001_initial.js";
 import { MIGRATIONS, readSchemaVersion, targetVersion } from "../../src/store/migrations/index.js";
 import {
   MIGRATION_001_TABLES,
+  MIGRATION_003_TABLES,
   NEVER_PRUNED_TABLES,
   StoreMigrationPendingError,
   StoreVersionError,
@@ -60,7 +61,9 @@ describe("open: files, modes, pragmas", () => {
       .all() as unknown as { name: string; sql: string }[];
     db.close();
     const names = rows.map((r) => r.name).sort();
-    expect(names).toEqual([...MIGRATION_001_TABLES, "league_settings_flag"].sort());
+    expect(names).toEqual(
+      [...MIGRATION_001_TABLES, ...MIGRATION_003_TABLES, "league_settings_flag"].sort(),
+    );
     expect(names.some((n) => n.startsWith("ds_"))).toBe(false);
     for (const tname of NEVER_PRUNED_TABLES) {
       const sql = rows.find((r) => r.name === tname)?.sql ?? "";

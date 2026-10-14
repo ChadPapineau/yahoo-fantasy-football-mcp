@@ -48,7 +48,7 @@ function indexes(file: string): Record<string, { unique: boolean; columns: strin
 
 describe("migration 002: reclog dedup scope [QA-1-061]", () => {
   it("is registered as version 2 after 001", () => {
-    expect(MIGRATIONS.map((m) => [m.version, m.name])).toEqual([
+    expect(MIGRATIONS.slice(0, 2).map((m) => [m.version, m.name])).toEqual([
       [1, "initial"],
       [2, "reclog_dedup_scope"],
     ]);
@@ -81,7 +81,7 @@ describe("migration 002: reclog dedup scope [QA-1-061]", () => {
 
     const s = openStore(t);
     try {
-      expect(s.schemaVersion).toBe(2);
+      expect(s.schemaVersion).toBe(MIGRATIONS.length);
       const again = await s.repos.recommendationLog.record(
         recordInput({ client_ref: "start-sit-2026-w4-flex", week: 4 }),
         ISO,

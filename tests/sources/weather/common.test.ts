@@ -5,6 +5,7 @@ import { mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { REFERENCE_VINTAGES } from "../../../src/config/reference-vintage.js";
 import { fixedClock } from "../../../src/domain/clock.js";
 import { HttpError } from "../../../src/http/errors.js";
 import type { SourceContext } from "../../../src/sources/source.js";
@@ -78,8 +79,25 @@ describe("roof decision (grounding open issue: the physical roof wins)", () => {
     ["HOU00", "dome", false],
     ["HOU00", "open", true],
     ["IND00", " Outdoors ", true],
-  ])("%s with game roof %j → %s", (id, roof, expected) => {
-    expect(needsWeather({ roof }, venue(id))).toBe(expected);
+  ])(
+    "%s with game roof %j → %s (every season the venue table is verified for)",
+    (id, roof, expected) => {
+      const v = REFERENCE_VINTAGES.venues.verified_through_season;
+      for (const season of [v - 2, v - 1, v])
+        expect(needsWeather({ roof, season }, venue(id)), String(season)).toBe(expected);
+    },
+  );
+
+  it.each([
+    ["CLE00", "dome", false], // the table says open-air; a later season's game row says dome
+    ["DET00", "outdoors", true],
+    ["HOU00", "open", true],
+    ["HOU00", null, false], // unknown → the table's default (retractable: assumed closed)
+    ["CLE00", null, true],
+  ])("past the venue table's vintage, %s with game roof %j → %s", (id, roof, expected) => {
+    const v = REFERENCE_VINTAGES.venues.verified_through_season;
+    for (const season of [v + 1, v + 2, v + 4])
+      expect(needsWeather({ roof, season }, venue(id)), String(season)).toBe(expected);
   });
 
   it("venueOf: resolved id first, then the stadium name, else null", () => {

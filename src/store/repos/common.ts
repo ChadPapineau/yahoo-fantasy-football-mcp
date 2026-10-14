@@ -1,6 +1,7 @@
 // common.ts — shared input checks for the store repositories (plan 01 §5.3: the store is the last
 // line before disk — a malformed instant or key is a programming error, never silently stored).
 import type { DatabaseSync } from "node:sqlite";
+import { TOOL_INPUT_WEEK_MAX } from "../../config/weeks.js";
 import type { WriteExecutor } from "../sqlite.js";
 
 /** What every repository is built from. */
@@ -44,8 +45,12 @@ export function finite(v: unknown, what: string): number {
 /** The season bound every repository accepts. */
 export const SEASON_MIN = 1990;
 export const SEASON_MAX = 2100;
-/** Week bound (plan 02 §5): 1..22. */
-export const WEEK_MAX = 22;
+/**
+ * Week bound of the tool-written tables (plan 02 §5): the tool-contract-1 input bound
+ * (TOOL_INPUT_WEEK_MAX, raised only with a contract bump) — the rows these repositories store come
+ * from tool inputs. Dataset rows are bounded by WEEK_INDEX_MAX instead (src/store/readers.ts).
+ */
+export const WEEK_MAX = TOOL_INPUT_WEEK_MAX;
 
 /** Parses JSON the store itself wrote (its shape is the one the same repository serialised). */
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- the caller names the shape it wrote

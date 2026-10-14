@@ -7,10 +7,10 @@
 // connection — with the authorizer denying any attempt.
 import { rmSync, statSync } from "node:fs";
 import path from "node:path";
-import { constants as C } from "node:sqlite";
+import { constants as C, DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DatasetSourceId } from "../../src/config/freshness.js";
-import { readOnlyUri } from "../../src/store/attach.js";
+import { readOnlyUri, seasonsOf } from "../../src/store/attach.js";
 import { isDatasetWrite } from "../../src/store/sqlite.js";
 import { statementGuardOf, storeInternalsOf } from "../../src/store/store.js";
 import {
@@ -412,5 +412,45 @@ describe("attach URI", () => {
     await publishTables(pub, "nflverse:injuries", "v1", injuryRows());
     s = openStore(t);
     expect(s.datasets.injuries.reports(SEASON, 3, null).rows).toHaveLength(2);
+  });
+});
+
+describe("the stamp names the seasons the attached file holds", () => {
+  it("follows each publish's seasons (any season set, any order, duplicates folded)", async () => {
+    const sets: number[][] = [[2026], [2025, 2026], [2027, 2026, 2028], [2030, 2029, 2029]];
+    for (const [i, seasons] of sets.entries()) {
+      await publishTables(pub, "nflverse:injuries", `v${String(i)}`, injuryRows(), seasons);
+      s?.close();
+      s = openStore(t);
+      const stamp = s.datasets.injuries.reports(SEASON, 3, null).stamp;
+      expect(stamp?.seasons, seasons.join(",")).toEqual(
+        [...new Set(seasons)].sort((a, b) => a - b),
+      );
+    }
+  });
+
+  it("an empty season list is an empty array; an unreadable seasons_json leaves seasons absent", async () => {
+    await publishTables(pub, "nflverse:injuries", "v1", injuryRows(), []);
+    s = openStore(t);
+    expect(s.datasets.injuries.reports(SEASON, 3, null).stamp?.seasons).toEqual([]);
+    s.close();
+    const db = new DatabaseSync(t.storePath);
+    db.prepare("UPDATE refresh_log SET seasons_json = ? WHERE source = ?").run(
+      '["x"]',
+      "nflverse:injuries",
+    );
+    db.close();
+    s = openStore(t);
+    const stamp = s.datasets.injuries.reports(SEASON, 3, null).stamp;
+    expect(stamp).not.toBeNull();
+    expect(stamp && "seasons" in stamp).toBe(false);
+  });
+
+  it("seasonsOf accepts only a JSON array of integer seasons", () => {
+    expect(seasonsOf("[2026,2025,2026]")).toEqual([2025, 2026]);
+    expect(seasonsOf("[]")).toEqual([]);
+    for (const bad of ["", "{}", "[2026.5]", '["2026"]', "[1989]", "[2101]", "not json", null, 7])
+      expect(seasonsOf(bad), String(bad)).toBeNull();
+    expect(seasonsOf(JSON.stringify(Array.from({ length: 65 }, (_, i) => 2000 + i)))).toBeNull();
   });
 });

@@ -4,7 +4,9 @@
 // file is absent answers `{ rows: [], stamp: null }` — the contract's "never loaded" outcome
 // (DATASET_NEVER_LOADED_HINT at the tool layer), never an exception.
 import type { DatabaseSync } from "node:sqlite";
+import { REFERENCE_VINTAGES } from "../config/reference-vintage.js";
 import { isNflTeam, type NflTeam } from "../config/schema.js";
+import { WEEK_INDEX_MAX } from "../config/weeks.js";
 import type {
   AttachedDataset,
   DatasetReaders,
@@ -32,13 +34,23 @@ import {
 /** Most ids/weeks/teams one reader call accepts (bounded statement; 20 k ids is well inside). */
 
 /**
- * A game's roof: the venue's physical roof decides for open-air (`outdoors`) and fixed-roof (`dome`)
- * venues — nflverse says `dome` for the open-air MCG, Stade de France and Allianz Arena — and only
- * for a retractable venue (`closed`/`open` default) does the game row's own state win, falling back
- * to the venue default. The same rule as the weather sources' needsWeather, so analytics and the
- * published forecasts agree on which games are outdoors.
+ * A game's roof. For a season the venue table is verified through
+ * (REFERENCE_VINTAGES.venues.verified_through_season), the venue's physical roof decides for
+ * open-air (`outdoors`) and fixed-roof (`dome`) venues — nflverse says `dome` for the open-air MCG,
+ * Stade de France and Allianz Arena — and only for a retractable venue (`closed`/`open` default)
+ * does the game row's own state win, falling back to the venue default. For a later season the
+ * table may be out of date (a renovated or new stadium), so a non-null game roof wins and the
+ * schedules publish warns when it disagrees (src/sources/nflverse/schedules.ts). The same rule as
+ * the weather sources' needsWeather, so analytics and the published forecasts agree on which games
+ * are outdoors.
  */
-export function gameRoof(gameRoofValue: string | null, venueDefault: string | null): string | null {
+export function gameRoof(
+  gameRoofValue: string | null,
+  venueDefault: string | null,
+  season: number,
+): string | null {
+  if (season > REFERENCE_VINTAGES.venues.verified_through_season)
+    return gameRoofValue ?? venueDefault;
   if (venueDefault === "outdoors" || venueDefault === "dome") return venueDefault;
   return gameRoofValue ?? venueDefault;
 }
@@ -60,9 +72,10 @@ function season(v: unknown): number {
     throw new RangeError("store: season must be an integer in 1990..2100");
   return v;
 }
+/** A week index of the data (1..WEEK_INDEX_MAX — a structural bound, never a season length). */
 function week(v: unknown): Week {
-  if (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 22)
-    throw new RangeError("store: week must be an integer in 1..22");
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > WEEK_INDEX_MAX)
+    throw new RangeError(`store: week must be an integer in 1..${String(WEEK_INDEX_MAX)}`);
   return v;
 }
 function weekList(v: readonly Week[]): string {
@@ -135,17 +148,20 @@ export function createReaders(o: ReadersOptions): {
     const hs = numOrNull(r.home_score);
     const final = as !== null && hs !== null;
     const div = numOrNull(r.div_game);
+    const gameSeason = numOrNull(r.season) ?? 0;
     return {
       game_id: str(r.game_id) ?? "",
-      season: numOrNull(r.season) ?? 0,
+      season: gameSeason,
       week: numOrNull(r.week) ?? 0,
+      game_type: str(r.game_type),
+      gameday: str(r.gameday),
       kickoff: str(r.kickoff_utc),
       away,
       home,
       stadium_id: str(r.venue_id),
       stadium: str(r.stadium),
       venue_tz: str(r.venue_tz),
-      roof: gameRoof(str(r.roof), str(r.venue_roof_default)),
+      roof: gameRoof(str(r.roof), str(r.venue_roof_default), gameSeason),
       surface: str(r.surface),
       divisional: div === null ? null : div === 1,
       rest_days: { away: numOrNull(r.away_rest), home: numOrNull(r.home_rest) },

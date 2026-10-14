@@ -32,7 +32,7 @@ import {
 } from "../config/paths.js";
 import type { Config } from "../config/schema.js";
 import { prunePreMigrationBackups } from "../store/backup.js";
-import { PUBLISH_LOCK_STALE_MS } from "../store/index.js";
+import { PRUNE_HISTORY_MAX_AGE_MS, PUBLISH_LOCK_STALE_MS } from "../store/index.js";
 import type { StoreFactory } from "../store/types.js";
 import { EXIT, UsageError } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
@@ -56,6 +56,8 @@ export const RUN_TMP_RE = /^[A-Za-z0-9_]{1,80}-[A-Za-z0-9]{6}$/;
 /** What a prune removed. */
 export interface PruneReport {
   readonly platform_cache_rows: number;
+  /** schedule_change, season_check and provider_backoff rows past their age (PRUNED_BY_AGE_003). */
+  readonly history_rows: number;
   readonly dataset_debris: readonly string[];
   readonly run_temp: readonly string[];
   readonly premigration_backups: readonly string[];
@@ -125,7 +127,7 @@ function oldEntries(dir: string, re: RegExp, nowMs: number): { name: string; dir
 export function pruneFiles(
   cacheDir: string,
   nowMs: number,
-): Omit<PruneReport, "platform_cache_rows"> {
+): Omit<PruneReport, "platform_cache_rows" | "history_rows"> {
   const ds = datasetDir(cacheDir);
   const tmp = runTempDir(cacheDir);
   const backups = backupDir(cacheDir);
@@ -167,14 +169,25 @@ export async function prune(
       ...(opts.factory ? { factory: opts.factory } : {}),
     });
     let rows: number;
+    let history: number;
     try {
+      const now = io.clock.nowMs();
       rows = store.repos.platformCache.prune(
-        new Date(io.clock.nowMs() - PLATFORM_CACHE_MAX_AGE_MS).toISOString(),
+        new Date(now - PLATFORM_CACHE_MAX_AGE_MS).toISOString(),
       );
+      const before = new Date(now - PRUNE_HISTORY_MAX_AGE_MS).toISOString();
+      history =
+        (await store.repos.scheduleChanges.prune(before)) +
+        (await store.repos.seasonChecks.prune(before)) +
+        (await store.repos.providerBackoff.prune(new Date(now).toISOString()));
     } finally {
       store.close();
     }
-    report = { platform_cache_rows: rows, ...pruneFiles(config.cacheDir, io.clock.nowMs()) };
+    report = {
+      platform_cache_rows: rows,
+      history_rows: history,
+      ...pruneFiles(config.cacheDir, io.clock.nowMs()),
+    };
   } catch (e) {
     // a refused path names which directory (local output: the user's own paths)
     await writeLine(
@@ -186,13 +199,14 @@ export async function prune(
   }
   log.info("prune.done", {
     platform_cache_rows: report.platform_cache_rows,
+    history_rows: report.history_rows,
     dataset_debris: report.dataset_debris.length,
     run_temp: report.run_temp.length,
     premigration_backups: report.premigration_backups.length,
   });
   await writeLine(
     io.stdout,
-    `pruned: ${String(report.platform_cache_rows)} cache row(s), ${String(report.dataset_debris.length)} dataset temp file(s), ${String(report.run_temp.length)} run temp dir(s), ${String(report.premigration_backups.length)} old pre-migration backup(s). Never pruned: recommendation log, league settings, write journal.`,
+    `pruned: ${String(report.platform_cache_rows)} cache row(s), ${String(report.history_rows)} schedule-history row(s), ${String(report.dataset_debris.length)} dataset temp file(s), ${String(report.run_temp.length)} run temp dir(s), ${String(report.premigration_backups.length)} old pre-migration backup(s). Never pruned: recommendation log, league settings, write journal.`,
   );
   return EXIT.OK;
 }

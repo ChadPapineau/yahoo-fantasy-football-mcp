@@ -37,6 +37,13 @@ import {
   pointsCacheRepository,
 } from "./repos/caches.js";
 import { jobLockRepository, refreshLogRepository, writeJournalRepository } from "./repos/ops.js";
+import {
+  jobRunRepository,
+  providerBackoffRepository,
+  scheduleChangeRepository,
+  seasonCheckRepository,
+} from "./repos/season-fresh.js";
+import { runLockReader } from "./run-lock.js";
 import { projectionRepository } from "./repos/projection.js";
 import { recommendationLogRepository } from "./repos/reclog.js";
 import { createPrivateFile, openStoreConnection, StatementGuard, WriteExecutor } from "./sqlite.js";
@@ -158,7 +165,7 @@ export function openMigrated(opts: {
   }
 }
 
-function buildRepos(deps: RepoDeps): StoreRepositories {
+function buildRepos(deps: RepoDeps, clock: Clock): StoreRepositories {
   return Object.freeze({
     recommendationLog: recommendationLogRepository(deps),
     crosswalk: crosswalkRepository(deps),
@@ -174,6 +181,11 @@ function buildRepos(deps: RepoDeps): StoreRepositories {
     scoreboardSnapshots: scoreboardSnapshotRepository(deps),
     faPoolSnapshots: faPoolSnapshotRepository(deps),
     transactionsSeen: transactionsSeenRepository(deps),
+    scheduleChanges: scheduleChangeRepository(deps),
+    jobRuns: jobRunRepository(deps),
+    seasonChecks: seasonCheckRepository(deps),
+    providerBackoff: providerBackoffRepository(deps),
+    runLocks: runLockReader(deps, clock, process.pid),
   });
 }
 
@@ -206,7 +218,7 @@ export function openStore(opts: StoreOpenOptions, internals: StoreInternals = {}
   };
   const writes = new WriteExecutor(internals.requiredWriteBudgetMs ?? REQUIRED_WRITE_BUDGET_MS, db);
   const deps: RepoDeps = { db, writes };
-  const repos = buildRepos(deps);
+  const repos = buildRepos(deps, opts.clock);
   const attachments = new Attachments({
     db,
     repo: deps,

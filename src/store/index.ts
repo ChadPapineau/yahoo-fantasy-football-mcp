@@ -7,6 +7,12 @@ import type { StoreFactory } from "./types.js";
 export { statementGuardOf, lockPathOf } from "./store.js";
 export { MIGRATIONS, type Migration } from "./migrations/index.js";
 export { PUBLISH_LOCK_STALE_MS, publishJob } from "./publisher.js";
+export { createRunLock, RUN_LOCK_STALE_MS, runLockJob, type RunLock } from "./run-lock.js";
+export type {
+  ProviderBackoffStore,
+  ScheduleChangeStore,
+  SeasonCheckStore,
+} from "./repos/season-fresh.js";
 export { DATASET_META_TABLE, DS_SCHEMA_VERSION, readOnlyUri } from "./attach.js";
 export { playerRowToStatLine, defenseRowToStatLine } from "./datasets/statline.js";
 export type { TraceEntry } from "./sqlite.js";

@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { SOURCE_REGISTRY, type DatasetSourceId } from "../../config/freshness.js";
+import { REFERENCE_VINTAGES } from "../../config/reference-vintage.js";
 import type { NflGame } from "../../domain/analytics/types.js";
 import type { IsoInstant } from "../../domain/league/types.js";
 import { HttpError, isTransientNetworkError } from "../../http/errors.js";
@@ -181,12 +182,21 @@ export function decodeJson(body: Uint8Array): unknown {
 
 // --- game selection -------------------------------------------------------------------------------------
 
-/** Whether a game at `venue` is played open-air (see the roof decision in the header). */
-export function needsWeather(game: Pick<NflGame, "roof">, venue: VenueReference): boolean {
-  if (venue.retractable) {
-    const r = (game.roof ?? "").trim().toLowerCase();
+/**
+ * Whether a game at `venue` is played open-air (see the roof decision in the header). For a season
+ * past the venue table's vintage (REFERENCE_VINTAGES.venues) the game row's own roof decides when it
+ * is known — the table may describe a stadium as it was — and the venue default only fills a gap; the
+ * schedules publish warns about every such disagreement. The same rule as the store reader's
+ * gameRoof.
+ */
+export function needsWeather(
+  game: Pick<NflGame, "roof" | "season">,
+  venue: VenueReference,
+): boolean {
+  const r = (game.roof ?? "").trim().toLowerCase();
+  if (game.season > REFERENCE_VINTAGES.venues.verified_through_season && r !== "")
     return r === "open" || r === "outdoors";
-  }
+  if (venue.retractable) return r === "open" || r === "outdoors";
   return venue.roof_default === "outdoors";
 }
 

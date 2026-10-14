@@ -75,11 +75,50 @@ describe("ff prune", () => {
     const io2 = makeIo(s, { clock: fixedClock(NOW) });
     expect(await main(["prune"], io2)).toBe(EXIT.OK);
     expect(io2.out.text).toMatch(
-      /pruned: 0 cache row\(s\), 2 dataset temp file\(s\), 1 run temp dir\(s\), 1 old pre-migration backup\(s\)/,
+      /pruned: 0 cache row\(s\), 0 schedule-history row\(s\), 2 dataset temp file\(s\), 1 run temp dir\(s\), 1 old pre-migration backup\(s\)/,
     );
     expect(readdirSync(ds).sort()).toEqual([foreign, young].sort());
     expect(readdirSync(tmp)).toEqual(["keep-me"]);
     expect(readdirSync(bdir).sort()).toEqual(["store.sqlite.bak-v2", "store.sqlite.bak-v3"]);
+  });
+
+  it("prunes schedule history past 400 days and ended provider pauses; keeps recent rows and job_run", async () => {
+    const s = sandbox();
+    sb = s;
+    expect(await main(["prune"], makeIo(s, { clock: fixedClock(NOW) }))).toBe(EXIT.OK);
+    const db = new DatabaseSync(storePath(s.cacheDir));
+    const day = 86_400_000;
+    const at = (ms: number): string => new Date(ms).toISOString();
+    const change = db.prepare(
+      "INSERT INTO schedule_change (detected_at, season, week, game_id, away, home, kind, new_value) VALUES (?, ?, 1, ?, 'CHI', 'BUF', 'added', ?)",
+    );
+    change.run(at(NOW - 401 * day), 2025, "2025_01_CHI_BUF", "a");
+    change.run(at(NOW - 399 * day), 2025, "2025_01_CHI_BUF", "b");
+    const check = db.prepare(
+      "INSERT INTO season_check (source, season, checked_at, status) VALUES ('nflverse:injuries', ?, ?, 'not_published')",
+    );
+    check.run(2024, at(NOW - 500 * day));
+    check.run(2026, at(NOW - day));
+    const pause = db.prepare(
+      "INSERT INTO provider_backoff (provider, until_at, reason, set_at) VALUES (?, ?, 'rate_limited', ?)",
+    );
+    pause.run("nflverse", at(NOW - 60_000), at(NOW - 3_600_000));
+    pause.run("weather:nws", at(NOW + 60_000), at(NOW - 60_000));
+    db.prepare(
+      "INSERT INTO job_run (job, last_run_at, exit, summary) VALUES ('refresh-due', ?, 0, NULL)",
+    ).run(at(NOW - 900 * day));
+    db.close();
+    const io = makeIo(s, { clock: fixedClock(NOW) });
+    expect(await main(["prune"], io)).toBe(EXIT.OK);
+    expect(io.out.text).toContain("3 schedule-history row(s)");
+    const after = new DatabaseSync(storePath(s.cacheDir), { readOnly: true });
+    const col = (sql: string): unknown[] =>
+      (after.prepare(sql).all() as Record<string, unknown>[]).map((r) => Object.values(r)[0]);
+    expect(col("SELECT new_value FROM schedule_change")).toEqual(["b"]);
+    expect(col("SELECT season FROM season_check")).toEqual([2026]);
+    expect(col("SELECT provider FROM provider_backoff")).toEqual(["weather:nws"]);
+    expect(col("SELECT job FROM job_run")).toEqual(["refresh-due"]);
+    after.close();
   });
 
   it("removes a symlink planted as debris without following it", () => {

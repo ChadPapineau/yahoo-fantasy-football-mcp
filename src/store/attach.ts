@@ -38,6 +38,27 @@ export function parseDsSchema(value: string | null | undefined): number | null {
   return typeof value === "string" && /^[0-9]{1,9}$/.test(value) ? Number(value) : null;
 }
 
+/**
+ * The seasons of a refresh_log `seasons_json`: a sorted, de-duplicated list of integer seasons, or
+ * null when the column does not hold one (the stamp then says nothing about seasons).
+ */
+export function seasonsOf(json: unknown): number[] | null {
+  if (typeof json !== "string") return null;
+  let v: unknown;
+  try {
+    v = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(v) || v.length > 64) return null;
+  const out = new Set<number>();
+  for (const s of v) {
+    if (typeof s !== "number" || !Number.isInteger(s) || s < 1990 || s > 2100) return null;
+    out.add(s);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
 /** Metadata the publisher stamps into the file itself. */
 export interface DatasetFileMeta {
   readonly source: string | null;
@@ -305,11 +326,18 @@ export class Attachments {
     const meta = slot?.meta ?? null;
     const row = this.o.repo.db
       .prepare(
-        "SELECT finished_at, checked_at, release_updated_at FROM refresh_log WHERE source = ? AND ok = 1 AND file_version = ? ORDER BY id DESC LIMIT 1",
+        "SELECT finished_at, checked_at, release_updated_at, seasons_json FROM refresh_log WHERE source = ? AND ok = 1 AND file_version = ? ORDER BY id DESC LIMIT 1",
       )
       .get(a.source, a.file_version) as
-      { finished_at: string; checked_at: string; release_updated_at: string | null } | undefined;
+      | {
+          finished_at: string;
+          checked_at: string;
+          release_updated_at: string | null;
+          seasons_json: string;
+        }
+      | undefined;
     const fetched = row?.finished_at ?? meta?.published_at ?? a.attached_at;
+    const seasons = row === undefined ? null : seasonsOf(row.seasons_json);
     return {
       source: a.source,
       as_of: row?.release_updated_at ?? meta?.release_updated_at ?? fetched,
@@ -317,6 +345,8 @@ export class Attachments {
       checked_at: row?.checked_at ?? fetched,
       freshness_class: SOURCE_REGISTRY[a.source].freshness,
       file_version: a.file_version,
+      // the seasons the attached file holds (its refresh_log row); absent = unknown
+      ...(seasons === null ? {} : { seasons }),
     };
   }
 

@@ -4,6 +4,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { up as up001 } from "./001_initial.js";
 import { up as up002 } from "./002_reclog_dedup_scope.js";
+import { up as up003 } from "./003_season_fresh.js";
 
 /** One forward-only migration. */
 export interface Migration {
@@ -17,6 +18,7 @@ export interface Migration {
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   Object.freeze({ version: 1, name: "initial", up: up001 }),
   Object.freeze({ version: 2, name: "reclog_dedup_scope", up: up002 }),
+  Object.freeze({ version: 3, name: "season_fresh", up: up003 }),
 ]);
 
 /** Asserts a migration list is 1..n contiguous; returns n (the binary's schema version). */

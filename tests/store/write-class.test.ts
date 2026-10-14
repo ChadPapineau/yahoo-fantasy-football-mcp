@@ -16,6 +16,7 @@ import {
   BUSY_TIMEOUT_MS,
   REQUIRED_WRITE_BUDGET_MS,
   StoreBusyError,
+  WRITE_CLASS_003,
   type Store,
 } from "../../src/store/types.js";
 import { storeInternalsOf } from "../../src/store/store.js";
@@ -316,7 +317,59 @@ describe("required writes under a foreign writer lock", () => {
           ]),
       ],
       ["recommendation_log", () => s.repos.recommendationLog.record(recordInput(), now, null)],
+      // migration 003: every table is a required write (WRITE_CLASS_003)
+      [
+        "schedule_change",
+        () =>
+          s.repos.scheduleChanges.append([
+            {
+              detected_at: now,
+              release_updated_at: null,
+              season: 2026,
+              week: 15,
+              game_id: "2026_15_CHI_BUF",
+              away: "CHI",
+              home: "BUF",
+              kind: "kickoff",
+              old_value: "2026-12-20T01:20:00.000Z",
+              new_value: "2026-12-20T18:00:00.000Z",
+            },
+          ]),
+      ],
+      ["schedule_change", () => s.repos.scheduleChanges.prune(now)],
+      [
+        "job_run",
+        () =>
+          s.repos.jobRuns.record({ job: "refresh-due", last_run_at: now, exit: 0, summary: null }),
+      ],
+      [
+        "season_check",
+        () =>
+          s.repos.seasonChecks.record({
+            source: "nflverse:injuries",
+            season: 2027,
+            checked_at: now,
+            status: "not_published",
+          }),
+      ],
+      [
+        "provider_backoff",
+        () =>
+          s.repos.providerBackoff.set({
+            provider: "nflverse",
+            until_at: now,
+            reason: "rate_limited",
+            set_at: now,
+          }),
+      ],
+      ["provider_backoff", () => s.repos.providerBackoff.clear("nflverse")],
     ];
+    expect(Object.values(WRITE_CLASS_003).every((c) => c === "required")).toBe(true);
+    for (const table of Object.keys(WRITE_CLASS_003))
+      expect(
+        cases.some(([n]) => n === table),
+        table,
+      ).toBe(true);
     const results = await Promise.allSettled(cases.map(([, f]) => f()));
     results.forEach((r, i) => {
       expect(r.status).toBe("rejected");

@@ -26,6 +26,12 @@ import type {
   Week,
 } from "../domain/league/types.js";
 import type { RecommendationLogRepository } from "../domain/reclog/types.js";
+import type { JobRunRepository, RunLockReader } from "../domain/analytics/types.js";
+import type {
+  ProviderBackoffStore,
+  ScheduleChangeStore,
+  SeasonCheckStore,
+} from "./repos/season-fresh.js";
 
 export type {
   AttachedDataset,
@@ -145,8 +151,28 @@ export const MIGRATION_001_TABLES = [
   "fa_pool_snapshot",
   "transactions_seen",
 ] as const;
+/**
+ * The store tables migration 003 creates (the schedule-driven refresh): the kickoff-change history,
+ * the scheduled jobs' heartbeat, the per-season "published upstream yet?" checks and the per-provider
+ * 429 / Retry-After pause. All required writes; pruned by age (PRUNED_BY_AGE_003).
+ */
+export const MIGRATION_003_TABLES = [
+  "schedule_change",
+  "job_run",
+  "season_check",
+  "provider_backoff",
+] as const;
+/** A table migration 001 creates. */
+export type Migration001Table = (typeof MIGRATION_001_TABLES)[number];
+/** A table migration 003 creates. */
+export type Migration003Table = (typeof MIGRATION_003_TABLES)[number];
+/** Every store table this binary creates, in migration order. */
+export const STORE_TABLES: readonly StoreTable[] = Object.freeze([
+  ...MIGRATION_001_TABLES,
+  ...MIGRATION_003_TABLES,
+]);
 /** A store table. */
-export type StoreTable = (typeof MIGRATION_001_TABLES)[number];
+export type StoreTable = Migration001Table | Migration003Table;
 
 /**
  * Never pruned (plan 01 §5.1 T5; plan 10 T12 adds `projection` — the retrospective's pre-game
@@ -166,24 +192,46 @@ export const PRUNABLE_TABLES: readonly StoreTable[] = ["yahoo_cache", "points_ca
  * (append-only; a busy lock during `ff refresh` must not fail E1/E2 — the retrospective counts only
  * persisted rows; decision recorded for critic C-03b).
  */
-export const WRITE_CLASS: Readonly<Record<Exclude<StoreTable, "schema_version">, WriteClass>> =
-  Object.freeze({
-    yahoo_cache: "best_effort",
-    points_cache: "best_effort",
-    limiter_state: "best_effort",
-    projection: "best_effort",
-    league_settings: "required",
-    crosswalk: "required",
-    write_journal: "required",
-    recommendation_log: "required",
-    recommendation_outcome: "required",
-    refresh_log: "required",
-    job_lock: "required",
-    roster_snapshot: "required",
-    scoreboard_snapshot: "required",
-    fa_pool_snapshot: "required",
-    transactions_seen: "required",
-  });
+export const WRITE_CLASS: Readonly<
+  Record<Exclude<Migration001Table, "schema_version">, WriteClass>
+> = Object.freeze({
+  yahoo_cache: "best_effort",
+  points_cache: "best_effort",
+  limiter_state: "best_effort",
+  projection: "best_effort",
+  league_settings: "required",
+  crosswalk: "required",
+  write_journal: "required",
+  recommendation_log: "required",
+  recommendation_outcome: "required",
+  refresh_log: "required",
+  job_lock: "required",
+  roster_snapshot: "required",
+  scoreboard_snapshot: "required",
+  fa_pool_snapshot: "required",
+  transactions_seen: "required",
+});
+
+/** The write class of each migration-003 table: every one is a required write. */
+export const WRITE_CLASS_003: Readonly<Record<Migration003Table, WriteClass>> = Object.freeze({
+  schedule_change: "required",
+  job_run: "required",
+  season_check: "required",
+  provider_backoff: "required",
+});
+
+/**
+ * Migration-003 tables `ff prune` trims by age: schedule_change and season_check rows older than
+ * PRUNE_HISTORY_MAX_AGE_MS, provider_backoff rows whose pause has ended. job_run keeps one row per
+ * job and is never pruned (it is the heartbeat).
+ */
+export const PRUNED_BY_AGE_003: readonly Migration003Table[] = [
+  "schedule_change",
+  "season_check",
+  "provider_backoff",
+];
+/** schedule_change and season_check rows older than this are pruned (about one season plus margin). */
+export const PRUNE_HISTORY_MAX_AGE_MS = 400 * 86_400_000;
 
 // --- dataset files (plan 01 §5.5, round 2 OBJ-27) ---------------------------------------------------------
 
@@ -382,6 +430,16 @@ export interface StoreRepositories {
   readonly scoreboardSnapshots: ScoreboardSnapshotRepository;
   readonly faPoolSnapshots: FaPoolSnapshotRepository;
   readonly transactionsSeen: TransactionsSeenRepository;
+  /** schedule_change (migration 003): the kickoff-change history. */
+  readonly scheduleChanges: ScheduleChangeStore;
+  /** job_run (migration 003): one heartbeat row per scheduled job. */
+  readonly jobRuns: JobRunRepository;
+  /** season_check (migration 003): whether upstream has published a source's season yet. */
+  readonly seasonChecks: SeasonCheckStore;
+  /** provider_backoff (migration 003): a 429 / Retry-After pause per provider. */
+  readonly providerBackoff: ProviderBackoffStore;
+  /** job_lock rows `refresh:<source>` of another live process, younger than RUN_LOCK_STALE_MS. */
+  readonly runLocks: RunLockReader;
 }
 
 // --- the store -------------------------------------------------------------------------------------------------
