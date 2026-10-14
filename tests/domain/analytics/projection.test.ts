@@ -15,6 +15,7 @@ import type {
   ScheduleReader,
 } from "../../../src/domain/analytics/types.js";
 import { SIMS } from "../../../src/domain/analytics/constants.js";
+import { WEEK_INDEX_MAX } from "../../../src/config/weeks.js";
 import { fixedClock, seededRng } from "../../../src/domain/clock.js";
 import { RETRO_SAMPLE_CAP } from "../../../src/mcp/tools/reclog.js";
 import type { RosterEntry } from "../../../src/domain/league/types.js";
@@ -355,7 +356,9 @@ describe("projectPlayers — availability, byes and gaps", () => {
       { weeks: [] },
       { weeks: [3, 3] },
       { weeks: [0] },
-      { weeks: [23] },
+      // a week index past the structural bound (never a season length: a 20-week regular season's
+      // postseason reaches week 24 — season-fresh §2.6)
+      { weeks: [WEEK_INDEX_MAX + 1] },
       { weeks: Array.from({ length: 19 }, (_, i) => i + 1) },
       { season: 1990 },
       { season: 2026.5 },

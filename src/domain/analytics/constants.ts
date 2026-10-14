@@ -1,6 +1,7 @@
 // constants.ts — every tuning constant of the P0 analytics in ONE place (plan 07 E1/E2/E3/E5;
 // research 05 §1 steps 1/4/8/9, §3.2–§3.5, §8, §11.1). Values marked [U] are unverified starting
 // points to be tuned against the retrospective (research 05 §1 Evaluation); nothing here is inline.
+import { REFERENCE_VINTAGES } from "../../config/reference-vintage.js";
 import type { Canonical } from "../scoring/types.js";
 
 /** The projection model this module implements (plan 07 E1). */
@@ -19,8 +20,6 @@ export const WINDOW = Object.freeze({
   halfLifeGames: 3,
   /** Weight multiplier for a game of the previous season (role and team may have changed) [U]. */
   priorSeasonWeight: 0.5,
-  /** Last regular-season week read from the previous season. */
-  priorSeasonLastWeek: 18,
 });
 
 /**
@@ -174,6 +173,21 @@ export const MARKET = Object.freeze({
   maxMultiplier: 1.3,
   /** League-average implied team total when a window game has no line [U]. */
   leagueAverageImplied: 22.5,
+});
+
+/**
+ * The base rates' basis seasons (POSITION_CV, P_ACTIVE, CORRELATION below), and the vintage the
+ * reference registry records for them (season-fresh §2.7): the newest basis season is the registry's
+ * `verified_through_season` (a test holds the two equal). Past that season plus its grace the tables
+ * still work, E1 names it in its assumptions, and `ff doctor` / G1 report it.
+ */
+export const BASE_RATES = Object.freeze({
+  vintage: REFERENCE_VINTAGES.analytics_base_rates,
+  seasons: Object.freeze({
+    position_cv: Object.freeze([2015, 2021] as const),
+    p_active: Object.freeze([2017, 2023] as const),
+    correlation: Object.freeze([2022, 2025] as const),
+  }),
 });
 
 /**
@@ -354,7 +368,10 @@ export const INDOOR_ROOFS: readonly string[] = Object.freeze(["dome", "closed"])
 export const LIMITS = Object.freeze({
   /** Players projected in one call (E1 selector ≤ 25 or pool top ≤ 50; rosters ≤ 60). */
   maxTargets: 64,
-  /** Weeks projected in one call (a ROS horizon). */
+  /**
+   * Weeks projected in one call: a work bound mirroring the tool's input (E1 `weeks` ≤ 18), never a
+   * season length — the line budget (SIMS.maxTotalLines) shares n_sims over the weeks either way.
+   */
   maxWeeks: 18,
   /** Players considered by one lineup solve (MAX_ROSTER_SIZE in src/domain/league/slots.ts). */
   maxLineupPlayers: 60,

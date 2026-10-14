@@ -6,7 +6,9 @@
 // league, said plainly (plan 07 E5 manual block; changelog OBJ-29). Pure.
 import type { Clock, Rng } from "../clock.js";
 import type { NflTeam } from "../../config/schema.js";
+import { ALL_WEEK_INDEXES } from "../../config/weeks.js";
 import { kickoffMs, lockAtFor, type LockMode } from "../league/schedule.js";
+import { seasonSchedule } from "../league/season.js";
 import type { PlayerKey, SlotClass, Week } from "../league/types.js";
 import type {
   Dist,
@@ -185,8 +187,15 @@ export function analyzeKdef(req: KdefRequest): KdefOutcome {
   const positions = [...new Set(req.positions)].filter(
     (p): p is KdefPosition => p === "K" || p === "DEF",
   );
+  // the look-ahead ends at the season's last week as its schedule lists it (an 18-, 19- or 20-week
+  // regular season and its postseason alike — season-fresh §2.6), never past it
+  const lastWeek = seasonSchedule(
+    req.readers.schedules.games(req.season, ALL_WEEK_INDEXES).rows,
+    req.season,
+  ).last_week;
+  const end = Math.max(req.week, Math.min(lastWeek ?? req.week, req.week + look));
   const weeks: Week[] = [];
-  for (let w = req.week; w <= Math.min(22, req.week + look); w++) weeks.push(w);
+  for (let w = req.week; w <= end; w++) weeks.push(w);
   // locks (QA-1-022, QA-1-059): a K/DEF whose game has started can be neither dropped nor added for
   // the decision week — research 05 §14.2, plan 09 guardrail "never a move on a locked player"
   const nowMs = req.clock.nowMs();

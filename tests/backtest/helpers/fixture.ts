@@ -106,6 +106,10 @@ async function build(): Promise<FixtureData> {
       game_id: String(r.game_id),
       season: Number(r.season),
       week: Number(r.week),
+      // as the store's games reader fills them (season-fresh §8.7): REG | WC | DIV | CON | SB, and
+      // the Eastern date (a TBD game has a gameday and no kickoff)
+      game_type: str(r.game_type),
+      gameday: str(r.gameday),
       kickoff: kickoffUtcFromEastern(r.gameday, r.gametime),
       away,
       home,

@@ -6,9 +6,14 @@
 // Stored format-agnostically (plan 08 §5) through the injected repository. Pure: readers, engine,
 // clock, rng and repository are injected.
 import type { Clock, Rng } from "../clock.js";
-import { freshnessClass, stampState } from "../../config/freshness.js";
+import { freshnessClass, isExpired } from "../../config/freshness.js";
+import type { GameCalendar } from "../../config/game-calendar.js";
+import { pastVintage } from "../../config/reference-vintage.js";
+import { ALL_WEEK_INDEXES, WEEK_INDEX_MAX } from "../../config/weeks.js";
 import { NFL_TEAMS, type NflTeam } from "../../config/schema.js";
+import { scheduleView } from "../league/calendar.js";
 import { GAME_WINDOW_MS, kickoffMs, opponentOf, teamGame } from "../league/schedule.js";
+import { isRegularGame, type SeasonSchedule, seasonSchedule } from "../league/season.js";
 import type { PlayerKey, Week } from "../league/types.js";
 import { scoringEngine } from "../scoring/engine.js";
 import { at } from "../scoring/numeric.js";
@@ -204,6 +209,12 @@ interface Loaded {
   readonly rosterRows: Map<string, NflRosterPlayer>;
   readonly weather: Map<string, WeatherObservation>;
   readonly stamps: (DatasetStamp | null)[];
+  /** The loaded schedule's game calendar: the inputs' freshness is judged under it (§3.1). */
+  readonly calendar: GameCalendar;
+  /** The target season's facts from its schedule (regular and postseason weeks, the final). */
+  readonly schedule: SeasonSchedule;
+  /** The window needed the previous season's games but its schedule is not loaded (§2.6). */
+  readonly priorSeasonMissing: boolean;
 }
 
 /** `r[k]`, or 0 when the stat is absent (the one "absent reads 0" rule of this module). */
@@ -220,17 +231,18 @@ function gamesAt(games: ReadonlyMap<string, NflGame[]>, season: number, week: We
  * The trailing window's weeks (QA-1-012): the WINDOW.maxGames calendar weeks ending at `lastWeek` —
  * the latest played week before the first target week, never the week before the target itself — so
  * a projection three months out reads the games already played instead of an empty future window.
- * The rest of the window is filled from the previous season's last weeks.
+ * The rest of the window is filled from the previous season's last regular-season weeks as its own
+ * schedule lists them (`priorRegWeeks`, ascending): never a postseason week, never an assumed season
+ * length (season-fresh §2.6 — an 18-, 19- or 20-week regular season alike).
  */
-function windowWeeks(lastWeek: Week): { cur: Week[]; prev: Week[] } {
+function windowWeeks(
+  lastWeek: Week,
+  priorRegWeeks: readonly Week[],
+): { cur: Week[]; prev: Week[] } {
   const cur: Week[] = [];
   for (let w = Math.max(1, lastWeek - WINDOW.maxGames + 1); w <= lastWeek; w++) cur.push(w);
-  const prev: Week[] = [];
   const need = WINDOW.maxGames - cur.length;
-  for (let w = WINDOW.priorSeasonLastWeek - need + 1; w <= WINDOW.priorSeasonLastWeek; w++) {
-    prev.push(w);
-  }
-  return { cur, prev };
+  return { cur, prev: need > 0 ? priorRegWeeks.slice(-need) : [] };
 }
 
 /** Exponential weights over a player's games, newest first, capped at WINDOW.maxGames. */
@@ -280,24 +292,36 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
   const stamps: (DatasetStamp | null)[] = [];
   const games = new Map<string, NflGame[]>();
 
-  // every week up to the last target: the trailing window's and the injury report's (whose game
+  // the whole season's games (its facts: regular and postseason weeks, the final), of which every
+  // week up to the last target is loaded: the trailing window's and the injury report's (whose game
   // days say when a team's game-status report is out — QA-2-034)
   const last = Math.max(...req.weeks);
   const upTo: Week[] = [];
   for (let w = 1; w <= last; w++) upTo.push(w);
-  const sched = req.readers.schedules.games(season, [...new Set([...upTo, ...req.weeks])]);
+  const sched = req.readers.schedules.games(season, ALL_WEEK_INDEXES);
   if (sched.stamp === null) {
     throw new AnalyticsError("dataset_never_loaded", "schedules never loaded", [
       "nflverse:schedules",
     ]);
   }
   stamps.push(sched.stamp);
-  const { cur, prev } = windowWeeks(lastPlayedWeek(sched.rows, season, first, req.clock.nowMs()));
+  const schedule = seasonSchedule(sched.rows, season);
+  // the previous season's regular weeks, from its own schedule (an unknown game_type reads REG)
+  const prior = req.readers.schedules.games(season - 1, ALL_WEEK_INDEXES);
+  const priorRows = prior.stamp === null ? [] : prior.rows.filter((g) => g.season === season - 1);
+  const priorRegWeeks = [
+    ...new Set(priorRows.filter((g) => isRegularGame(g)).map((g) => g.week)),
+  ].sort((a, b) => a - b);
+  const { cur, prev } = windowWeeks(
+    lastPlayedWeek(sched.rows, season, first, req.clock.nowMs()),
+    priorRegWeeks,
+  );
+  const priorSeasonMissing = cur.length < WINDOW.maxGames && priorRegWeeks.length === 0;
   // betting lines ride in the schedules release but age by their own class (plan 01 §5.4: 24 h →
   // "omitted driver"): past it, the target weeks' lines are dropped and the omission is named. A
-  // window game's closing line is history and stays (QA-1-004).
-  const linesOmitted =
-    stampState(freshnessClass("lines"), sched.stamp, req.clock.nowMs()).state === "expired";
+  // window game's closing line is history and stays (QA-1-004). Expiry never depends on the game
+  // calendar (season-fresh §3.1).
+  const linesOmitted = isExpired(freshnessClass("lines"), sched.stamp, req.clock.nowMs());
   const addGames = (rows: readonly NflGame[]): void => {
     for (const raw of rows) {
       const g =
@@ -310,11 +334,9 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
       games.set(k, list);
     }
   };
-  addGames(sched.rows);
-  if (prev.length > 0) {
-    const ps = req.readers.schedules.games(season - 1, prev);
-    if (ps.stamp !== null) addGames(ps.rows);
-  }
+  addGames(sched.rows.filter((g) => g.season === season && g.week <= last));
+  const prevSet = new Set(prev);
+  addGames(priorRows.filter((g) => prevSet.has(g.week)));
 
   const gsisIds = [
     ...new Set(
@@ -461,6 +483,9 @@ function load(req: ProjectionRequest, needDefense: boolean): Loaded {
     linesOmitted,
     weather,
     stamps,
+    calendar: scheduleView(req.readers.schedules, req.clock.nowMs()).calendar,
+    schedule,
+    priorSeasonMissing,
   };
 }
 
@@ -693,6 +718,47 @@ export const LINES_OMITTED: Assumption = Object.freeze(
   ),
 );
 
+/** The postseason rounds by nflverse `game_type`. */
+const ROUND_NAMES: Readonly<Record<string, string>> = Object.freeze({
+  WC: "wild-card",
+  DIV: "divisional",
+  CON: "conference championship",
+  SB: "Super Bowl",
+});
+
+/**
+ * Why a team has no game in a week, from the schedule's `game_type` (season-fresh §2.5): a bye in a
+ * regular-season week; out of a postseason round whose games are listed; a week past the season's
+ * final; or a week whose games are not scheduled yet (the next round's pairings). Never a weekday
+ * or a season length.
+ */
+function noGameAssumption(
+  week: Week,
+  weekGames: readonly NflGame[],
+  schedule: SeasonSchedule,
+): Assumption {
+  const w = String(week);
+  const round = weekGames.find((g) => !isRegularGame(g))?.game_type;
+  if (weekGames.length > 0 && round === undefined)
+    return A(`bye in week ${w}: zero points`, "never — the schedule is fixed");
+  if (weekGames.length > 0)
+    return A(
+      `no ${ROUND_NAMES[round ?? ""] ?? "postseason"} game for the team in week ${w}: zero points`,
+      "the round's games change in a schedules release",
+    );
+  if (schedule.has_final && schedule.last_week !== null && week > schedule.last_week)
+    return A(
+      `no game in week ${w}: the ${String(schedule.season)} season ended in week ${String(schedule.last_week)}`,
+      "never — the season is over",
+    );
+  return A(
+    `no game scheduled in week ${w}: zero points`,
+    schedule.last_reg_week !== null && week > schedule.last_reg_week
+      ? "the week's postseason games are scheduled (a schedules release)"
+      : "the week's games are scheduled (a schedules release)",
+  );
+}
+
 const BASE_ASSUMPTIONS: readonly Assumption[] = Object.freeze([
   A(
     "points width is a position-level CV table around the trailing mean (basis position_cv), not a per-player simulation",
@@ -766,6 +832,23 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
       : (t.nfl_team ?? windowGames[0]?.team ?? null);
   const roleGames = windowGames.filter((g) => g.season === req.season && g.team === team).length;
   if (loaded.linesOmitted) assumptions.push(LINES_OMITTED);
+  if (loaded.priorSeasonMissing) {
+    assumptions.push(
+      A(
+        `the ${String(req.season - 1)} schedule is not loaded: the trailing window holds ${String(req.season)} games only`,
+        `ff refresh loads the ${String(req.season - 1)} schedule`,
+      ),
+    );
+  }
+  const baseRates = pastVintage(req.season).find((v) => v.id === "analytics_base_rates");
+  if (baseRates !== undefined) {
+    assumptions.push(
+      A(
+        `the position CVs, P(active) and same-team correlations are base rates verified through ${String(baseRates.verified_through_season)}; ${String(req.season)} is past their vintage`,
+        "research 05's base rates are re-verified",
+      ),
+    );
+  }
   if (ctx.reducedFrom !== null) {
     assumptions.push(
       A(
@@ -802,12 +885,7 @@ function projectTarget(t: ProjectionTarget, ctx: Ctx): ProjectedPlayer {
           ? A("position not projected by v1-trailing: zero points", "a supported position")
           : team === null
             ? A("no NFL team known: zero points", "the player joins a team")
-            : weekGames.length > 0 && week <= WINDOW.priorSeasonLastWeek
-              ? A(`bye in week ${String(week)}: zero points`, "never — the schedule is fixed")
-              : A(
-                  `no game scheduled in week ${String(week)}: zero points`,
-                  "the week's games are scheduled (postseason pairings)",
-                );
+            : noGameAssumption(week, weekGames, loaded.schedule);
       if (!assumptions.some((a) => a.text === why.text)) assumptions.push(why);
       weeks.push({
         week,
@@ -1122,10 +1200,14 @@ function validate(
   if (
     req.weeks.length === 0 ||
     req.weeks.length > LIMITS.maxWeeks ||
-    req.weeks.some((w) => !Number.isInteger(w) || w < 1 || w > 22) ||
+    req.weeks.some((w) => !Number.isInteger(w) || w < 1 || w > WEEK_INDEX_MAX) ||
     new Set(req.weeks).size !== req.weeks.length
   ) {
-    throw new AnalyticsError("invalid_request", "weeks must be distinct integers 1..22", ["weeks"]);
+    throw new AnalyticsError(
+      "invalid_request",
+      `weeks must be distinct integers 1..${String(WEEK_INDEX_MAX)}`,
+      ["weeks"],
+    );
   }
   if (req.targets.length > maxTargets) {
     throw new AnalyticsError("invalid_request", "too many players", ["targets"]);
@@ -1199,7 +1281,11 @@ function run(
     written,
   };
   const players = req.targets.map((t) => projectTarget(t, ctx));
-  const inputs = collectInputs([...loaded.stamps, ...(req.extra_stamps ?? [])], req.clock);
+  const inputs = collectInputs(
+    [...loaded.stamps, ...(req.extra_stamps ?? [])],
+    req.clock,
+    loaded.calendar,
+  );
   return {
     result: { model_version: MODEL_VERSION, projections: players.map((p) => p.projection), inputs },
     players,
