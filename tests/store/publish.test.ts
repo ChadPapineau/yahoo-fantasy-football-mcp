@@ -355,21 +355,49 @@ describe("single-flight (job_lock)", () => {
     expect((await pub.publish("nflverse:injuries", "c", null, fillWith("c"))).ok).toBe(true);
   });
 
+  // QA-2-065: A holds the job lock until the test releases it — after B has made its attempt — never
+  // for a fixed time: a fresh tsx process can take longer than any fixed hold just to start, and
+  // then B arrived after A had finished and published too. B starts late on purpose (B_START_DELAY_MS,
+  // longer than the 1 500 ms the old fixed hold gave it), so a fixed hold fails here every time.
   it("two processes publishing the same source: exactly one publishes, the other skips", async () => {
-    const a = run("publish-child.mjs", [t.storePath, t.datasetDir, "ok", "proc-a", "1500"], {
+    const B_START_DELAY_MS = "2000";
+    const a = run("publish-child.mjs", [t.storePath, t.datasetDir, "ok", "proc-a", "release"], {
       tsx: true,
     });
-    await a.waitFor(/^FILLING/, 30_000);
-    const b = run("publish-child.mjs", [t.storePath, t.datasetDir, "ok", "proc-b", "0"], {
-      tsx: true,
-    });
-    const outB = JSON.parse(await b.waitFor(/^\{/, 30_000)) as { ok: boolean; error?: string };
+    let outB: { ok: boolean; error?: string } | undefined;
+    try {
+      await a.waitFor(/^FILLING/, 30_000);
+      const b = run(
+        "publish-child.mjs",
+        [t.storePath, t.datasetDir, "ok", "proc-b", "0", B_START_DELAY_MS],
+        { tsx: true },
+      );
+      outB = JSON.parse(await b.waitFor(/^\{/, 30_000)) as { ok: boolean; error?: string };
+      expect(await b.exited()).toBe(0);
+      expect(a.out.some((l) => l.startsWith("{"))).toBe(false); // A still holds the lock
+    } finally {
+      a.proc.stdin?.on("error", () => undefined); // A already gone: the test fails on its output
+      a.proc.stdin?.end("release\n"); // B has answered (or failed): let A finish either way
+    }
     const outA = JSON.parse(await a.waitFor(/^\{/, 30_000)) as { ok: boolean };
-    await Promise.all([a.exited(), b.exited()]);
-    expect(outA.ok).toBe(true);
+    expect(await a.exited()).toBe(0);
     expect(outB).toEqual({ ok: false, error: "job_locked" });
+    expect(outA.ok).toBe(true);
     expect(tags(INJ())).toEqual(["child proc-a"]);
     expect(tmpFiles()).toEqual([]);
+  }, 90_000);
+
+  it("QA-2-065: a holder never released gives up after its bound and does not publish", async () => {
+    const a = run(
+      "publish-child.mjs",
+      [t.storePath, t.datasetDir, "ok", "proc-a", "release", "0", "300"],
+      { tsx: true },
+    );
+    await a.waitFor(/^FILLING/, 30_000);
+    expect(await a.exited()).toBe(3);
+    expect(a.err.join("")).toMatch(/no release line within 300 ms/);
+    expect(a.out.some((l) => l.startsWith("{"))).toBe(false);
+    expect(existsSync(INJ())).toBe(false);
   }, 60_000);
 });
 
