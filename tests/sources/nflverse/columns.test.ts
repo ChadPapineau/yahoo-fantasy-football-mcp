@@ -5,7 +5,11 @@
 // non-finite value.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { KNOWN_CANONICAL, CANONICAL_NAME_RE } from "../../../src/domain/scoring/types.js";
+import {
+  KNOWN_CANONICAL,
+  CANONICAL_NAME_RE,
+  type PositionType,
+} from "../../../src/domain/scoring/types.js";
 import {
   MAPPED_STAT_COLUMNS,
   NFLVERSE_STAT_MAP,
@@ -17,7 +21,7 @@ import {
   translatePlayerWeek,
   unmappedStatColumns,
 } from "../../../src/sources/nflverse/columns.js";
-import { yardsAllowed } from "../../../src/domain/scoring/nflverse.js";
+import { DST_TD_COLUMNS, yardsAllowed } from "../../../src/domain/scoring/nflverse.js";
 import { UNMAPPED_PLAYER_WEEK_COLUMNS } from "../../../src/sources/nflverse/index.js";
 import { PLAYER_WEEK_STAT_COLUMNS } from "../../../src/store/datasets/tables.js";
 import { fixtureRows } from "./helpers/rewrite.js";
@@ -143,6 +147,19 @@ describe("toStatLine over the fixture players (real 2026 weeks 1–3)", () => {
   });
 });
 
+/** Hostile row values: QA-2-064's overflow needs several near-MAX_VALUE finite parts in one sum. */
+const HUGE = fc.constantFrom(1.7e308, -1.7e308, Number.MAX_VALUE, -Number.MAX_VALUE);
+const value = fc.oneof(
+  fc.constant(null),
+  fc.integer({ min: -100, max: 1000 }),
+  fc.double(),
+  HUGE,
+  fc.string({ maxLength: 4 }),
+  fc.bigInt({ min: -(2n ** 64n), max: 2n ** 64n }),
+  fc.constant(undefined),
+);
+const col = fc.constantFrom(...MAPPED_STAT_COLUMNS, "position", "junk");
+
 describe("translation rules", () => {
   it("null is absent, 0 is present; a sum is present when any part is", () => {
     const l = toStatLine({
@@ -212,15 +229,6 @@ describe("translation rules", () => {
   });
 
   it("property: any row of arbitrary values yields a NaN-free line whose present = sorted keys", () => {
-    const value = fc.oneof(
-      fc.constant(null),
-      fc.integer({ min: -100, max: 1000 }),
-      fc.double(),
-      fc.string({ maxLength: 4 }),
-      fc.bigInt({ min: -(2n ** 64n), max: 2n ** 64n }),
-      fc.constant(undefined),
-    );
-    const col = fc.constantFrom(...MAPPED_STAT_COLUMNS, "position", "junk");
     fc.assert(
       fc.property(
         fc.dictionary(col, value, { maxKeys: 30 }),
@@ -235,6 +243,54 @@ describe("translation rules", () => {
       ),
       { numRuns: 1000 },
     );
+  });
+
+  // QA-2-064: every value finite, the SUM was not — the multi-column stats overflowed to Infinity
+  // (the property above failed about once in 500 runs while fc.double() alone had to find two
+  // near-MAX_VALUE parts in one sum; HUGE makes the case common).
+  it.each([
+    ["O", "QB", "QB"],
+    ["K", "K", "SPEC"],
+    ["D", "LB", "LB"],
+    ["O", "P", "SPEC"],
+    ["O", "", null],
+  ] as const)(
+    "QA-2-064: a sum that overflows is dropped with an issue, never Infinity (%s line, position %j)",
+    (type, position, group) => {
+      for (const sign of [1, -1]) {
+        const row: Record<string, unknown> = { position, position_group: group };
+        for (const c of MAPPED_STAT_COLUMNS) row[c] = sign * 1.7e308;
+        for (const t of [
+          translatePlayerWeek(row),
+          translatePlayerWeek(row, { positionType: type }),
+        ]) {
+          expect(t.line.position_type).toBe(type);
+          for (const v of Object.values(t.line.values)) expect(Number.isFinite(v)).toBe(true);
+          expect(t.line.present).toEqual(Object.keys(t.line.values).sort());
+          const emitted = NFLVERSE_STAT_MAP.filter((m) => m.position_types.includes(type));
+          const multi = emitted.filter((m) => m.columns.length > 1).map((m) => m.canonical);
+          const single = emitted.filter((m) => m.columns.length === 1).map((m) => m.canonical);
+          expect(t.line.present).toEqual([...single].sort());
+          for (const k of single) expect(t.line.values[k]).toBe(sign * 1.7e308);
+          const overflow = t.issues.filter(
+            (i) => i.column === null && i.issue.endsWith("not finite"),
+          );
+          expect(overflow.map((i) => i.issue).sort()).toEqual(
+            multi.map((k) => `${k}: sum is not finite`).sort(),
+          );
+        }
+      }
+    },
+  );
+
+  it("QA-2-064: the overflowing stats are exactly the multi-column ones (two_pt, fum_lost, fum; fg_50p, fg_miss_50p)", () => {
+    const multi = (pt: PositionType): string[] =>
+      NFLVERSE_STAT_MAP.filter((m) => m.columns.length > 1 && m.position_types.includes(pt))
+        .map((m) => m.canonical)
+        .sort();
+    expect(multi("O")).toEqual(["fum", "fum_lost", "two_pt"]);
+    expect(multi("K")).toEqual(["fg_50p", "fg_miss_50p"]);
+    expect(multi("D")).toEqual([]);
   });
 });
 
@@ -293,6 +349,63 @@ describe("team defence (DT) lines", () => {
           expect(t.line.values.dst_ya).toBeLessThanOrEqual(pass + rush);
         },
       ),
+    );
+  });
+
+  it("QA-2-064: an overflowing sum or yards allowed is dropped with an issue, never Infinity", () => {
+    const columns = [...Object.keys(row), ...DST_TD_COLUMNS];
+    for (const sign of [1, -1]) {
+      const huge: Record<string, unknown> = {};
+      for (const c of columns) huge[c] = sign * 1.7e308;
+      // sack term 0: pass + rush overflows; dst_td (2 columns) and dst_blk (3 with PATs) too
+      const t = toDefenseStatLine({ ...huge, opp_sack_yards_lost: 0 }, { includePatBlocks: true });
+      for (const v of Object.values(t.line.values)) expect(Number.isFinite(v)).toBe(true);
+      expect(t.line.present).toEqual(Object.keys(t.line.values).sort());
+      expect(t.line.present).toEqual([
+        "dst_fum_rec",
+        "dst_int",
+        "dst_ret_td",
+        "dst_sack",
+        "dst_safety",
+      ]);
+      expect(t.issues.filter((i) => i.column === null).map((i) => i.issue)).toEqual([
+        "dst_td: sum is not finite",
+        "dst_blk: sum is not finite",
+        "dst_ya: yards allowed is not finite",
+      ]);
+      // without PAT blocks dst_blk is FG + punt blocks: two huge parts still overflow
+      expect(toDefenseStatLine(huge).line.values.dst_blk).toBeUndefined();
+    }
+    // a huge but finite net (pass − sack + rush) stays present
+    const net = toDefenseStatLine({
+      ...row,
+      opp_passing_yards: 1.7e308,
+      opp_sack_yards_lost: -1.7e308,
+      opp_rushing_yards: 1.7e308,
+    });
+    expect(net.issues).toEqual([]);
+    expect(net.line.values.dst_ya).toBe(1.7e308);
+  });
+
+  it("property: any team-defence row of arbitrary values yields a finite line whose present = sorted keys", () => {
+    const dtCol = fc.constantFrom(...Object.keys(row), ...DST_TD_COLUMNS, "junk");
+    fc.assert(
+      fc.property(
+        fc.dictionary(dtCol, value, { maxKeys: 20 }),
+        fc.oneof(value, fc.constant(17)),
+        fc.boolean(),
+        (r, pa, pats) => {
+          const t = toDefenseStatLine(r, {
+            pointsAllowed: pa as number | null,
+            includePatBlocks: pats,
+          });
+          return (
+            Object.values(t.line.values).every((v) => Number.isFinite(v)) &&
+            JSON.stringify(t.line.present) === JSON.stringify(Object.keys(t.line.values).sort())
+          );
+        },
+      ),
+      { numRuns: 1000 },
     );
   });
 

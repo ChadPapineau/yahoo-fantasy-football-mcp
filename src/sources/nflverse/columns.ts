@@ -172,8 +172,25 @@ function buildLine(
   });
 }
 
+/**
+ * A derived value (a sum, yards allowed) that is not finite is dropped like any invalid column value:
+ * finite parts can still overflow when added (QA-2-064: two parts near Number.MAX_VALUE make
+ * Infinity), so every arithmetic result is checked, never only its inputs.
+ */
+function finiteOrDropped(
+  canonical: string,
+  what: string,
+  v: number | null,
+  issues: TranslationIssue[],
+): number | null {
+  if (v === null || Number.isFinite(v)) return v;
+  issues.push({ column: null, issue: `${canonical}: ${what} is not finite` });
+  return null;
+}
+
 function sumColumns(
   row: Readonly<Record<string, unknown>>,
+  canonical: string,
   columns: readonly string[],
   kind: "count" | "measure",
   issues: TranslationIssue[],
@@ -188,14 +205,15 @@ function sumColumns(
     }
     total = (total ?? 0) + value;
   }
-  return total;
+  return finiteOrDropped(canonical, "sum", total, issues);
 }
 
 /**
  * Translates one nflverse `stats_player_week` row (or a `ds_player_week` row — same column names)
  * into a canonical StatLine (plan 08 §2/§3.2). A null column is ABSENT (not 0); a sum is present
  * when any component is. Only the mappings for the row's position type are emitted. Non-numeric or
- * non-finite values never reach the line (NaN-free by construction) and are reported as issues.
+ * non-finite values never reach the line (NaN-free by construction) and are reported as issues; so
+ * is a sum of finite values that overflows (QA-2-064) — the stat is dropped, never Infinity.
  */
 export function translatePlayerWeek(
   row: Readonly<Record<string, unknown>>,
@@ -214,7 +232,7 @@ export function translatePlayerWeek(
   }
   for (const x of NFLVERSE_STAT_MAP) {
     if (!x.position_types.includes(positionType)) continue;
-    const v = sumColumns(row, x.columns, x.kind, issues);
+    const v = sumColumns(row, x.canonical, x.columns, x.kind, issues);
     if (v !== null) values[x.canonical] = v;
   }
   return { line: buildLine(values, positionType, opts.provisional ?? false), issues };
@@ -242,7 +260,8 @@ export interface DefenseOptions {
  * `PlayerWeekReader.defenseLines` mapping): dst_sack, dst_int, dst_fum_rec, dst_td, dst_ret_td,
  * dst_safety, dst_blk (FG + punt blocks, + PAT blocks when asked), dst_pa (the scalar; the engine
  * bracketizes it, plan 08 §4.1), dst_ya = yardsAllowed(opponent passing, sack yards, rushing) —
- * net yards, the sack term a magnitude whatever its sign (all three needed; QA-2-032).
+ * net yards, the sack term a magnitude whatever its sign (all three needed; QA-2-032). A sum or a
+ * yards-allowed value that overflows is dropped with an issue (QA-2-064).
  */
 export function toDefenseStatLine(
   row: Readonly<Record<string, unknown>>,
@@ -251,7 +270,7 @@ export function toDefenseStatLine(
   const issues: TranslationIssue[] = [];
   const values: Record<string, number> = {};
   const put = (canonical: string, cols: readonly string[], kind: "count" | "measure"): void => {
-    const v = sumColumns(row, cols, kind, issues);
+    const v = sumColumns(row, canonical, cols, kind, issues);
     if (v !== null) values[canonical] = v;
   };
   put("dst_sack", ["def_sacks"], "measure"); // half sacks are legitimate
@@ -272,8 +291,15 @@ export function toDefenseStatLine(
   const pass = numeric(row.opp_passing_yards).value;
   const sackYds = numeric(row.opp_sack_yards_lost).value;
   const rush = numeric(row.opp_rushing_yards).value;
-  if (pass !== null && sackYds !== null && rush !== null)
-    values.dst_ya = yardsAllowed(pass, sackYds, rush);
+  if (pass !== null && sackYds !== null && rush !== null) {
+    const ya = finiteOrDropped(
+      "dst_ya",
+      "yards allowed",
+      yardsAllowed(pass, sackYds, rush),
+      issues,
+    );
+    if (ya !== null) values.dst_ya = ya;
+  }
   return { line: buildLine(values, "DT", opts.provisional ?? false), issues };
 }
 
