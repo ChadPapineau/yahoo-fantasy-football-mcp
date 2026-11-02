@@ -54,16 +54,20 @@ local-scope registration and said no client was configured), fixed on
 failed on 2026-10-26 and 2026-11-02 with no code change. Both weeks the `supply-chain` job failed on
 zod's advisory [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) (high,
 CVE-2023-54404: zod through 4.6.5 can exhaust memory while validating an oversized array), QA-2-066,
-fixed by the dependency update on `build/ci-fixes-2026-11` (`5616d38`: zod 4.6.7, MCP SDK 2.4.0,
+fixed by the dependency update on `build/ci-fixes-2026-11`, merged to `main` at `a177c4f` with
+`ci`, `docs` and `secrets` green (`5616d38`: zod 4.6.7, MCP SDK 2.4.0,
 hyparquet 1.32.0 and five dev tools, the same pins as Dependabot PR #11; the advisory's first patched
 release is 4.6.6). zod now refuses an over-long list before reading its elements, so one test's
 issue-cap case no longer reached the cap; it keeps its roster within the bound now (`9b6efba`). On
-2026-11-02 the `test` job failed too; its log is not public, and the two unit tests known
-to fail at random on that commit are registered and fixed on the same branch: QA-2-064 (finite
+2026-11-02 the `test` job failed too: every test passed and the coverage gate failed, because
+`schedule-changes.ts` (held to 100 % of branches) had a tie-break that only a random property ever
+reached (QA-2-067; a fixed case covers it now, `99a2f14`, on `build/coverage-tie-qa-2-067`). Two
+further unit tests that failed at random on that commit are registered and fixed on
+`build/ci-fixes-2026-11`: QA-2-064 (finite
 nflverse values whose sum overflowed reached a stat line as `Infinity`; the translation now drops a
 non-finite result with an issue, `ca8ffb8`) and QA-2-065 (the two-process publish test raced the
 second process's start-up; the first publisher now holds its lock until the test releases it,
-`7fe71d4`). Records: the QA register § Registered after the round: QA-2-064 to QA-2-066, and
+`7fe71d4`). Records: the QA register § Registered after the round: QA-2-064 to QA-2-067, and
 `CHANGELOG.md` (Fixed, Security).
 
 Owner's next steps, in order:
@@ -74,10 +78,11 @@ Owner's next steps, in order:
    goes into a repository). Then `ff doctor`: row 4 (league file) and row 23 (its season) should
    read ok; row 2 reads ok, naming the local-scope entry and its folder (QA-2-063's fix, on `main`;
    the install needs a build that includes it).
-2. **Review and merge `build/ci-fixes-2026-11`** (fast-forward) once CI on its head is green — the
-   `ci` workflow is the full gate (lint, typecheck, test with the coverage gate, supply-chain, pack,
-   process, smoke, skills), plus `docs` and `secrets`: the dependency update (QA-2-066), QA-2-064,
-   QA-2-065 and these records. (`build/doctor-scope-and-setup-docs`, QA-2-063, is on `main`.)
+2. **Close Dependabot PRs #11 and #9 if Dependabot does not.** `main` has #11's exact pins and vite
+   8.3.5 (#9 asks for 8.3.4) since `build/ci-fixes-2026-11` (QA-2-064 to QA-2-066) was merged at
+   `a177c4f`; `build/coverage-tie-qa-2-067` (QA-2-067) follows it. (`build/doctor-scope-and-setup-docs`,
+   QA-2-063, is on `main`.) If `gh` answers "Bad credentials" while its keyring sign-in is valid, an
+   expired `GITHUB_TOKEN` in the shell environment is taking precedence: renew or unset it.
    Open low items for a later pass, unchanged: QA-2-052, QA-2-053 and QA-2-056 to QA-2-061 (register
    § Open after round 2).
    **Another install made before the season-fresh build — one step, once:** `git pull && npm ci &&
@@ -564,7 +569,10 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
   run on the owner's install the same day
 - [ ] **Chad:** run `/onboard` in the advisor folder to write `league.yaml` (▶ NEXT STEP item 1)
 - [x] **Chad:** review and merge `build/doctor-scope-and-setup-docs` (QA-2-063) — on `main`
-- [ ] **Chad:** review and merge `build/ci-fixes-2026-11` (QA-2-064 to QA-2-066; ▶ NEXT STEP item 2)
+- [x] **Chad:** review and merge `build/ci-fixes-2026-11` (QA-2-064 to QA-2-066) — on `main` at
+  `a177c4f`, CI green
+- [x] QA-2-067 (the coverage gate's tie-break, the 2026-11-02 `test` failure) — `build/coverage-tie-qa-2-067`
+- [ ] **Chad:** close Dependabot PRs #11 and #9 if Dependabot does not (▶ NEXT STEP item 2)
 - [x] wire the league season's last regular week into `src/providers/manual/provider.ts` — closed
   2026-10-14 (SF-34; ▶ NEXT STEP item 3)
 - [ ] the contract-2 batch when its trigger fires (§ Decisions made, 2026-10-14)
@@ -761,3 +769,11 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
   the cap removed, at 49 or at 51). The full gate ran at `9b6efba`, locally and in CI; locally the
   E1 worst-case budget test (`perf.test.ts`, < 3 s) took 3.2–4.1 s on the development laptop under
   load, with the timed code unchanged from `main` and CI's `process` job green.
+- 2026-11-02 — **Merged, and the `test` failure read: QA-2-067** (`build/coverage-tie-qa-2-067`, from
+  `main` at `a177c4f`). `build/ci-fixes-2026-11` was fast-forwarded to `main` (`a177c4f`; `ci`,
+  `docs` and `secrets` green on `main`) and `dist/` rebuilt from it. The 2026-11-02 `test` job's log,
+  read once `gh` used its keyring sign-in, shows 233 of 233 test files passing and the coverage gate
+  failing: `schedule-changes.ts` at 99.14 % of branches against 100 %. The notification's tie-break
+  (two segments at one instant) was reached only by a random property; a fixed case now covers it,
+  red with the tie-break removed (`99a2f14`). Run with every test named "property" left out, the unit
+  suite still covers all 24 files under the 100 % gate fully.

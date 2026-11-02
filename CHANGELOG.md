@@ -252,6 +252,10 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
   1.5 s, so a second process slower than that to start published too and the test failed at
   random. The first publisher now holds the lock until the test releases it, after the second has
   answered (bounded at 60 s).
+- **QA-2-067** — the coverage gate failed `main`'s 2026-11-02 `test` job although every test
+  passed: `src/domain/league/schedule-changes.ts` (held to 100 % of branches) reached 99.14 %,
+  because only the random notification property ever made two changes fall at one instant, the
+  case where the text decides which leads. A deterministic case now covers that tie (`99a2f14`).
 - **The season-fresh verification round (2026-10-14, SF-27 to SF-40 in the QA register; each fix
   has a regression test, mutation-checked):**
   - A run that found its season unpublished upstream (injuries from the May schedule release to the
@@ -428,5 +432,5 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
   array. The dependency update (`5616d38`) moves zod to 4.6.7, a patched release (the advisory's
   first is 4.6.6). The advisory failed the `supply-chain` job (`npm audit` over the
   runtime tree) of `main`'s scheduled CI on 2026-10-26 and 2026-11-02; the 2026-11-02 run's `test`
-  job failed as well, and QA-2-064 and QA-2-065 above are the unit tests known to fail at random on
-  that commit (the job log is not public).
+  job failed as well, on the coverage gate (QA-2-067 above), and QA-2-064 and QA-2-065 above are two
+  further unit tests that failed at random on that commit.
