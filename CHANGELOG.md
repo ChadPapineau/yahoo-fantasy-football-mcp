@@ -171,6 +171,13 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
   five-package runtime tree. Visible change: `prompts/get` without `arguments` now answers for
   `ff.start_sit` and `ff.retro` (validated as `{}`); `ff.stream` still refuses. `ff_get_status`
   reports `sdk_version` 2.3.1. Rollback: revert `67dd174` (lockfile and allow-list move together).
+- **Dependencies** (`5616d38`, the same pins as Dependabot PR #11; QA-2-066): `zod` 4.6.5 → 4.6.7
+  (still one copy), `@modelcontextprotocol/server`, `core` and `client` 2.3.1 → 2.4.0, `hyparquet`
+  1.31.3 → 1.32.0, and five dev tools; still a five-package runtime tree. No visible change: the
+  server's JSON-RPC output is identical under SDK 2.3.1 and 2.4.0 in both protocol eras, and an
+  over-long list in a tool call is refused with one `too_big` issue before its elements are read.
+  `ff_get_status` reports `sdk_version` 2.4.0. Rollback: revert `5616d38` (lockfile and allow-list
+  move together), which brings the advisory back.
 - **QA round 2 behaviour changes** (`docs/qa/2026-10-06-qa-round2.md`):
   - **Dataset files are now `ds_schema` 3** (QA-2-032): a file written by an earlier build may hold
     the opponent's sack yardage with the wrong sign, so it is refused until it is republished. Run
@@ -418,8 +425,8 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
 
 - **zod [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)** (high,
   CVE-2023-54404; QA-2-066): zod through 4.6.5 can exhaust memory while validating an oversized
-  array. The dependency update on `build/ci-fixes-2026-11` moves zod to a patched release (the
-  advisory's first is 4.6.6). The advisory failed the `supply-chain` job (`npm audit` over the
+  array. The dependency update (`5616d38`) moves zod to 4.6.7, a patched release (the advisory's
+  first is 4.6.6). The advisory failed the `supply-chain` job (`npm audit` over the
   runtime tree) of `main`'s scheduled CI on 2026-10-26 and 2026-11-02; the 2026-11-02 run's `test`
   job failed as well, and QA-2-064 and QA-2-065 above are the unit tests known to fail at random on
   that commit (the job log is not public).
