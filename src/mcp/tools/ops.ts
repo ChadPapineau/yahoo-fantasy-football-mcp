@@ -43,7 +43,7 @@ import { bareName, gsisId, iso, playerKey, week } from "./schemas.js";
 /** The tool contract version the Skills stamp and check (plan 09 §4 K5; skills/_shared/manifest.json). */
 export const TOOL_CONTRACT = 1;
 /** The MCP SDK version this build pins (package.json; a test pins the equality). */
-export const SDK_VERSION = "2.3.1";
+export const SDK_VERSION = "2.4.0";
 /** The protocol eras `serveStdio` answers (plan 01 §3.1: dual era). */
 export const PROTOCOL_ERAS = ["2026-07-28", "legacy"] as const;
 
