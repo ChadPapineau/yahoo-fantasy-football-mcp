@@ -6,6 +6,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { easternClockOf } from "../../../src/config/game-calendar.js";
+import type { NflTeam } from "../../../src/config/schema.js";
 import type { NflGame, ScheduleChange } from "../../../src/domain/analytics/types.js";
 import {
   CHANGE_LOOKBACK_MS,
@@ -419,6 +420,28 @@ describe("changeNotificationText", () => {
         now,
       ),
     ).toBe("NFL schedule changed: CHI@BUF TBD → Sun 13:00 ET");
+  });
+
+  it("games changed to the same instant: the text that sorts first leads, whatever the input order (QA-2-067)", () => {
+    // Two games added at one Sunday 13:00 slot give two segments with equal instants, so the
+    // tie-break on the text decides the lead; the random property above reaches a tie only now
+    // and then, which left this branch to chance under the 100 % gate.
+    const added = (away: NflTeam, home: NflTeam): ScheduleChange => ({
+      detected_at: "2029-11-01T00:00:00.000Z",
+      release_updated_at: null,
+      season: 2029,
+      week: 9,
+      game_id: `2029_09_${away}_${home}`,
+      away,
+      home,
+      kind: "added",
+      old_value: null,
+      new_value: etIso("2029-11-04", "13:00"),
+    });
+    const now = Date.UTC(2029, 10, 1);
+    const expected = "NFL schedule changed: ATL@NO added Sun 13:00 ET (+1 more)";
+    expect(changeNotificationText([added("ATL", "NO"), added("CHI", "BUF")], now)).toBe(expected);
+    expect(changeNotificationText([added("CHI", "BUF"), added("ATL", "NO")], now)).toBe(expected);
   });
 
   it("property: one line, never longer than 200 characters, for any set of changes", () => {
