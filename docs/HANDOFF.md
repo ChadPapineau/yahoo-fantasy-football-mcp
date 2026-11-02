@@ -78,9 +78,11 @@ Owner's next steps, in order:
    goes into a repository). Then `ff doctor`: row 4 (league file) and row 23 (its season) should
    read ok; row 2 reads ok, naming the local-scope entry and its folder (QA-2-063's fix, on `main`;
    the install needs a build that includes it).
-2. **Close Dependabot PRs #11 and #9 if Dependabot does not.** `main` has #11's exact pins and vite
-   8.3.5 (#9 asks for 8.3.4) since `build/ci-fixes-2026-11` (QA-2-064 to QA-2-066) was merged at
-   `a177c4f`; `build/coverage-tie-qa-2-067` (QA-2-067) follows it. (`build/doctor-scope-and-setup-docs`,
+2. **Dependabot PR #12** (eslint 10.13.0 → 10.14.0, dev only) failed its `pull_request` run at
+   `a177c4f` on QA-2-067; once rebased onto the fix (`@dependabot rebase`) its CI should pass, and it
+   can be merged then. PRs #11 and #9 were closed by Dependabot on 2026-11-02 when
+   `build/ci-fixes-2026-11` (QA-2-064 to QA-2-066) reached `main` at `a177c4f` with their pins;
+   `build/coverage-tie-qa-2-067` (QA-2-067) follows it. (`build/doctor-scope-and-setup-docs`,
    QA-2-063, is on `main`.) If `gh` answers "Bad credentials" while its keyring sign-in is valid, an
    expired `GITHUB_TOKEN` in the shell environment is taking precedence: renew or unset it.
    Open low items for a later pass, unchanged: QA-2-052, QA-2-053 and QA-2-056 to QA-2-061 (register
@@ -572,7 +574,8 @@ reasoning and the reopen triggers). Build one only when its trigger fires.
 - [x] **Chad:** review and merge `build/ci-fixes-2026-11` (QA-2-064 to QA-2-066) — on `main` at
   `a177c4f`, CI green
 - [x] QA-2-067 (the coverage gate's tie-break, the 2026-11-02 `test` failure) — `build/coverage-tie-qa-2-067`
-- [ ] **Chad:** close Dependabot PRs #11 and #9 if Dependabot does not (▶ NEXT STEP item 2)
+- [x] Dependabot PRs #11 and #9 — closed by Dependabot 2026-11-02 (superseded by `a177c4f`)
+- [ ] Dependabot PR #12 (eslint 10.14.0): rebase onto the QA-2-067 fix, then merge (▶ NEXT STEP item 2)
 - [x] wire the league season's last regular week into `src/providers/manual/provider.ts` — closed
   2026-10-14 (SF-34; ▶ NEXT STEP item 3)
 - [ ] the contract-2 batch when its trigger fires (§ Decisions made, 2026-10-14)
