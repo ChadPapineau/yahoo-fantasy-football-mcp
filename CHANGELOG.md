@@ -236,6 +236,15 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
   servers that load beside ours (user scope, plus the folders ours loads in). `ff print-config
   --client code` says that `--scope local`, run in a chosen folder, keeps the tools out of other
   projects' sessions, and `ff uninstall` prints the matching `claude mcp remove --scope local`.
+- **QA-2-064** — a stat summed from several nflverse columns (`two_pt`, `fum_lost`, `fum`; `fg_50p`,
+  `fg_miss_50p`; the team defence's `dst_td`, `dst_blk` and `dst_ya`) came out `Infinity` when
+  finite values near `Number.MAX_VALUE` overflowed the sum. `toStatLine(nflverse)` now drops a
+  non-finite result with an issue, like any invalid value. Real nflverse files never come near
+  this; the NaN-free property test hit it about once in 500 runs.
+- **QA-2-065** — the two-process publish test held the first publisher's job lock for a fixed
+  1.5 s, so a second process slower than that to start published too and the test failed at
+  random. The first publisher now holds the lock until the test releases it, after the second has
+  answered (bounded at 60 s).
 - **The season-fresh verification round (2026-10-14, SF-27 to SF-40 in the QA register; each fix
   has a regression test, mutation-checked):**
   - A run that found its season unpublished upstream (injuries from the May schedule release to the
@@ -404,3 +413,13 @@ names, tool schemas or the store format bumps the minor version — `docs/plan/0
   call this server session answered.
 - A bare `ff refresh all` in fixture mode exits 0: fixture mode defaults to the seasons the fixture
   manifest records.
+
+### Security
+
+- **zod [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)** (high,
+  CVE-2023-54404; QA-2-066): zod through 4.6.5 can exhaust memory while validating an oversized
+  array. The dependency update on `build/ci-fixes-2026-11` moves zod to a patched release (the
+  advisory's first is 4.6.6). The advisory failed the `supply-chain` job (`npm audit` over the
+  runtime tree) of `main`'s scheduled CI on 2026-10-26 and 2026-11-02; the 2026-11-02 run's `test`
+  job failed as well, and QA-2-064 and QA-2-065 above are the unit tests known to fail at random on
+  that commit (the job log is not public).
