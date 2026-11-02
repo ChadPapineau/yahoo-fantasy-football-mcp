@@ -325,15 +325,29 @@ describe("schema-level attacks and mistakes", () => {
     expect(reasons(await invalid(text))).toMatch(/my_team\.players: too large/);
   });
 
-  it("the issue list is capped at 50", async () => {
-    const bad = Array.from(
-      { length: 60 },
-      (_, i) => `    - { name: P${String(i)}, team: XXX, position: WR }`,
-    ).join("\n");
-    const e = await invalid(
-      edit("  players:\n    - { name: Josh Allen", `  players:\n${bad}\n    - { name: Josh Allen`),
-    );
-    expect(e.issues).toHaveLength(50);
+  // The roster stays within its 60-entry bound, so every entry is read: zod 4.6.6+ refuses an
+  // over-long list with one too_big issue before reading an entry (GHSA-mrhx-c7xc-m3w5, QA-2-066),
+  // and 60 bad entries on top of the fixture's 16 gave one issue, not 60. Each entry here has two bad
+  // fields (team, position), so k entries make 2k issues: all of them below the cap, 50 above it.
+  it("the issue list is capped at 50: every issue below the cap, exactly 50 above it", async () => {
+    const roster = FIXTURE_TEXT.split("\n  players:\n")[1]?.split("\n\n")[0] ?? "";
+    const room = 60 - roster.split("\n").filter((l) => l.startsWith("    - {")).length;
+    expect(room).toBeGreaterThanOrEqual(26); // 26 entries make 52 issues
+    for (const k of [10, 25, 26, room]) {
+      const bad = Array.from(
+        { length: k },
+        (_, i) => `    - { name: P${String(i)}, team: XXX, position: ZZ }`,
+      ).join("\n");
+      const e = await invalid(
+        edit(
+          "  players:\n    - { name: Josh Allen",
+          `  players:\n${bad}\n    - { name: Josh Allen`,
+        ),
+      );
+      expect(e.issues, `${String(k)} bad entries`).toHaveLength(Math.min(50, 2 * k));
+      for (const i of e.issues)
+        expect(i.path).toMatch(/^my_team\.players\[\d+\]\.(team|position)$/);
+    }
   });
 });
 
